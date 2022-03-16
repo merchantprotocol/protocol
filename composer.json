@@ -1,0 +1,19 @@
+{
+    "name": "jonathonbyrdziak/github-continuous-deployment",
+    "description": "A github command line tool for continuous delivery",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "Gitcd\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Jonathon Byrdziak",
+            "email": "jonathonbyrd@gmail.com"
+        }
+    ],
+    "require": {
+        "symfony/console": "^5.4"
+    }
+}
