@@ -54,7 +54,7 @@ Class Config {
         if (file_exists($configfile))
         {
             $config = UtilConfig::getInstance( $configfile );
-            $config->get( $property, $default );
+            $default = $config->get( $property, $default );
         }
         return $default;
     }

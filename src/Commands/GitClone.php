@@ -38,6 +38,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Config;
 
 Class GitClone extends Command {
 
@@ -55,7 +56,7 @@ Class GitClone extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::REQUIRED, 'The remote git url to clone from')
+            ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
             ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
@@ -72,7 +73,7 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $remoteurl = $input->getArgument('remote');
+        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
         $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
 
         $output->writeln('================== Cloning Repo ================');
