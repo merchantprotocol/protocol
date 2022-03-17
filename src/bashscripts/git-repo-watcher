@@ -4,7 +4,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 default_interval_in_seconds=10
 default_hooks_file="$script_dir""/git-repo-watcher-hooks"
-gitcd="$(dirname $(dirname $script_dir))""/bin/gitcd"
+gitcd="$(dirname $(dirname $script_dir))""/bin/pipeline"
 
 print_usage() {
     echo ""
