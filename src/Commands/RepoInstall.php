@@ -75,7 +75,7 @@ Class RepoInstall extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
-        $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
+        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
         $output->writeln('================== Installing Repository ================');
 

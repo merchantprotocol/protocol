@@ -72,7 +72,7 @@ Class ComposerInstall extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         global $script_dir;
-        $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
+        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
         $output->writeln('================== Composer Install ================');
 

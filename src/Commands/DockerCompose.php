@@ -71,7 +71,7 @@ Class DockerCompose extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
+        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
         $output->writeln('================== Docker Compose ================');
 
         if (!file_exists("{$localdir}/docker-compose.yml")) {
