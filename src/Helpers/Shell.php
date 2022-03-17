@@ -92,7 +92,7 @@ Class Shell {
         }
         $pidfile = $webroot.DIRECTORY_SEPARATOR.Config::read('shell.pidfile');
 
-        return exec(sprintf("%s > %s 2>&1 & echo $! >> %s", $command, $outputfile, $pidfile));
+        return exec(sprintf("%s > %s 2>&1 & echo $! > %s", $command, $outputfile, $pidfile));
     }
 
     /**

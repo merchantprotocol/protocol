@@ -24,7 +24,6 @@ change_pulled() {
 # $3 - Commit details
 pull_failed() {
     echo "Pull failed --> Exiting: $*"
-    exit 1
 }
 
 # $1 - Git repository name
@@ -50,5 +49,4 @@ local_change() {
 # $2 - Branch name
 diverged() {
     echo "Diverged --> Exiting: $*"
-    exit 1
 }
