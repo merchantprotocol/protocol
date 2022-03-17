@@ -74,7 +74,7 @@ Class RepoSlave extends Command {
     {
         // the .git directory
         $repo_dir = rtrim(realpath($input->getArgument('localdir')), '/') ?: Config::read('localdir');
-var_dump(Config::read('localdir'));die;
+
         // get the branch
         $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 
