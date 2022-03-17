@@ -2,3 +2,4 @@ tmp/logs/*
 !tmp/logs/.gitkeep
 tmp/pid/*
 !tmp/pid/.gitkeep
+config/config.php

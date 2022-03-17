@@ -1,4 +1,3 @@
-#!/usr/bin/env php
 <?php
 /**
  * NOTICE OF LICENSE
@@ -31,49 +30,32 @@
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
-$autoload = [
-    getcwd() . '/vendor/autoload.php',
-    __DIR__ . '/../vendor/autoload.php',
-    __DIR__ . '/../../vendor/autoload.php',
-    __DIR__ . '/../../../vendor/autoload.php',
-    __DIR__ . '/../../../../vendor/autoload.php',
-    __DIR__ . '/../../../../../vendor/autoload.php'
-];
+namespace Gitcd\Helpers;
 
-$webroot = false;
-$loaded = false;
-$vendorDir = false;
-for ($i = 0; $i < count($autoload); $i++) {
-    if (file_exists($autoload[$i])) {
-        require $autoload[$i];
-        $vendorDir = dirname($autoload[$i]);
-        $loaded = true;
-        $webroot = dirname($vendorDir);
-        break;
+use Gitcd\Utils\Config as UtilConfig;
+
+Class Config {
+
+    /**
+     * 
+     *
+     * @param [string] $path
+     * @param [bool] $default
+     * @return void
+     */
+    public static function read( $property = null, $default = null )
+    {
+        global $config_dir;
+        $configfile = $config_dir.'config.php';
+
+        $global = UtilConfig::getInstance();
+        $default = $global->get( $property, $default );
+
+        if (file_exists($configfile))
+        {
+            $config = UtilConfig::getInstance( $configfile );
+            $config->get( $property, $default );
+        }
+        return $default;
     }
 }
-if (!$loaded) {
-    fwrite(
-        STDERR,
-        'Unable to determine install location.' . PHP_EOL
-    );
-    exit(1);
-}
-
-$config_dir = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR;
-$src_dir = $webroot.DIRECTORY_SEPARATOR.'src'.DIRECTORY_SEPARATOR;
-$script_dir = $src_dir.'bashscripts'.DIRECTORY_SEPARATOR;
-$commands_dir = $src_dir.'Commands'.DIRECTORY_SEPARATOR;
-
-use Symfony\Component\Console\Application;
-$application = new Application();
-
-// ... register commands
-$files = glob("{$commands_dir}*.{php}", GLOB_BRACE);
-foreach($files as $file) {
-    $filename = rtrim(basename($file), '.php');
-    $class = "\Gitcd\Commands\\$filename";
-    $application->add(new $class());
-}
-
-$application->run();

@@ -32,7 +32,7 @@
  */
 namespace Gitcd\Helpers;
 
-use Gitcd\Utils\Config;
+use Gitcd\Helpers\Config;
 
 Class Shell {
 

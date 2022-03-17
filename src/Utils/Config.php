@@ -205,10 +205,12 @@ Class Config
 	 * 
 	 * @param $file string
 	 */
-	public static function getInstance()
+	public static function getInstance( $file = false )
 	{
-		global $webroot;
-	    $file = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'global.php';
+		if (!$file) {
+			global $webroot;
+			$file = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'global.php';
+		}
 
 	    //print_r(self::$instances);
 		//create the class if it does not exist
