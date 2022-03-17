@@ -39,11 +39,11 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 
-Class GitClone extends Command {
+Class ComposerInstall extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'git:clone';
-    protected static $defaultDescription = 'Clone from remote repo';
+    protected static $defaultName = 'composer:install';
+    protected static $defaultDescription = 'Run the composer install command';
 
     protected function configure(): void
     {
@@ -55,8 +55,7 @@ Class GitClone extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::REQUIRED, 'The remote git url to clone from')
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
             // ...
         ;
     }
@@ -72,20 +71,13 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $remoteurl = $input->getArgument('remote');
+        global $script_dir;
         $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
 
-        $output->writeln('================== Cloning Repo ================');
+        $output->writeln('================== Composer Install ================');
 
-        $command = "git clone $remoteurl $localdir";
+        $command = "{$script_dir}composer.phar install --working-dir=$localdir --ignore-platform-reqs";
         $response = Shell::passthru($command);
-
-        $command = "git -C $localdir submodule update --init --recursive";
-        $response = Shell::passthru($command);
-
-        $response = Shell::run("git config --global core.mergeoptions --no-edit");
-        $response = Shell::run("git config --global core.fileMode false");
-        $response = Shell::run("git -C $localdir config core.fileMode false");
 
         return Command::SUCCESS;
     }

@@ -60,15 +60,19 @@ if (!$loaded) {
     exit(1);
 }
 
-$script_dir = $webroot.DIRECTORY_SEPARATOR.'src'.DIRECTORY_SEPARATOR.'bashscripts'.DIRECTORY_SEPARATOR;
+$src_dir = $webroot.DIRECTORY_SEPARATOR.'src'.DIRECTORY_SEPARATOR;
+$script_dir = $src_dir.'bashscripts'.DIRECTORY_SEPARATOR;
+$commands_dir = $src_dir.'Commands'.DIRECTORY_SEPARATOR;
 
 use Symfony\Component\Console\Application;
 $application = new Application();
 
 // ... register commands
-$application->add(new \Gitcd\Commands\Pull());
-$application->add(new \Gitcd\Commands\Slave());
-$application->add(new \Gitcd\Commands\GitClone());
-$application->add(new \Gitcd\Commands\KeyGenerate());
+$files = glob("{$commands_dir}*.{php}", GLOB_BRACE);
+foreach($files as $file) {
+    $filename = rtrim(basename($file), '.php');
+    $class = "\Gitcd\Commands\\$filename";
+    $application->add(new $class());
+}
 
 $application->run();
