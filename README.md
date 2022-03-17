@@ -11,7 +11,7 @@ Once installed, any commits made to the master repo will immediately be replicat
 ## Installation
 
 ```
-# git clone git@github.com:merchantprotocol/github-continuous-deployment.git /opt/continuous-deployment
+# git clone https://github.com/merchantprotocol/github-continuous-deployment.git /opt/continuous-deployment
 # /opt/continuous-deployment/bin/pipeline key:generate
 # /opt/continuous-deployment/bin/pipeline git:clone <remote_repo_url> <public_html_dir>
 # /opt/continuous-deployment/bin/pipeline repo:slave <public_html_dir> -d
