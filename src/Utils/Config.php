@@ -208,7 +208,7 @@ Class Config
 	public static function getInstance()
 	{
 		global $webroot;
-	    $file = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'config.php';
+	    $file = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'global.php';
 
 	    //print_r(self::$instances);
 		//create the class if it does not exist
