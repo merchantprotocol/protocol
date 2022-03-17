@@ -38,6 +38,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Config;
 
 Class DockerCompose extends Command {
 
