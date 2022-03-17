@@ -8,6 +8,11 @@ My solution was to create a master/slave continuous deployment system. I have al
 
 Once installed, any commits made to the master repo will immediately be replicated to the slave node, thanks to the Git Continuous Deployment Tool.
 
+## System Requirements
+
+- git
+- php 7.4 
+
 ## Installation
 
 ```
