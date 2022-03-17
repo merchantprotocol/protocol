@@ -44,7 +44,7 @@ use Gitcd\Helpers\Config;
 Class RepoSlave extends Command {
 
     protected static $defaultName = 'repo:slave';
-    protected static $defaultDescription = 'Continuously deployment keeps the local repo updated with the remote changes';
+    protected static $defaultDescription = 'Continuous deployment keeps the local repo updated with the remote changes';
 
     protected function configure(): void
     {
@@ -111,10 +111,8 @@ Class RepoSlave extends Command {
         }
         $output->writeln(" - If any changes are made to $remoteurl we'll update $repo_dir".PHP_EOL);
 
-        global $script_dir;
-
         // execute command
-        $command = "{$script_dir}git-repo-watcher -d $repo_dir -o $remote -b $branch -h {$script_dir}git-repo-watcher-hooks -i $increment";
+        $command = SCRIPT_DIR."git-repo-watcher -d $repo_dir -o $remote -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
             Shell::background($command);

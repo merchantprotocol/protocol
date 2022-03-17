@@ -208,8 +208,7 @@ Class Config
 	public static function getInstance( $file = false )
 	{
 		if (!$file) {
-			global $webroot;
-			$file = $webroot.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'global.php';
+			$file = WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR.'global.php';
 		}
 
 	    //print_r(self::$instances);

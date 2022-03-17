@@ -85,12 +85,11 @@ Class Shell {
      */
     public static function background( $command )
     {
-        global $webroot;
-        $outputfile = $webroot.DIRECTORY_SEPARATOR.Config::read('shell.outputfile');
+        $outputfile = WEBROOT_DIR.Config::read('shell.outputfile');
         if (!file_exists($outputfile)) {
             touch($outputfile);
         }
-        $pidfile = $webroot.DIRECTORY_SEPARATOR.Config::read('shell.pidfile');
+        $pidfile = WEBROOT_DIR.Config::read('shell.pidfile');
 
         return exec(sprintf("%s > %s 2>&1 & echo $! > %s", $command, $outputfile, $pidfile));
     }

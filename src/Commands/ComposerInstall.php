@@ -72,7 +72,6 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        global $script_dir;
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
         $output->writeln('================== Composer Install ================');
@@ -82,7 +81,7 @@ Class ComposerInstall extends Command {
             return Command::SUCCESS;
         }
 
-        $command = "{$script_dir}composer.phar install --working-dir=$localdir --ignore-platform-reqs";
+        $command = SCRIPT_DIR."composer.phar install --working-dir=$localdir --ignore-platform-reqs";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

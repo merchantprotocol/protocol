@@ -45,8 +45,7 @@ Class Config {
      */
     public static function read( $property = null, $default = null )
     {
-        global $config_dir;
-        $configfile = $config_dir.'config.php';
+        $configfile = CONFIG_DIR.'config.php';
 
         $global = UtilConfig::getInstance();
         $default = $global->get( $property, $default );
