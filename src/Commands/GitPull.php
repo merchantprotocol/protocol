@@ -37,6 +37,8 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Config;
 
 Class GitPull extends Command {
 
@@ -55,7 +57,7 @@ Class GitPull extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('git-dir', InputArgument::REQUIRED, 'The local git directory to manage')
+            ->addArgument('localdir', InputArgument::REQUIRED, 'The local git directory to manage')
             // ...
         ;
     }
@@ -72,7 +74,7 @@ Class GitPull extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         // the .git directory
-        $repo_dir = rtrim(realpath($input->getArgument('git-dir')), '/').'/';
+        $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
         $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 

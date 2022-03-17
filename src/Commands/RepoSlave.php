@@ -38,6 +38,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class RepoSlave extends Command {
@@ -72,10 +73,12 @@ Class RepoSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        // the .git directory
-        $repo_dir = rtrim(realpath($input->getArgument('localdir')), '/') ?: Config::read('localdir');
+        $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        if (!is_dir($repo_dir)) {
+            $output->writeln(' - Skipping repo:slave, there is no directory '.$repo_dir);
+            return Command::SUCCESS;
+        }
 
-        // get the branch
         $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 
         // get the remote name
