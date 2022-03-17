@@ -2,6 +2,8 @@
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+default_remote_origin_name='origin'
+default_branch_name='master'
 default_interval_in_seconds=10
 default_hooks_file="$script_dir""/git-repo-watcher-hooks"
 gitcd="$(dirname $(dirname $script_dir))""/bin/pipeline"
@@ -21,7 +23,7 @@ print_usage() {
     exit 1
 }
 
-while getopts ":d:i:h:" options; do
+while getopts ":d:i:h:o:b:" options; do
     case "${options}" in
     d)
         git_repository_dir=${OPTARG}
@@ -31,6 +33,12 @@ while getopts ":d:i:h:" options; do
         ;;
     i)
         interval_in_seconds=${OPTARG}
+        ;;
+    o)
+        remote_origin_name=${OPTARG}
+        ;;
+    b)
+        branch_name=${OPTARG}
         ;;
     *)
         print_usage
@@ -74,6 +82,16 @@ fi
 # Validating given interval
 if [[ -z "$interval_in_seconds" ]]; then
     interval_in_seconds="$default_interval_in_seconds"
+fi
+
+# Validating remote origin name
+if [[ -z "$remote_origin_name" ]]; then
+    remote_origin_name="$default_remote_origin_name"
+fi
+
+# Validating branch name
+if [[ -z "$branch_name" ]]; then
+    branch_name="$default_branch_name"
 fi
 
 # Executes user hooks
@@ -125,7 +143,7 @@ while true; do
     upstream="$(git --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null)"
 
     if [[ -z "$upstream" ]]; then
-        upstream="origin/master"
+        upstream="$remote_origin_name/$branch_name"
     fi
 
     git_local=$(git rev-parse @)

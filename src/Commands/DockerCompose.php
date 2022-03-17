@@ -37,12 +37,13 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
 
-Class Pull extends Command {
+Class DockerCompose extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'git:pull';
-    protected static $defaultDescription = 'Pull from github and update the local repo';
+    protected static $defaultName = 'docker:compose';
+    protected static $defaultDescription = 'Run docker compose on the repository to boot up any container';
 
     protected function configure(): void
     {
@@ -50,12 +51,11 @@ Class Pull extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. Using this command will overwrite any local files or commits that'
-            .' are not in the remote source of truth.')
+            .' source of truth.')
         ;
         $this
             // configure an argument
-            ->addArgument('git-dir', InputArgument::REQUIRED, 'The local git directory to manage')
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run docker compose in', false)
             // ...
         ;
     }
@@ -71,37 +71,16 @@ Class Pull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        // the .git directory
-        $git_dir = rtrim(realpath($input->getArgument('git-dir')), '/').'/';
-        if (!strpos($git_dir, '/.git')) {
-            $git_dir = rtrim($git_dir, '/').'/.git/';
-        }
-        // the actual code repo
-        $repo_dir = rtrim($git_dir, '.git/');
-        $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
-        // get the remote name
-        $remotes = Shell::run("git remote");
-        $remotearray = explode(PHP_EOL, $remotes);
-        $remote = array_shift($remotearray);
+        $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
+        $output->writeln('================== Docker Compose ================');
 
-        $output->writeln('================== Executing Git Pull Force ================');
-
-        // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
-        if ($response) $output->writeln($response);
-
-        // if the fetch failed, then stop
-        if ($return_var) {
-            $output->writeln('Pull failed, canceling operation...');
-            return Command::FAILURE;
+        if (!file_exists("{$localdir}/docker-compose.yml")) {
+            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
+            return Command::SUCCESS;
         }
 
-        // resets the master branch to what you just fetched. 
-        // The --hard option changes all the files in your working tree to match the files in origin/master
-        $response = Shell::run("git -C $repo_dir reset --hard $remote/$branch");
-        if ($response) $output->writeln($response);
-        $response = Shell::run("git -C $repo_dir reset --hard HEAD");
-        if ($response) $output->writeln($response);
+        $command = "cd $localdir && docker-compose up --build -d";
+        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }

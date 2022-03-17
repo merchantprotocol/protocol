@@ -37,13 +37,12 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
-use Gitcd\Helpers\Dir;
 
-Class ComposerInstall extends Command {
+Class GitPull extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'composer:install';
-    protected static $defaultDescription = 'Run the composer install command';
+    protected static $defaultName = 'git:pull';
+    protected static $defaultDescription = 'Pull from github and update the local repo';
 
     protected function configure(): void
     {
@@ -51,11 +50,12 @@ Class ComposerInstall extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            .' source of truth. Using this command will overwrite any local files or commits that'
+            .' are not in the remote source of truth.')
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
+            ->addArgument('git-dir', InputArgument::REQUIRED, 'The local git directory to manage')
             // ...
         ;
     }
@@ -71,18 +71,34 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        global $script_dir;
-        $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
+        // the .git directory
+        $repo_dir = rtrim(realpath($input->getArgument('git-dir')), '/').'/';
 
-        $output->writeln('================== Composer Install ================');
+        $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 
-        if (!file_exists("{$localdir}/composer.json")) {
-            $output->writeln(' - Skipping composer install, there is no composer.json in the project');
-            return Command::SUCCESS;
+        // get the remote name
+        $remotes = Shell::run("git remote");
+        $remotearray = explode(PHP_EOL, $remotes);
+        $remote = array_shift($remotearray);
+
+        $output->writeln('================== Executing Git Pull Force ================');
+
+        // First, run a fetch to update all origin/<branch> refs to latest:
+        $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
+        if ($response) $output->writeln($response);
+
+        // if the fetch failed, then stop
+        if ($return_var) {
+            $output->writeln('Pull failed, canceling operation...');
+            return Command::FAILURE;
         }
 
-        $command = "{$script_dir}composer.phar install --working-dir=$localdir --ignore-platform-reqs";
-        $response = Shell::passthru($command);
+        // resets the master branch to what you just fetched. 
+        // The --hard option changes all the files in your working tree to match the files in origin/master
+        $response = Shell::run("git -C $repo_dir reset --hard $remote/$branch");
+        if ($response) $output->writeln($response);
+        $response = Shell::run("git -C $repo_dir reset --hard HEAD");
+        if ($response) $output->writeln($response);
 
         return Command::SUCCESS;
     }

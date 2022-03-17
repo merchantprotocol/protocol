@@ -33,17 +33,18 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 
-Class ComposerInstall extends Command {
+Class RepoInstall extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'composer:install';
-    protected static $defaultDescription = 'Run the composer install command';
+    protected static $defaultName = 'repo:install';
+    protected static $defaultDescription = 'Handles the entire installation of a repository';
 
     protected function configure(): void
     {
@@ -51,11 +52,12 @@ Class ComposerInstall extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            .' source of truth. It will not ask questions, but assume all installation requirements.')
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
+            ->addArgument('remote', InputArgument::REQUIRED, 'The remote git url to clone from')
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
     }
@@ -71,18 +73,36 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        global $script_dir;
+        $remoteurl = $input->getArgument('remote');
         $localdir = Dir::realpath($input->getArgument('localdir'), '/opt/public_html');
 
-        $output->writeln('================== Composer Install ================');
+        $output->writeln('================== Installing Repository ================');
 
-        if (!file_exists("{$localdir}/composer.json")) {
-            $output->writeln(' - Skipping composer install, there is no composer.json in the project');
-            return Command::SUCCESS;
-        }
+        $arguments = [
+            'remote'   => $remoteurl,
+            'localdir' => $localdir
+        ];
+        $arrInput = new ArrayInput($arguments);
+        $arguments = [
+            'localdir' => $localdir
+        ];
+        $arrInput2 = new ArrayInput($arguments);
 
-        $command = "{$script_dir}composer.phar install --working-dir=$localdir --ignore-platform-reqs";
-        $response = Shell::passthru($command);
+        // pull down the repo
+        $command = $this->getApplication()->find('git:clone');
+        $returnCode = $command->run($arrInput, $output);
+
+        // run composer install
+        $command = $this->getApplication()->find('composer:install');
+        $returnCode = $command->run($arrInput2, $output);
+
+        // run docker compose
+        $command = $this->getApplication()->find('docker:compose');
+        $returnCode = $command->run($arrInput2, $output);
+
+        // run repo slave
+        $command = $this->getApplication()->find('repo:slave');
+        $returnCode = $command->run($arrInput2, $output);
 
         return Command::SUCCESS;
     }

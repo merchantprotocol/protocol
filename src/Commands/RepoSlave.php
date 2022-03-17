@@ -39,7 +39,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 
-Class Slave extends Command {
+Class RepoSlave extends Command {
 
     protected static $defaultName = 'repo:slave';
     protected static $defaultDescription = 'Continuously deployment keeps the local repo updated with the remote changes';
@@ -55,9 +55,9 @@ Class Slave extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('git-dir', InputArgument::REQUIRED, 'The local git directory to manage')
+            ->addArgument('localdir', InputArgument::REQUIRED, 'The local git directory to manage')
             ->addOption('increment', 'i', InputOption::VALUE_OPTIONAL, 'How many seconds to sleep between remote checks')
-            ->addOption('daemon', 'd', InputOption::VALUE_OPTIONAL, 'Run as a background service', false)
+            ->addOption('no-daemon', 'no-d', InputOption::VALUE_OPTIONAL, 'Do not run as a background service', false)
             // ...
         ;
     }
@@ -72,17 +72,13 @@ Class Slave extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         // the .git directory
-        $git_dir = rtrim(realpath($input->getArgument('git-dir')), '/').'/';
-        if (!strpos($git_dir, '/.git')) {
-            $git_dir = rtrim($git_dir, '/').'/.git/';
-        }
+        $repo_dir = rtrim(realpath($input->getArgument('localdir')), '/').'/';
 
-        // the actual code repo
-        $repo_dir = rtrim($git_dir, '.git/');
-        $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
+        // get the branch
+        $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 
         // get the remote name
-        $remotes = Shell::run("git remote");
+        $remotes = Shell::run("git -C $repo_dir remote");
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
 
@@ -97,10 +93,11 @@ Class Slave extends Command {
         if (!$increment) {
             $increment = 10;
         }
-        $daemon = $input->getOption('daemon');
-        if (is_null($daemon)) {
-            $daemon = true;
+        $nodaemon = $input->getOption('no-daemon');
+        if (is_null($nodaemon)) {
+            $nodaemon = true;
         }
+        $daemon = !$nodaemon;
 
         $output->writeln(PHP_EOL.'================== Watching ================');
         if ($daemon) {
@@ -113,7 +110,7 @@ Class Slave extends Command {
         global $script_dir;
 
         // execute command
-        $command = "{$script_dir}git-repo-watcher -d $repo_dir -h {$script_dir}git-repo-watcher-hooks -i $increment";
+        $command = "{$script_dir}git-repo-watcher -d $repo_dir -o $remote -b $branch -h {$script_dir}git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
             Shell::background($command);
