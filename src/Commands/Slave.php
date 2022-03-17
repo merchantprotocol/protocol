@@ -95,7 +95,7 @@ Class Slave extends Command {
 
         $increment = $input->getOption('increment');
         if (!$increment) {
-            $increment = 60;
+            $increment = 10;
         }
         $daemon = $input->getOption('daemon');
         if (is_null($daemon)) {
@@ -103,7 +103,11 @@ Class Slave extends Command {
         }
 
         $output->writeln(PHP_EOL.'================== Watching ================');
-        $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
+        if ($daemon) {
+            $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
+        } else {
+            $output->writeln(" - This command will run in the foreground every $increment seconds until you kill it.");
+        }
         $output->writeln(" - If any changes are made to $remoteurl we'll update $repo_dir".PHP_EOL);
 
         global $script_dir;

@@ -78,12 +78,11 @@ Class GitClone extends Command {
         $output->writeln('================== Cloning Repo ================');
 
         $command = "git clone $remoteurl $localdir";
-        $response = Shell::run($command);
-        if ($response) $output->writeln($response);
+        $response = Shell::passthru($command);
 
         $response = Shell::run("git config --global core.mergeoptions --no-edit");
         $response = Shell::run("git config --global core.fileMode false");
-        $response = Shell::run("git -C $repo_dir config core.fileMode false");
+        $response = Shell::run("git -C $localdir config core.fileMode false");
 
         return Command::SUCCESS;
     }

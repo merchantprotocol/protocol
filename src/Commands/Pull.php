@@ -84,11 +84,7 @@ Class Pull extends Command {
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
 
-        $output->writeln('================== Executing Git Pull --force ================');
-
-        $response = Shell::run("git config --global core.mergeoptions --no-edit");
-        $response = Shell::run("git config --global core.fileMode false");
-        $response = Shell::run("git -C $repo_dir config core.fileMode false");
+        $output->writeln('================== Executing Git Pull Force ================');
 
         // First, run a fetch to update all origin/<branch> refs to latest:
         $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
