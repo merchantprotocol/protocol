@@ -59,10 +59,14 @@ if (!$loaded) {
     );
     exit(1);
 }
+
+$script_dir = $webroot.DIRECTORY_SEPARATOR.'src'.DIRECTORY_SEPARATOR.'bashscripts'.DIRECTORY_SEPARATOR;
+
 use Symfony\Component\Console\Application;
 $application = new Application();
 
 // ... register commands
 $application->add(new \Gitcd\Commands\Pull());
+$application->add(new \Gitcd\Commands\Watch());
 
 $application->run();

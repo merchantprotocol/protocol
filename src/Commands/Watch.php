@@ -35,14 +35,14 @@ namespace Gitcd\Commands;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 
-Class Pull extends Command {
+Class Watch extends Command {
 
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'git:pull';
-    protected static $defaultDescription = 'Pull from github and update the local repo';
+    protected static $defaultName = 'git:watch';
+    protected static $defaultDescription = 'Watches a repository for changes and updates the repo when changes are made to the remote';
 
     protected function configure(): void
     {
@@ -56,6 +56,8 @@ Class Pull extends Command {
         $this
             // configure an argument
             ->addArgument('git-dir', InputArgument::REQUIRED, 'The local git directory to manage')
+            ->addOption('increment', 'i', InputOption::VALUE_OPTIONAL, 'How many seconds to sleep between remote checks')
+            ->addOption('daemon', 'd', InputOption::VALUE_OPTIONAL, 'Run as a background service', false)
             // ...
         ;
     }
@@ -83,29 +85,46 @@ Class Pull extends Command {
         $remotes = Shell::run("git remote");
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
-
-        $output->writeln('================== Executing Git Pull --force ================');
-
-        $response = Shell::run("git config --global core.mergeoptions --no-edit");
-        $response = Shell::run("git config --global core.fileMode false");
-        $response = Shell::run("git config core.fileMode false");
-
-        // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
-        if ($response) $output->writeln($response);
-
-        // if the fetch failed, then stop
-        if ($return_var) {
-            $output->writeln('Pull failed, canceling operation...');
+        // remote url
+        $remoteurl = Shell::run("git -C $repo_dir config --get remote.origin.url");
+        if (!$remoteurl) {
+            $output->writeln("Your local repo is not connected to a remote source of truth. cancelling...");
             return Command::FAILURE;
         }
 
-        // resets the master branch to what you just fetched. 
-        // The --hard option changes all the files in your working tree to match the files in origin/master
-        $response = Shell::run("git -C $repo_dir reset --hard $remote/$branch");
-        if ($response) $output->writeln($response);
-        $response = Shell::run("git -C $repo_dir reset --hard HEAD");
-        if ($response) $output->writeln($response);
+        $increment = $input->getOption('increment');
+        if (!$increment) {
+            $increment = 60;
+        }
+        $daemon = $input->getOption('daemon');
+        if (is_null($daemon)) {
+            $daemon = true;
+        }
+
+        $output->writeln(PHP_EOL.'================== Watching ================');
+        $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
+        $output->writeln(" - If any changes are made to $remoteurl we'll update $repo_dir".PHP_EOL);
+
+        global $script_dir;
+
+
+        // execute command
+        $command = "{$script_dir}git-repo-watcher -d $repo_dir -h {$script_dir}git-repo-watcher-hooks -i $increment";
+        if ($daemon) {
+            Shell::background($command);
+            return Command::SUCCESS;
+        }
+
+        $descriptorSpec = array(
+            0 => STDIN,
+            1 => STDOUT,
+            2 => STDERR,
+        );
+        $pipes = array();
+        $process = proc_open($command, $descriptorSpec, $pipes);
+        if (is_resource($process)) {
+            proc_close($process);
+        }
 
         return Command::SUCCESS;
     }
