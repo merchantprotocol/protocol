@@ -36,7 +36,26 @@ use Gitcd\Utils\Config;
 
 Class Shell {
 
-
+    /**
+     * Provides a passthrough exec option
+     *
+     * @param [type] $command
+     * @return void
+     */
+    public static function passthru( $command )
+    {
+        $descriptorSpec = array(
+            0 => STDIN,
+            1 => STDOUT,
+            2 => STDERR,
+        );
+        $pipes = array();
+        $process = proc_open($command, $descriptorSpec, $pipes);
+        if (is_resource($process)) {
+            proc_close($process);
+        }
+        return 0;
+    }
 
     /**
      * Runs the shell command and returns the result

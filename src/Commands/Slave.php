@@ -39,10 +39,10 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 
-Class Watch extends Command {
+Class Slave extends Command {
 
-    protected static $defaultName = 'git:watch';
-    protected static $defaultDescription = 'Watches a repository for changes and updates the repo when changes are made to the remote';
+    protected static $defaultName = 'repo:slave';
+    protected static $defaultDescription = 'Continuously deployment keeps the local repo updated with the remote changes';
 
     protected function configure(): void
     {
@@ -63,9 +63,7 @@ Class Watch extends Command {
     }
 
     /**
-     * We're not looking to remove all changed and untracked files. We only want to overwrite local
-     * files that exist in the remote branch. Only the remotely tracked files will be overwritten, 
-     * and every local file that has been here was left untouched.
+     * 
      *
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -78,13 +76,16 @@ Class Watch extends Command {
         if (!strpos($git_dir, '/.git')) {
             $git_dir = rtrim($git_dir, '/').'/.git/';
         }
+
         // the actual code repo
         $repo_dir = rtrim($git_dir, '.git/');
         $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
+
         // get the remote name
         $remotes = Shell::run("git remote");
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
+
         // remote url
         $remoteurl = Shell::run("git -C $repo_dir config --get remote.origin.url");
         if (!$remoteurl) {
@@ -107,25 +108,16 @@ Class Watch extends Command {
 
         global $script_dir;
 
-
         // execute command
         $command = "{$script_dir}git-repo-watcher -d $repo_dir -h {$script_dir}git-repo-watcher-hooks -i $increment";
         if ($daemon) {
+            // Run the command in the background as a daemon
             Shell::background($command);
             return Command::SUCCESS;
         }
 
-        $descriptorSpec = array(
-            0 => STDIN,
-            1 => STDOUT,
-            2 => STDERR,
-        );
-        $pipes = array();
-        $process = proc_open($command, $descriptorSpec, $pipes);
-        if (is_resource($process)) {
-            proc_close($process);
-        }
-
+        // run the command as a passthru to the user
+        Shell::passthru($command);
         return Command::SUCCESS;
     }
 
