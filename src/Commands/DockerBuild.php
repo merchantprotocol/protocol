@@ -57,7 +57,6 @@ Class DockerBuild extends Command {
         $this
             // configure an argument
             ->addArgument('location', InputArgument::OPTIONAL, 'The desired remote docker image tag')
-            ->addArgument('image', InputArgument::OPTIONAL, 'The desired image tagname')
             ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username')
             ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password')
             // ...
@@ -73,7 +72,6 @@ Class DockerBuild extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $location = $input->getArgument('location') ?: Config::read('docker.location');
-        $image    = $input->getArgument('image') ?: Config::read('docker.image');
         $username = $input->getArgument('username') ?: Config::read('docker.username');
         $password = $input->getArgument('password') ?: Config::read('docker.password');
 
