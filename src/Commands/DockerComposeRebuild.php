@@ -41,24 +41,23 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class RepoInstall extends Command {
+Class DockerComposeRebuild extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'repo:install';
-    protected static $defaultDescription = 'Handles the entire installation of a repository';
+    protected static $defaultName = 'docker:compose:rebuild';
+    protected static $defaultDescription = 'Pulls down a new copy and rebuilds the image';
 
     protected function configure(): void
     {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. It will not ask questions, but assume all installation requirements.')
+            ->setHelp('This command was designed to be run frequently in a non-interactive state. '
+                    . 'Ideal for keeping a child node up to date.')
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run docker compose in', false)
             // ...
         ;
     }
@@ -74,36 +73,37 @@ Class RepoInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $output->writeln('================== Docker Compose ================');
 
-        $output->writeln('================== Installing Repository ================');
+        if (!file_exists("{$localdir}/docker-compose.yml")) {
+            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
+            return Command::FAILURE;
+        }
 
-        $arguments = [
-            'remote'   => $remoteurl,
-            'localdir' => $localdir
-        ];
-        $arrInput = new ArrayInput($arguments);
-        $arguments = [
-            'localdir' => $localdir
-        ];
-        $arrInput2 = new ArrayInput($arguments);
+        $image = Config::read('docker.image', false);
+        if (!$image) {
+            $output->writeln(' - FAILED Exiting... - image param needs to be set in the config.php');
+            return Command::FAILURE;
+        }
 
-        // pull down the repo
-        $command = $this->getApplication()->find('git:clone');
-        $returnCode = $command->run($arrInput, $output);
+        $username = Config::read('docker.username', false);
+        if (!$username) {
+            $output->writeln(' - FAILED Exiting... - username param needs to be set in the config.php');
+            return Command::FAILURE;
+        }
 
-        // run composer install
-        $command = $this->getApplication()->find('composer:install');
-        $returnCode = $command->run($arrInput2, $output);
+        $password = Config::read('docker.password', false);
+        if (!$password) {
+            $output->writeln(' - FAILED Exiting... - password param needs to be set in the config.php');
+            return Command::FAILURE;
+        }
 
-        // run docker compose
-        $command = $this->getApplication()->find('docker:compose:rebuild');
+        $command = $this->getApplication()->find('docker:pull');
         $returnCode = $command->run((new ArrayInput([])), $output);
 
-        // run repo slave
-        $command = $this->getApplication()->find('repo:slave');
-        $returnCode = $command->run($arrInput2, $output);
+        $command = "cd $localdir && docker-compose up --build -d";
+        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }

@@ -92,6 +92,7 @@ Class KeyGenerate extends Command {
 
             touch($sshconfig);
             \file_put_contents($sshconfig, $data, FILE_APPEND);
+            Shell::run("chmod 600 $sshconfig");
         }
 
         $output->writeln( PHP_EOL.PHP_EOL.file_get_contents($keyfilepub).PHP_EOL );

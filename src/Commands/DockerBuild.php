@@ -33,7 +33,6 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -41,11 +40,11 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class RepoInstall extends Command {
+Class DockerBuild extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'repo:install';
-    protected static $defaultDescription = 'Handles the entire installation of a repository';
+    protected static $defaultName = 'docker:build';
+    protected static $defaultDescription = 'Builds the docker image from source';
 
     protected function configure(): void
     {
@@ -53,20 +52,19 @@ Class RepoInstall extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. It will not ask questions, but assume all installation requirements.')
+            .' source of truth.')
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addArgument('location', InputArgument::OPTIONAL, 'The desired remote docker image tag')
+            ->addArgument('image', InputArgument::OPTIONAL, 'The desired image tagname')
+            ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username')
+            ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password')
             // ...
         ;
     }
 
     /**
-     * We're not looking to remove all changed and untracked files. We only want to overwrite local
-     * files that exist in the remote branch. Only the remotely tracked files will be overwritten, 
-     * and every local file that has been here was left untouched.
      *
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -74,36 +72,20 @@ Class RepoInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $location = $input->getArgument('location') ?: Config::read('docker.location');
+        $image    = $input->getArgument('image') ?: Config::read('docker.image');
+        $username = $input->getArgument('username') ?: Config::read('docker.username');
+        $password = $input->getArgument('password') ?: Config::read('docker.password');
 
-        $output->writeln('================== Installing Repository ================');
+        $output->writeln('================== Building docker image ================');
 
-        $arguments = [
-            'remote'   => $remoteurl,
-            'localdir' => $localdir
-        ];
-        $arrInput = new ArrayInput($arguments);
-        $arguments = [
-            'localdir' => $localdir
-        ];
-        $arrInput2 = new ArrayInput($arguments);
+        $command = "echo '$password' | docker login --username $username --password-stdin";
+        $response = Shell::passthru($command);
 
-        // pull down the repo
-        $command = $this->getApplication()->find('git:clone');
-        $returnCode = $command->run($arrInput, $output);
+        $locationCmd = " -f $location/Dockerfile $location";
 
-        // run composer install
-        $command = $this->getApplication()->find('composer:install');
-        $returnCode = $command->run($arrInput2, $output);
-
-        // run docker compose
-        $command = $this->getApplication()->find('docker:compose:rebuild');
-        $returnCode = $command->run((new ArrayInput([])), $output);
-
-        // run repo slave
-        $command = $this->getApplication()->find('repo:slave');
-        $returnCode = $command->run($arrInput2, $output);
+        $command = "docker build -t $image $locationCmd";
+        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }

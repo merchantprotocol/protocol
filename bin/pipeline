@@ -72,7 +72,7 @@ $application = new Application();
 // ... register commands
 $files = glob(COMMANDS_DIR."*.{php}", GLOB_BRACE);
 foreach($files as $file) {
-    $filename = rtrim(basename($file), '.php');
+    $filename = str_replace('.php', '', basename($file));
     $class = "\Gitcd\Commands\\$filename";
     $application->add(new $class());
 }
