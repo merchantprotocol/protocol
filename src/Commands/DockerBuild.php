@@ -85,7 +85,6 @@ Class DockerBuild extends Command {
         $locationCmd = " -f {$location}Dockerfile $location";
 
         $command = "docker build -t $image $locationCmd";
-var_dump($command);
         $response = Shell::passthru($command);
 
         // $command = "docker build $locationCmd";
