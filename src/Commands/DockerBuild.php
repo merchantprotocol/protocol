@@ -56,9 +56,10 @@ Class DockerBuild extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('location', InputArgument::OPTIONAL, 'The desired remote docker image tag')
-            ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username')
-            ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password')
+            ->addArgument('location', InputArgument::OPTIONAL, 'The desired remote docker image tag', false)
+            ->addArgument('image', InputArgument::OPTIONAL, 'The tag for the image', false)
+            ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username', false)
+            ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password', false)
             // ...
         ;
     }
@@ -72,6 +73,7 @@ Class DockerBuild extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $location = $input->getArgument('location') ?: Config::read('docker.location');
+        $image    = $input->getArgument('image') ?: Config::read('docker.image');
         $username = $input->getArgument('username') ?: Config::read('docker.username');
         $password = $input->getArgument('password') ?: Config::read('docker.password');
 
@@ -80,10 +82,14 @@ Class DockerBuild extends Command {
         $command = "echo '$password' | docker login --username $username --password-stdin";
         $response = Shell::passthru($command);
 
-        $locationCmd = " -f $location/Dockerfile $location";
+        $locationCmd = " -f {$location}Dockerfile $location";
 
         $command = "docker build -t $image $locationCmd";
+var_dump($command);
         $response = Shell::passthru($command);
+
+        // $command = "docker build $locationCmd";
+        // $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }

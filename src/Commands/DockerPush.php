@@ -75,7 +75,7 @@ Class DockerPush extends Command {
         $username = $input->getArgument('username') ?: Config::read('docker.username');
         $password = $input->getArgument('password') ?: Config::read('docker.password');
 
-        $output->writeln('================== Pulling Image ================');
+        $output->writeln('================== Pushing Image ================');
 
         $command = "echo '$password' | docker login --username $username --password-stdin";
         $response = Shell::passthru($command);
