@@ -44,7 +44,7 @@ use Gitcd\Helpers\Config;
 Class NodeUpdate extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'repo:update';
+    protected static $defaultName = 'node:update';
     protected static $defaultDescription = 'Updates the docker container, the repo and itself';
 
     protected function configure(): void
