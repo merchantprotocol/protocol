@@ -26,22 +26,26 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class RepoInstall extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'repo:install';
@@ -52,8 +56,11 @@ Class RepoInstall extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. It will not ask questions, but assume all installation requirements.')
+            ->setHelp(<<<HELP
+            Command runs git:clone to deploy the repository in it's full capacity and then runs repo:slave
+            to keep the repository up to date.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -71,10 +78,18 @@ Class RepoInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Installing A Repository For The First Time');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-
-        $output->writeln('================== Installing Repository ================');
 
         $arguments = [
             'remote'   => $remoteurl,

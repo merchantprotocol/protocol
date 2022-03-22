@@ -26,22 +26,26 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class RepoUpdate extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'repo:update';
@@ -52,8 +56,14 @@ Class RepoUpdate extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. It will not ask questions, but assume all installation requirements.')
+            ->setHelp(<<<HELP
+            Assuming that you already ran repo:install on your node, took a snapshot and then
+            shutdown the node for some time.
+
+            This command will update the repository and then startup repo:slave to monitor the
+            repository in case the server was rebooted or turned on after some time.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -70,7 +80,15 @@ Class RepoUpdate extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('================== Updating Repository ================');
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Updating Repository and Watching For Changes');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
         $arrInput2 = new ArrayInput([

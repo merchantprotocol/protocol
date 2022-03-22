@@ -26,21 +26,25 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class DockerPush extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'docker:push';
@@ -51,8 +55,12 @@ Class DockerPush extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            ->setHelp(<<<HELP
+            Command will login to your docker account using the credentials stored in the config.php
+            and then PUSH up the image you've specified either through direct argument or specified
+            in the config.php file.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -71,11 +79,19 @@ Class DockerPush extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Pushing Image To Remote');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $image    = $input->getArgument('image') ?: Config::read('docker.image');
         $username = $input->getArgument('username') ?: Config::read('docker.username');
         $password = $input->getArgument('password') ?: Config::read('docker.password');
-
-        $output->writeln('================== Pushing Image ================');
 
         $command = "echo '$password' | docker login --username $username --password-stdin";
         $response = Shell::passthru($command);

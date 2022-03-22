@@ -26,21 +26,26 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class GitClone extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'git:clone';
@@ -51,8 +56,19 @@ Class GitClone extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            ->setHelp(<<<HELP
+            This command was intended to clone down an application repository from a remote source
+            to a local directory.
+
+            After cloning the repo it will run composer:install from this project and init your repo
+            submodules recursively.
+
+            Finally this command will tell your repo to ignore file permissions, and to not ask for edits when
+            running git commands.
+
+            After you run this command you can expect to have your local repo setup and ready to be used.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -70,10 +86,18 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Cloing a Git Repo');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-
-        $output->writeln('================== Cloning Repo ================');
 
         $command = "git clone $remoteurl $localdir";
         $response = Shell::passthru($command);

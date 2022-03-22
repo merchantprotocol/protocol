@@ -6,7 +6,7 @@ default_remote_origin_name='origin'
 default_branch_name='master'
 default_interval_in_seconds=10
 default_hooks_file="$script_dir""/git-repo-watcher-hooks"
-gitcd="$(dirname $(dirname $script_dir))""/bin/pipeline"
+gitcd="$(dirname $(dirname $script_dir))""/protocol"
 
 print_usage() {
     echo ""

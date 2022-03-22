@@ -26,34 +26,41 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class NodeInstall extends Command {
 
+    use LockableTrait;
+
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'node:install';
-    protected static $defaultDescription = 'Installs the repository and the docker container';
+    protected static $defaultName = 'install';
+    protected static $defaultDescription = 'Creating a new cluster node from scratch: deploys the repo and builds the container';
 
     protected function configure(): void
     {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            ->setHelp(<<<HELP
+            This command is used to install a brand new node, launch a docker container and place
+            the repo into slave mode.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -65,7 +72,7 @@ Class NodeInstall extends Command {
     /**
      * When the node is relaunched after sleeping through assumed changes
      * Install this command in the crontab as:
-     * @reboot /opt/github-continuous-deployment/bin/pipeline node:update
+     * @reboot /opt/protocol/pipeline node:update
      * 
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -73,7 +80,15 @@ Class NodeInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('================== Updating Node ================');
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Setting Up A Node For The First Time');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
         $arrInput2 = new ArrayInput([

@@ -26,21 +26,25 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class DockerCompose extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'docker:compose';
@@ -51,8 +55,11 @@ Class DockerCompose extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            ->setHelp(<<<HELP
+            Command runs modified docker-compose on your repository if your repository has a 
+            docker-compose.yml file.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -69,8 +76,17 @@ Class DockerCompose extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Docker Compose');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-        $output->writeln('================== Docker Compose ================');
 
         if (!file_exists("{$localdir}/docker-compose.yml")) {
             $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');

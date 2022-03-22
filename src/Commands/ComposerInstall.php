@@ -26,21 +26,25 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class ComposerInstall extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'composer:install';
@@ -51,8 +55,16 @@ Class ComposerInstall extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth.')
+            ->setHelp(<<<HELP
+            Uses the composer.phar (Composer version 2.2.9 2022-03-15 22:13:37) which is a part of
+            this package. There's no need to install composer on your server when using this project.
+
+            1. If the project contains a composer.json file
+            2. The following modified `composer install` command will be run:
+
+            composer.phar install --working-dir=/path-to-repo/ --ignore-platform-reqs
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -69,9 +81,17 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Composer Install');
 
-        $output->writeln('================== Composer Install ================');
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
+        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
         if (!file_exists("{$localdir}/composer.json")) {
             $output->writeln(' - Skipping composer install, there is no composer.json in the project');

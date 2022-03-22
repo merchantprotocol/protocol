@@ -27,7 +27,7 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
@@ -63,7 +63,7 @@ if (!$loaded) {
 DEFINE('WEBROOT_DIR', $webroot.DIRECTORY_SEPARATOR);
 DEFINE('CONFIG_DIR', WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR);
 DEFINE('SRC_DIR', WEBROOT_DIR.'src'.DIRECTORY_SEPARATOR);
-DEFINE('SCRIPT_DIR', SRC_DIR.'bashscripts'.DIRECTORY_SEPARATOR);
+DEFINE('SCRIPT_DIR', WEBROOT_DIR.'bin'.DIRECTORY_SEPARATOR);
 DEFINE('COMMANDS_DIR', SRC_DIR.'Commands'.DIRECTORY_SEPARATOR);
 
 use Symfony\Component\Console\Application;
@@ -74,7 +74,13 @@ $files = glob(COMMANDS_DIR."*.{php}", GLOB_BRACE);
 foreach($files as $file) {
     $filename = str_replace('.php', '', basename($file));
     $class = "\Gitcd\Commands\\$filename";
-    $application->add(new $class());
-}
+    $command = new $class();
+    $application->add( $command );
 
+    // if ($filename == 'NodeInstall') {
+    //     $application->setDefaultCommand( $command->getName() );
+    // }
+}
+$application->setName('Protocol');
+$application->setVersion('0.1.0');
 $application->run();

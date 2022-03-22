@@ -26,22 +26,26 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class RepoSlave extends Command {
+
+    use LockableTrait;
 
     protected static $defaultName = 'repo:slave';
     protected static $defaultDescription = 'Continuous deployment keeps the local repo updated with the remote changes';
@@ -51,9 +55,17 @@ Class RepoSlave extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. Using this command will overwrite any local files or commits that'
-            .' are not in the remote source of truth.')
+            ->setHelp(<<<HELP
+            This command interfaces with a bash script that was created to constantly monitor the git repo
+            without leaking memory. When this command is run it will constantly monitor the repository. Any
+            updates to the remote repository will be reflected on this node within 10 seconds.
+
+            Our script will make sure that your repository has not diverged from it's source before running
+            the update command.
+
+            Additionally, it will keep your repo synced with the same remote branch as you've specified locally.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -73,6 +85,16 @@ Class RepoSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Continously Monitoring Repository For Changes');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
         if (!is_dir($repo_dir)) {
             $output->writeln(' - Skipping repo:slave, there is no directory '.$repo_dir);
@@ -103,7 +125,6 @@ Class RepoSlave extends Command {
         }
         $daemon = !$nodaemon;
 
-        $output->writeln(PHP_EOL.'================== Watching ================');
         if ($daemon) {
             $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
         } else {

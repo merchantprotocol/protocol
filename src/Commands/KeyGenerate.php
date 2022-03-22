@@ -26,13 +26,14 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -49,7 +50,18 @@ Class KeyGenerate extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('Generates a key and returns the public pem')
+            ->setHelp(<<<HELP
+            Generates a key after setting default values and then returns the public pem. 
+            Go to your github account and enter the outputed pem string so that we can 
+            pull from the remote private repo.
+
+            This command will generate a key named `id_ed25519_ContinuousDeliverySystem` in
+            your .ssh directory.
+
+            It will update your .ssh/config to include the key in every ssh connection and 
+            then set the key files permissions to 600.
+
+            HELP)
         ;
     }
 
@@ -61,7 +73,15 @@ Class KeyGenerate extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('================== Generating Key ================');
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Generating Key Pair');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
 
         $email = 'worker@ec2.com';
         $HOME = Shell::run('echo $HOME');

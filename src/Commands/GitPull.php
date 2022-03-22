@@ -26,22 +26,26 @@
  *
  * 
  * @category   merchantprotocol
- * @package    merchantprotocol/github-continuous-delivery
+ * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
 Class GitPull extends Command {
+
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'git:pull';
@@ -52,9 +56,20 @@ Class GitPull extends Command {
         // ...
         $this
             // the command help shown when running the command with the "--help" option
-            ->setHelp('This command was designed to be run on a cluster node that is NOT the'
-            .' source of truth. Using this command will overwrite any local files or commits that'
-            .' are not in the remote source of truth.')
+            ->setHelp(<<<HELP
+            This command was designed to be run on a cluster node that is NOT the source of truth. 
+            Using this command will overwrite any local files or commits that are not in the remote source
+            of truth. Any files on the local node that are not tracked in the repository will be ignored.
+
+            This is much like running a `git pull --force` command, but that doesn't exist. So we built it.
+        
+            After updating the tracked files, this command will run `composer install` and update your 
+            submodules using `git submodule update --init --recursive`.
+
+            This command is used to update your repository when in slave mode. It was specifically designed for
+            slave mode.
+
+            HELP)
         ;
         $this
             // configure an argument
@@ -74,6 +89,16 @@ Class GitPull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Pulling Git Repo');
+
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         // the .git directory
         $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
@@ -83,8 +108,6 @@ Class GitPull extends Command {
         $remotes = Shell::run("git remote");
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
-
-        $output->writeln('================== Executing Git Pull Force ================');
 
         // First, run a fetch to update all origin/<branch> refs to latest:
         $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
