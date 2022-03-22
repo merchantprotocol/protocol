@@ -33,6 +33,7 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -57,7 +58,7 @@ Class GitPull extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::REQUIRED, 'The local git directory to manage')
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local git directory to manage')
             // ...
         ;
     }
@@ -101,6 +102,15 @@ Class GitPull extends Command {
         if ($response) $output->writeln($response);
         $response = Shell::run("git -C $repo_dir reset --hard HEAD");
         if ($response) $output->writeln($response);
+
+
+        // run composer install
+        $command = $this->getApplication()->find('composer:install');
+        $returnCode = $command->run((new ArrayInput([])), $output);
+
+        // Update the submodules
+        $command = "git -C $repo_dir submodule update --init --recursive";
+        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }
