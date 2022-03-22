@@ -1,22 +1,22 @@
 <?php return array(
     'root' => array(
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
+        'pretty_version' => 'dev-master',
+        'version' => 'dev-master',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
-        'reference' => NULL,
-        'name' => 'jonathonbyrdziak/github-continuous-deployment',
+        'reference' => '6219563ebb9299963e70969d79d7a4dd8e0b6f67',
+        'name' => 'merchantprotocol/protocol',
         'dev' => true,
     ),
     'versions' => array(
-        'jonathonbyrdziak/github-continuous-deployment' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
+        'merchantprotocol/protocol' => array(
+            'pretty_version' => 'dev-master',
+            'version' => 'dev-master',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
-            'reference' => NULL,
+            'reference' => '6219563ebb9299963e70969d79d7a4dd8e0b6f67',
             'dev_requirement' => false,
         ),
         'psr/container' => array(
@@ -26,6 +26,15 @@
             'install_path' => __DIR__ . '/../psr/container',
             'aliases' => array(),
             'reference' => '513e0666f7216c7459170d56df27dfcefe1689ea',
+            'dev_requirement' => false,
+        ),
+        'psr/log' => array(
+            'pretty_version' => '1.1.4',
+            'version' => '1.1.4.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../psr/log',
+            'aliases' => array(),
+            'reference' => 'd49695b909c3b7628b6289db5479a1c204601f11',
             'dev_requirement' => false,
         ),
         'psr/log-implementation' => array(
@@ -50,6 +59,15 @@
             'install_path' => __DIR__ . '/../symfony/deprecation-contracts',
             'aliases' => array(),
             'reference' => '6f981ee24cf69ee7ce9736146d1c57c2780598a8',
+            'dev_requirement' => false,
+        ),
+        'symfony/lock' => array(
+            'pretty_version' => 'v5.4.5',
+            'version' => '5.4.5.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../symfony/lock',
+            'aliases' => array(),
+            'reference' => 'f03b561c3bff8dc3a8ed0ff960f8a41bb14337d8',
             'dev_requirement' => false,
         ),
         'symfony/polyfill-ctype' => array(
