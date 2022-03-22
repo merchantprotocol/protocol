@@ -63,9 +63,6 @@ Class GitClone extends Command {
     }
 
     /**
-     * We're not looking to remove all changed and untracked files. We only want to overwrite local
-     * files that exist in the remote branch. Only the remotely tracked files will be overwritten, 
-     * and every local file that has been here was left untouched.
      *
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -81,6 +78,11 @@ Class GitClone extends Command {
         $command = "git clone $remoteurl $localdir";
         $response = Shell::passthru($command);
 
+        // run composer install
+        $command = $this->getApplication()->find('composer:install');
+        $returnCode = $command->run((new ArrayInput([])), $output);
+
+        // update the submodules
         $command = "git -C $localdir submodule update --init --recursive";
         $response = Shell::passthru($command);
 
