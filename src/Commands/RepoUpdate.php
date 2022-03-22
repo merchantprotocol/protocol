@@ -41,11 +41,11 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class RepoInstall extends Command {
+Class RepoUpdate extends Command {
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'repo:install';
-    protected static $defaultDescription = 'Handles the entire installation of a REPOSITORY';
+    protected static $defaultName = 'repo:update';
+    protected static $defaultDescription = 'Updates a repository that slept through changes';
 
     protected function configure(): void
     {
@@ -57,7 +57,6 @@ Class RepoInstall extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
             ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
@@ -71,24 +70,16 @@ Class RepoInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
+        $output->writeln('================== Updating Repository ================');
+
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-
-        $output->writeln('================== Installing Repository ================');
-
-        $arguments = [
-            'remote'   => $remoteurl,
+        $arrInput2 = new ArrayInput([
             'localdir' => $localdir
-        ];
-        $arrInput = new ArrayInput($arguments);
-        $arguments = [
-            'localdir' => $localdir
-        ];
-        $arrInput2 = new ArrayInput($arguments);
+        ]);
 
         // pull down the repo
-        $command = $this->getApplication()->find('git:clone');
-        $returnCode = $command->run($arrInput, $output);
+        $command = $this->getApplication()->find('git:pull');
+        $returnCode = $command->run((new ArrayInput([])), $output);
 
         // run repo slave
         $command = $this->getApplication()->find('repo:slave');
