@@ -62,9 +62,6 @@ Class ComposerInstall extends Command {
     }
 
     /**
-     * We're not looking to remove all changed and untracked files. We only want to overwrite local
-     * files that exist in the remote branch. Only the remotely tracked files will be overwritten, 
-     * and every local file that has been here was left untouched.
      *
      * @param InputInterface $input
      * @param OutputInterface $output

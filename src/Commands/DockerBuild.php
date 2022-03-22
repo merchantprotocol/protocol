@@ -87,9 +87,6 @@ Class DockerBuild extends Command {
         $command = "docker build -t $image $locationCmd";
         $response = Shell::passthru($command);
 
-        // $command = "docker build $locationCmd";
-        // $response = Shell::passthru($command);
-
         return Command::SUCCESS;
     }
 
