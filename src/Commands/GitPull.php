@@ -102,10 +102,10 @@ Class GitPull extends Command {
         // the .git directory
         $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 
-        $branch = Shell::run("git branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
+        $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
 
         // get the remote name
-        $remotes = Shell::run("git remote");
+        $remotes = Shell::run("git -C $repo_dir remote");
         $remotearray = explode(PHP_EOL, $remotes);
         $remote = array_shift($remotearray);
 
