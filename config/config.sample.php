@@ -17,5 +17,8 @@ return [
 
         // The image tagname for the remote docker repository
         'image'     => 'byrdziak/merchantprotocol-webserver-nginx-php7.4:initial',
-    ]
+    ],
+
+    // Allows you to define the banner message on login
+    'banner_file' => '/path-to-banner-file/for-ssh-login-message'
 ];

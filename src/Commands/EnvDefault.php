@@ -43,13 +43,13 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class DockerComposeRebuild extends Command {
+Class EnvDefault extends Command {
 
     use LockableTrait;
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'docker:compose:rebuild';
-    protected static $defaultDescription = 'Pulls down a new copy and rebuilds the image';
+    protected static $defaultName = 'env:default';
+    protected static $defaultDescription = 'Set the default environment variables for easier docker configurations';
 
     protected function configure(): void
     {
@@ -57,33 +57,21 @@ Class DockerComposeRebuild extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Command runs modified docker-compose on your repository if your repository has a 
-            docker-compose.yml file. This command was designed to be run frequently in a non-interactive 
-            state. Ideal for keeping a child node up to date.
-
-            When running docker-compose --rebuild on a repository, we want to make sure we have the latest
-            image on the node.
-
-            This command will login to your private docker repo and then pull the image down, finally running
-            `docker-compose up --rebuild -d` on your repository to rebuild your container from the latest
-            available image.
-
-            This command was not tested on a public docker repo. But, enter your credentials anyway and it
-            should work on a public repository. 
-
-            This command requires that you enter your docker credentials into the config.php file.
+            
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run docker compose in', false)
             // ...
         ;
     }
 
     /**
-     *
+     * When the node is relaunched after sleeping through assumed changes
+     * Install this command in the crontab as:
+     * @reboot /opt/protocol/protocol node:update
+     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -91,7 +79,7 @@ Class DockerComposeRebuild extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Docker Compose Rebuild');
+        $io->title('Configuring the environment variables');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -100,36 +88,13 @@ Class DockerComposeRebuild extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $PROTOCOL_WEBROOT = Config::read('localdir', false);
+        if ($PROTOCOL_WEBROOT) putenv("PROTOCOL_WEBROOT={$PROTOCOL_WEBROOT}");
 
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
-            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
-            return Command::FAILURE;
-        }
+        // Set the hostname environment variable
+        $DOCKER_HOSTNAME = Shell::run("hostname");
+        $response = putenv("DOCKER_HOSTNAME={$DOCKER_HOSTNAME}");
 
-        $image = Config::read('docker.image', false);
-        if (!$image) {
-            $output->writeln(' - FAILED Exiting... - image param needs to be set in the config.php');
-            return Command::FAILURE;
-        }
-
-        $username = Config::read('docker.username', false);
-        if (!$username) {
-            $output->writeln(' - FAILED Exiting... - username param needs to be set in the config.php');
-            return Command::FAILURE;
-        }
-
-        $password = Config::read('docker.password', false);
-        if (!$password) {
-            $output->writeln(' - FAILED Exiting... - password param needs to be set in the config.php');
-            return Command::FAILURE;
-        }
-
-        $command = $this->getApplication()->find('env:default');
-        $returnCode = $command->run((new ArrayInput([])), $output);
-
-        $command = "cd $localdir && docker-compose up --build -d";
-        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }

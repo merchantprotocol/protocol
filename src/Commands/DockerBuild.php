@@ -106,9 +106,8 @@ Class DockerBuild extends Command {
         $location = $input->getArgument('location') ?: Config::read('docker.location');
         $image    = $input->getArgument('image') ?: Config::read('docker.image');
 
-        // Set the hostname environment variable
-        $DOCKER_HOSTNAME = Shell::run("hostname");
-        $response = putenv("DOCKER_HOSTNAME={$DOCKER_HOSTNAME}");
+        $command = $this->getApplication()->find('env:default');
+        $returnCode = $command->run((new ArrayInput([])), $output);
 
         $locationCmd = " -f {$location}Dockerfile $location";
         $command = "docker build -t $image $locationCmd";
