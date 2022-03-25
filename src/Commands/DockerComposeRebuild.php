@@ -125,8 +125,9 @@ Class DockerComposeRebuild extends Command {
             return Command::FAILURE;
         }
 
-        $command = $this->getApplication()->find('docker:pull');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        // Set the hostname environment variable
+        $DOCKER_HOSTNAME = Shell::run("hostname");
+        $response = putenv("DOCKER_HOSTNAME={$DOCKER_HOSTNAME}");
 
         $command = "cd $localdir && docker-compose up --build -d";
         $response = Shell::passthru($command);

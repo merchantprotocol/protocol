@@ -115,6 +115,9 @@ Class NodeUpdate extends Command {
         $command = $this->getApplication()->find('repo:update');
         $returnCode = $command->run($arrInput2, $output);
 
+        $command = $this->getApplication()->find('docker:pull');
+        $returnCode = $command->run((new ArrayInput([])), $output);
+
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');
         $returnCode = $command->run((new ArrayInput([])), $output);
