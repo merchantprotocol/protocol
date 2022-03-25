@@ -88,23 +88,40 @@ Class SshBanner extends Command {
 
             return Command::SUCCESS;
         }
-        $banner_file    = $input->getArgument('banner') ?: Config::read('banner_file');
 
         // Make sure the environment variables are set
         $command = $this->getApplication()->find('env:default');
         $returnCode = $command->run((new ArrayInput([])), $output);
 
-        // unlock the motd file
-        $command = "chattr -i /etc/motd";
-        $response = Shell::run($command);
+        // Update the sshd_config file to not display the default banner
+        $response = Shell::run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak");
+        $sshconfig = <<<SETTINGS
 
-        // set the motd file
-        $command = "cat $banner_file > /etc/motd";
-        $response = Shell::run($command);
+        PrintMotd No
 
-        // lock the motd file
-        $command = "chattr +i /etc/motd";
-        $response = Shell::run($command);
+        SETTINGS;
+        $response = Shell::run("echo '$sshconfig' >> /etc/ssh/sshd_config");
+
+        // write the etc/profile to include the new banner
+
+        $banner_file = Dir::realpath($input->getArgument('banner'), false) ?: Config::read('banner_file');
+        if (strpos($banner_file, '/') !== 0) {
+            $banner_file = WEBROOT_DIR.$banner_file;
+        }
+        $response = Shell::run("cp /etc/profile /etc/profile.bak");
+        $etcprofile = <<<SETTINGS
+
+        $banner_file
+
+        SETTINGS;
+        // write the new file
+        $response = Shell::run("echo '$etcprofile' >> /etc/profile");
+
+
+        // empty the default file and lock it so the system cannot override it
+        $response = Shell::run("chattr -i /etc/motd");
+        $response = Shell::run("cat '' > /etc/motd");
+        $response = Shell::run("chattr +i /etc/motd");
 
 
         return Command::SUCCESS;

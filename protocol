@@ -64,6 +64,7 @@ DEFINE('WEBROOT_DIR', $webroot.DIRECTORY_SEPARATOR);
 DEFINE('CONFIG_DIR', WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR);
 DEFINE('SRC_DIR', WEBROOT_DIR.'src'.DIRECTORY_SEPARATOR);
 DEFINE('SCRIPT_DIR', WEBROOT_DIR.'bin'.DIRECTORY_SEPARATOR);
+DEFINE('TEMPLATES_DIR', WEBROOT_DIR.'templates'.DIRECTORY_SEPARATOR);
 DEFINE('COMMANDS_DIR', SRC_DIR.'Commands'.DIRECTORY_SEPARATOR);
 
 use Symfony\Component\Console\Application;
@@ -76,10 +77,6 @@ foreach($files as $file) {
     $class = "\Gitcd\Commands\\$filename";
     $command = new $class();
     $application->add( $command );
-
-    // if ($filename == 'NodeInstall') {
-    //     $application->setDefaultCommand( $command->getName() );
-    // }
 }
 $application->setName('Protocol');
 $application->setVersion('0.1.0');
