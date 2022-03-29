@@ -1,6 +1,5 @@
 #!/bin/sh
 
-
 upSeconds="$(/usr/bin/cut -d. -f1 /proc/uptime)"
 secs=$((${upSeconds}%60))
 mins=$((${upSeconds}/60%60))
@@ -36,13 +35,13 @@ $(tput setaf 7)
 
       ----------------------------------------------------------------
 
-You have entered an Official Merchant Protocol System, which may be used only
-for authorized purposes. The company may monitor and audit usage of this system,
-and all persons are hereby notified that use of this system constitutes consent
-to such monitoring and auditing. Unauthorized attempts to upload information
-and/or change information on these computers are strictly prohibited and are
-subject to prosecution under the Computer Fraud and Abuse Act of 1986 and
-Title 18 U.S.C. Sec.1001 and 1030. 
+      You have entered an Official Merchant Protocol System, which may be used only
+      for authorized purposes. The company may monitor and audit usage of this system,
+      and all persons are hereby notified that use of this system constitutes consent
+      to such monitoring and auditing. Unauthorized attempts to upload information
+      and/or change information on these computers are strictly prohibited and are
+      subject to prosecution under the Computer Fraud and Abuse Act of 1986 and
+      Title 18 U.S.C. Sec.1001 and 1030. 
 
       Merchant Protocol, LLC
       9169 W State St #701
@@ -53,7 +52,7 @@ Title 18 U.S.C. Sec.1001 and 1030.
       ----------------------------------------------------------------
 
       Distro     : `uname -srmo`
-      Date	 : `date +"%A, %e %B %Y, %r"`
+      Date       : `date +"%A, %e %B %Y, %r"`
 
       Webroot    : ${PROTOCOL_WEBROOT}
       PHP        : PHP $(php -v|grep --only-matching --perl-regexp "\\d+.\\d+\.\\d+"|head -n1)
