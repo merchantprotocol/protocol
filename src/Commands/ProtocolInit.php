@@ -83,6 +83,7 @@ Class ProtocolInit extends Command {
 
         Json::write('name', basename($repo_dir));
 
+        Json::write('docker.container_name', Yaml::read('services.app.container_name'));
         Json::write('docker.image', Yaml::read('services.app.image'));
 
         $remoteurl = Git::RemoteUrl( $repo_dir );
@@ -95,6 +96,12 @@ Class ProtocolInit extends Command {
         Json::write('git.branch', $branch);
 
         Json::save();
+
+        // add the protocol.lock file to gitignore
+        $command = "echo '".<<<FILE
+        protocol.lock
+        FILE."' >> .gitignore";
+        Shell::run($command);
 
         return Command::SUCCESS;
     }
