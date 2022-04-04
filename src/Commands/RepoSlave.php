@@ -42,6 +42,9 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
 Class RepoSlave extends Command {
 
@@ -86,7 +89,6 @@ Class RepoSlave extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Continously Monitoring Repository For Changes');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -94,27 +96,24 @@ Class RepoSlave extends Command {
 
             return Command::SUCCESS;
         }
+        Git::checkInitializedRepo( $output );
+        $io->title('Continously Monitoring Repository For Changes');
 
-        $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-        if (!is_dir($repo_dir)) {
-            $output->writeln(' - Skipping repo:slave, there is no directory '.$repo_dir);
-            return Command::SUCCESS;
+        // Check to see if the PID is still running, fail if it is
+        $running = Shell::isLockedPIDStillRunning();
+        if ($running) {
+            $output->writeln("Slave mode is already running");
+            exit(0);
         }
+        JsonLock::delete();
 
-        $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
-
-        // get the remote name
-        $remotes = Shell::run("git -C $repo_dir remote");
-        $remotearray = explode(PHP_EOL, $remotes);
-        $remote = array_shift($remotearray);
-
-        // remote url
-        $remoteurl = Shell::run("git -C $repo_dir config --get remote.origin.url");
+        $repo_dir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
+        $remoteName = Git::remoteName( $repo_dir );
+        $remoteurl = Git::RemoteUrl( $repo_dir );
         if (!$remoteurl) {
             $output->writeln("Your local repo is not connected to a remote source of truth. cancelling...");
             return Command::FAILURE;
         }
-
         $increment = $input->getOption('increment');
         if (!$increment) {
             $increment = 10;
@@ -124,7 +123,9 @@ Class RepoSlave extends Command {
             $nodaemon = true;
         }
         $daemon = !$nodaemon;
+        $branch = Git::branch( $repo_dir );
 
+        // trigger the daemon or run it yourself
         if ($daemon) {
             $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
         } else {
@@ -133,10 +134,20 @@ Class RepoSlave extends Command {
         $output->writeln(" - If any changes are made to $remoteurl we'll update $repo_dir".PHP_EOL);
 
         // execute command
-        $command = SCRIPT_DIR."git-repo-watcher -d $repo_dir -o $remote -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
+        $command = SCRIPT_DIR."git-repo-watcher -d $repo_dir -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
-            Shell::background($command);
+            Json::write('git.branch', $branch);
+            Json::write('git.remote', $remoteurl);
+            Json::write('git.remotename', $remoteName);
+            Json::write('git.local', $repo_dir);
+            Json::write('slave.increment', $increment);
+
+            $pid = Shell::background($command);
+            Json::write('slave.pid', $pid);
+            sleep(1);
+            Json::lock();
+
             return Command::SUCCESS;
         }
 

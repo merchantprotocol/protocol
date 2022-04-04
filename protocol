@@ -31,36 +31,11 @@
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
  * @license    MIT License
  */
-$autoload = [
-    __DIR__ . '/vendor/autoload.php',
-    __DIR__ . '/../vendor/autoload.php',
-    __DIR__ . '/../../vendor/autoload.php',
-    __DIR__ . '/../../../vendor/autoload.php',
-    __DIR__ . '/../../../../vendor/autoload.php',
-    __DIR__ . '/../../../../../vendor/autoload.php'
-];
 
-$webroot = false;
-$loaded = false;
-$vendorDir = false;
-for ($i = 0; $i < count($autoload); $i++) {
-    if (file_exists($autoload[$i])) {
-        require $autoload[$i];
-        $vendorDir = dirname($autoload[$i]);
-        $loaded = true;
-        $webroot = dirname($vendorDir);
-        break;
-    }
-}
-if (!$loaded) {
-    fwrite(
-        STDERR,
-        'Unable to determine install location.' . PHP_EOL
-    );
-    exit(1);
-}
+require __DIR__ . '/vendor/autoload.php';
 
-DEFINE('WEBROOT_DIR', $webroot.DIRECTORY_SEPARATOR);
+DEFINE('WORKING_DIR', getcwd().DIRECTORY_SEPARATOR);
+DEFINE('WEBROOT_DIR', __DIR__.DIRECTORY_SEPARATOR);
 DEFINE('CONFIG_DIR', WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR);
 DEFINE('SRC_DIR', WEBROOT_DIR.'src'.DIRECTORY_SEPARATOR);
 DEFINE('SCRIPT_DIR', WEBROOT_DIR.'bin'.DIRECTORY_SEPARATOR);

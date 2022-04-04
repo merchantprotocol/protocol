@@ -34,6 +34,7 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -42,13 +43,13 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class DockerCompose extends Command {
+Class ProtocolUpdate extends Command {
 
     use LockableTrait;
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'docker:compose';
-    protected static $defaultDescription = 'Run docker compose on the repository to boot up any container';
+    protected static $defaultName = 'update';
+    protected static $defaultDescription = 'Updating a node that has been shut down for some time.';
 
     protected function configure(): void
     {
@@ -56,20 +57,39 @@ Class DockerCompose extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Command runs modified docker-compose on your repository if your repository has a 
-            docker-compose.yml file.
+            This command was designed to be run on a cluster node that is NOT the source of truth.
+            It will not ask questions, but assume all installation requirements.
+            
+            Let's say you built a node, took a snapshot and then three months of updates later the snapshot
+            got provisioned as a node in the cluster. This would leave your snapshot instance out of date
+            and cause issues with your application.
+
+            This command will update the docker container and the repository, and itself! 
+
+            When building your docker container for the first time you should run this command on reboot/boot.
+            To do that with cron, run the following command to edit your crontab file:
+
+            `crontab -e`
+
+            Then include the following line at the bottom of your file. Be sure to leave a blank line at the bottom
+            of your crontab file.
+
+            @reboot /path/to/protocol node:update
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run docker compose in', false)
+            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
     }
 
     /**
-     *
+     * When the node is relaunched after sleeping through assumed changes
+     * Install this command in the crontab as:
+     * @reboot /opt/protocol/protocol node:update
+     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -77,7 +97,7 @@ Class DockerCompose extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Docker Compose');
+        $io->title('Bringing Node Up To Date');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -87,14 +107,20 @@ Class DockerCompose extends Command {
         }
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $arrInput2 = new ArrayInput([
+            'localdir' => $localdir
+        ]);
 
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
-            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
-            return Command::SUCCESS;
-        }
+        // pull down the docker container
+        $command = $this->getApplication()->find('repo:update');
+        $returnCode = $command->run($arrInput2, $output);
 
-        $command = "cd $localdir && docker-compose up -d";
-        $response = Shell::passthru($command);
+        $command = $this->getApplication()->find('docker:pull');
+        $returnCode = $command->run((new ArrayInput([])), $output);
+
+        // run docker compose
+        $command = $this->getApplication()->find('docker:compose:rebuild');
+        $returnCode = $command->run((new ArrayInput([])), $output);
 
         return Command::SUCCESS;
     }

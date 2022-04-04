@@ -34,22 +34,22 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
+use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
-use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
-Class NodeInstall extends Command {
+Class RepoSlaveStop extends Command {
 
     use LockableTrait;
 
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'install';
-    protected static $defaultDescription = 'Creating a new cluster node from scratch: deploys the repo and builds the container';
+    protected static $defaultName = 'repo:slave:stop';
+    protected static $defaultDescription = 'Stops the slave mode when its running';
 
     protected function configure(): void
     {
@@ -57,51 +57,40 @@ Class NodeInstall extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command is used to install a brand new node, launch a docker container and place
-            the repo into slave mode.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
      * 
+     *
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Setting Up A Node For The First Time');
+        Git::checkInitializedRepo( $output );
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
+        // Check to see if the PID is still running, fail if it is
+        $pid = JsonLock::read('slave.pid');
+        $running = Shell::isRunning( $pid );
+        if (!$pid || !$running) {
+            $output->writeln("Slave mode is not running");
+            JsonLock::delete();
+            exit(0);
         }
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-        $arrInput2 = new ArrayInput([
-            'localdir' => $localdir
-        ]);
+        $command = "kill $pid";
+        Shell::passthru($command);
+        JsonLock::delete();
 
-        // pull down the docker container
-        $command = $this->getApplication()->find('repo:install');
-        $returnCode = $command->run($arrInput2, $output);
-
-        // run docker compose
-        $command = $this->getApplication()->find('docker:compose:rebuild');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $output->writeln("Slave mode stopped");
 
         return Command::SUCCESS;
     }

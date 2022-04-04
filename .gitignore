@@ -3,3 +3,5 @@ tmp/logs/*
 tmp/pid/*
 !tmp/pid/.gitkeep
 config/config.php
+protocol.json
+protocol.lock

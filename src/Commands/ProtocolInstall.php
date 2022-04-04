@@ -43,13 +43,13 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class NodeUpdate extends Command {
+Class ProtocolInstall extends Command {
 
     use LockableTrait;
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'update';
-    protected static $defaultDescription = 'Updating a node that has been shut down for some time.';
+    protected static $defaultName = 'install';
+    protected static $defaultDescription = 'Creating a new cluster node from scratch: deploys the repo and builds the container';
 
     protected function configure(): void
     {
@@ -57,24 +57,8 @@ Class NodeUpdate extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command was designed to be run on a cluster node that is NOT the source of truth.
-            It will not ask questions, but assume all installation requirements.
-            
-            Let's say you built a node, took a snapshot and then three months of updates later the snapshot
-            got provisioned as a node in the cluster. This would leave your snapshot instance out of date
-            and cause issues with your application.
-
-            This command will update the docker container and the repository, and itself! 
-
-            When building your docker container for the first time you should run this command on reboot/boot.
-            To do that with cron, run the following command to edit your crontab file:
-
-            `crontab -e`
-
-            Then include the following line at the bottom of your file. Be sure to leave a blank line at the bottom
-            of your crontab file.
-
-            @reboot /path/to/protocol node:update
+            This command is used to install a brand new node, launch a docker container and place
+            the repo into slave mode.
 
             HELP)
         ;
@@ -88,7 +72,7 @@ Class NodeUpdate extends Command {
     /**
      * When the node is relaunched after sleeping through assumed changes
      * Install this command in the crontab as:
-     * @reboot /opt/protocol/protocol node:update
+     * @reboot /opt/protocol/pipeline node:update
      * 
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -97,7 +81,7 @@ Class NodeUpdate extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Bringing Node Up To Date');
+        $io->title('Setting Up A Node For The First Time');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -112,11 +96,8 @@ Class NodeUpdate extends Command {
         ]);
 
         // pull down the docker container
-        $command = $this->getApplication()->find('repo:update');
+        $command = $this->getApplication()->find('repo:install');
         $returnCode = $command->run($arrInput2, $output);
-
-        $command = $this->getApplication()->find('docker:pull');
-        $returnCode = $command->run((new ArrayInput([])), $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');

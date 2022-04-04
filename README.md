@@ -75,7 +75,9 @@ Options:
 Available commands:
   completion              Dump the shell completion script
   help                    Display help for a command
+  install                 Creating a new cluster node from scratch: deploys the repo and builds the container
   list                    List commands
+  update                  Updating a node that has been shut down for some time.
  composer
   composer:install        Run the composer install command
  docker
@@ -84,49 +86,86 @@ Available commands:
   docker:compose:rebuild  Pulls down a new copy and rebuilds the image
   docker:pull             Docker pull and update an image
   docker:push             Pushes the docker image to the remote repository
+ env
+  env:default             Set the default environment variables for easier docker configurations
  git
   git:clone               Clone from remote repo
   git:pull                Pull from github and update the local repo
  key
   key:generate            Generate an openssl key
- node
-  node:install            Installs the repository and the docker container
-  node:update             Updates the docker container, the repo and itself
  repo
   repo:install            Handles the entire installation of a REPOSITORY
   repo:slave              Continuous deployment keeps the local repo updated with the remote changes
   repo:update             Updates a repository that slept through changes
+ security
+  security:changedfiles   Find all files changed within the last (15) days
+  security:trojansearch   Find anything that looks like a trojan in our application
+ ssh
+  ssh:banner              Add the Ssh Banner
 
 ```
 
 Run --help on any of the specific commands to see how to use the command.
 
-## pipeline composer:install --help
+## pipeline repo:slave --help
 ```
 Description:
-  Run the composer install command
+  Continuous deployment keeps the local repo updated with the remote changes
 
 Usage:
-  composer:install [<localdir>]
+  repo:slave [options] [--] [<localdir>]
 
 Arguments:
-  localdir              The local dir to run composer install in [default: false]
+  localdir                        The local git directory to manage
 
 Options:
-  -h, --help            Display help for the given command. When no command is given display help for the list command
-  -q, --quiet           Do not output any message
-  -V, --version         Display this application version
-      --ansi|--no-ansi  Force (or disable --no-ansi) ANSI output
-  -n, --no-interaction  Do not ask any interactive question
-  -v|vv|vvv, --verbose  Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
+  -i, --increment[=INCREMENT]     How many seconds to sleep between remote checks
+  -h, --help                      Display help for the given command. When no command is given display help for the list command
+  -q, --quiet                     Do not output any message
+  -V, --version                   Display this application version
+      --ansi|--no-ansi            Force (or disable --no-ansi) ANSI output
+  -n, --no-interaction            Do not ask any interactive question
+  -no-d, --no-daemon[=NO-DAEMON]  Do not run as a background service [default: false]
+  -v|vv|vvv, --verbose            Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
 
 Help:
-  Uses the composer.phar (Composer version 2.2.9 2022-03-15 22:13:37) which is a part of
-  this package. There's no need to install composer on your server when using this project.
+  This command interfaces with a bash script that was created to constantly monitor the git repo
+  without leaking memory. When this command is run it will constantly monitor the repository. Any
+  updates to the remote repository will be reflected on this node within 10 seconds.
   
-  1. If the project contains a composer.json file
-  2. The following modified `composer install` command will be run:
+  Our script will make sure that your repository has not diverged from it's source before running
+  the update command.
   
-  composer.phar install --working-dir=/path-to-repo/ --ignore-platform-reqs
+  Additionally, it will keep your repo synced with the same remote branch as you've specified locally.
   
 ```  
+
+## The protocol.json file
+
+In your campaign you need to create a protocol.json file. This file will house your projects configuration and determine how protocol manages your project.
+
+After you install protocol globally, you'll be able to run commands in the root of your application like:
+
+    protocol repo:slave
+
+Upon running this command the current repo will become a slave to it's remote. Any changes to the remote will update this child repo within 10 seconds. When the repo is in slave mode like this, you'll notice a protocol.lock file which contains some meta information, including the PID monitoring the repo.
+
+#### Sample json file
+
+```json
+{
+    "name": "Datamelt",
+    "git": {
+        "username": "jonathonbyrdziak",
+        "password": "",
+        "key": "",
+        "remote": ""
+    },
+    "docker": {
+        "image" : "byrdziak/merchantprotocol-webserver-nginx-php7.4:initial",
+        "username" : "",
+        "password" : "",
+        "local" : "../docker-webserver-nginx-php7.4-fpm/"
+    }
+}
+```

@@ -211,7 +211,6 @@ Class Config
 			$file = WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR.'global.php';
 		}
 
-	    //print_r(self::$instances);
 		//create the class if it does not exist
 		if (empty(self::$instances[$file]))
 		{
@@ -235,15 +234,16 @@ Class Config
 	 * @return array Merged user defined values with defaults.
 	 */
 	function parse_args( $args, $defaults = '' ) {
+		$r = [];
 	    if ( is_object( $args ) )
 	        $r = get_object_vars( $args );
-	        elseif ( is_array( $args ) )
-	        $r =& $args;
-	        else
-	            parse_string( $args, $r );
-	            
-	            if ( is_array( $defaults ) )
-	                return array_merge( $defaults, $r );
-	                return $r;
+        elseif ( is_array( $args ) )
+            $r =& $args;
+        elseif (function_exists('parse_string'))
+            \parse_string( $args, $r );
+            
+        if ( is_array( $defaults ) )
+            return array_merge( $defaults, $r );
+        return $r;
 	}
 }

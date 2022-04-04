@@ -33,6 +33,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
 Class Shell {
 
@@ -89,13 +90,29 @@ Class Shell {
         if (!file_exists($outputfile)) {
             touch($outputfile);
         }
-        $pidfile = WEBROOT_DIR.Config::read('shell.pidfile');
 
-        return exec(sprintf("%s > %s 2>&1 & echo $! > %s", $command, $outputfile, $pidfile));
+        $command = sprintf("%s > %s 2>&1 & echo $!", $command, $outputfile);
+        exec($command, $response);
+
+        if (is_array($response)) {
+            $response = array_pop($response);
+        }
+        return $response;
     }
 
     /**
-     * allows you to check on a background running process
+     * 
+     *
+     * @return boolean
+     */
+    public static function isLockedPIDStillRunning()
+    {
+        $pid = Json::read('slave.pid');
+        return self::isRunning( $pid );
+    }
+
+    /**
+     * Allows you to check on a background running process
      *
      * @param [type] $pid
      * @return boolean

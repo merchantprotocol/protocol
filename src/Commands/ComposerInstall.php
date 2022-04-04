@@ -54,6 +54,7 @@ Class ComposerInstall extends Command {
     {
         // ...
         $this
+            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
             Uses the composer.phar (Composer version 2.2.9 2022-03-15 22:13:37) which is a part of
