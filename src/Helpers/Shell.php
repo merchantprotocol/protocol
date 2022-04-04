@@ -86,9 +86,15 @@ Class Shell {
      */
     public static function background( $command )
     {
-        $outputfile = WEBROOT_DIR.Config::read('shell.outputfile');
+        $outputfile = Config::read('shell.outputfile');
         if (!file_exists($outputfile)) {
-            touch($outputfile);
+            $dir = dirname($outputfile);
+            if (!is_dir($dir)) {
+                self::run("mkdir -p $dir");
+            }
+            if (is_dir($dir)) {
+                touch($outputfile);
+            }
         }
 
         $command = sprintf("%s > %s 2>&1 & echo $!", $command, $outputfile);

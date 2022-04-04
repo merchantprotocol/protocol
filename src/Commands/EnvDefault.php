@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
 
 Class EnvDefault extends Command {
 
@@ -82,14 +83,7 @@ Class EnvDefault extends Command {
         $io = new SymfonyStyle($input, $output);
         $io->title('Configuring the environment variables');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
-        }
-
-        $PROTOCOL_WEBROOT = Config::read('localdir', false);
+        $PROTOCOL_WEBROOT = Git::getGitLocalFolder();
         if ($PROTOCOL_WEBROOT) putenv("PROTOCOL_WEBROOT={$PROTOCOL_WEBROOT}");
 
         // Set the hostname environment variable

@@ -41,7 +41,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 Class ProtocolStart extends Command {
 
@@ -88,25 +89,23 @@ Class ProtocolStart extends Command {
         }
 
         $localdir = Git::getGitLocalFolder();
-        $arrInput2 = new ArrayInput([
-            'localdir' => $localdir
-        ]);
+        $arrInput = (new ArrayInput([]));
 
         // run update
         $command = $this->getApplication()->find('git:pull');
-        $returnCode = $command->run($arrInput2, $output);
+        $returnCode = $command->run($arrInput, $output);
 
         // run repo slave
         $command = $this->getApplication()->find('repo:slave');
-        $returnCode = $command->run($arrInput2, $output);
+        $returnCode = $command->run($arrInput, $output);
 
         // Update docker image
         $command = $this->getApplication()->find('docker:pull');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run($arrInput, $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;
     }

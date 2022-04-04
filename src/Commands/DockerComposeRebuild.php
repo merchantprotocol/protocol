@@ -93,13 +93,6 @@ Class DockerComposeRebuild extends Command {
         $io = new SymfonyStyle($input, $output);
         $io->title('Docker Compose Rebuild');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
-        }
-
         $localdir = Git::getGitLocalFolder();
 
         if (!file_exists("{$localdir}/docker-compose.yml")) {

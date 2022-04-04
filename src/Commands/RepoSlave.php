@@ -72,7 +72,6 @@ Class RepoSlave extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local git directory to manage')
             ->addOption('increment', 'i', InputOption::VALUE_OPTIONAL, 'How many seconds to sleep between remote checks')
             ->addOption('no-daemon', 'no-d', InputOption::VALUE_OPTIONAL, 'Do not run as a background service', false)
             // ...
@@ -107,7 +106,7 @@ Class RepoSlave extends Command {
         }
         JsonLock::delete();
 
-        $repo_dir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
+        $repo_dir = Git::getGitLocalFolder();
         $remoteName = Git::remoteName( $repo_dir );
         $remoteurl = Git::RemoteUrl( $repo_dir );
         if (!$remoteurl) {

@@ -74,7 +74,6 @@ Class GitPull extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('local', InputArgument::OPTIONAL, 'The local git directory to manage')
             // ...
         ;
     }

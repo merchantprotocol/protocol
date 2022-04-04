@@ -36,20 +36,20 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
-use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
-Class RepoSlaveStop extends Command {
+Class DockerComposeDown extends Command {
 
     use LockableTrait;
 
-    protected static $defaultName = 'repo:slave:stop';
-    protected static $defaultDescription = 'Stops the slave mode when its running';
+    // the name of the command (the part after "bin/console")
+    protected static $defaultName = 'docker:compose:down';
+    protected static $defaultDescription = 'shuts down docker';
 
     protected function configure(): void
     {
@@ -57,6 +57,7 @@ Class RepoSlaveStop extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
+            Shuts down the running container
 
             HELP)
         ;
@@ -67,7 +68,6 @@ Class RepoSlaveStop extends Command {
     }
 
     /**
-     * 
      *
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -75,22 +75,17 @@ Class RepoSlaveStop extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        Git::checkInitializedRepo( $output );
+        $io = new SymfonyStyle($input, $output);
 
-        // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('slave.pid');
-        $running = Shell::isRunning( $pid );
-        if (!$pid || !$running) {
-            $output->writeln("Slave mode is not running");
-            JsonLock::delete();
+        $localdir = Git::getGitLocalFolder();
+
+        if (!file_exists("{$localdir}/docker-compose.yml")) {
+            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
             return Command::SUCCESS;
         }
 
-        $command = "kill $pid";
-        Shell::passthru($command);
-        JsonLock::delete();
-
-        $output->writeln("Slave mode stopped");
+        $command = "cd $localdir && docker-compose down";
+        $response = Shell::passthru($command);
 
         return Command::SUCCESS;
     }
