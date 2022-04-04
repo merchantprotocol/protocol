@@ -74,6 +74,7 @@ Class GitPull extends Command {
         ;
         $this
             // configure an argument
+            ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
             // ...
         ;
     }
@@ -100,7 +101,7 @@ Class GitPull extends Command {
         }
 
         // the .git directory
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir   = $input->getArgument('local') ?: Git::getGitLocalFolder();
         $branch = Git::branch( $repo_dir );
         $remote = Git::remoteName( $repo_dir );
 
