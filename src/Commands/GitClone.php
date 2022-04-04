@@ -55,6 +55,7 @@ Class GitClone extends Command {
     {
         // ...
         $this
+            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
             This command was intended to clone down an application repository from a remote source

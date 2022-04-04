@@ -27,6 +27,7 @@ class ComposerStaticInit4343e9dcb3d8cb497e76a9c4a63bb388
             'Symfony\\Polyfill\\Intl\\Grapheme\\' => 31,
             'Symfony\\Polyfill\\Ctype\\' => 23,
             'Symfony\\Contracts\\Service\\' => 26,
+            'Symfony\\Component\\Yaml\\' => 23,
             'Symfony\\Component\\String\\' => 25,
             'Symfony\\Component\\Lock\\' => 23,
             'Symfony\\Component\\Console\\' => 26,
@@ -70,6 +71,10 @@ class ComposerStaticInit4343e9dcb3d8cb497e76a9c4a63bb388
         'Symfony\\Contracts\\Service\\' => 
         array (
             0 => __DIR__ . '/..' . '/symfony/service-contracts',
+        ),
+        'Symfony\\Component\\Yaml\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/symfony/yaml',
         ),
         'Symfony\\Component\\String\\' => 
         array (

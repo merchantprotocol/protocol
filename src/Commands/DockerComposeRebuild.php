@@ -41,7 +41,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 Class DockerComposeRebuild extends Command {
 
@@ -77,7 +78,6 @@ Class DockerComposeRebuild extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run docker compose in', false)
             // ...
         ;
     }
@@ -100,28 +100,10 @@ Class DockerComposeRebuild extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $localdir = Git::getGitLocalFolder();
 
         if (!file_exists("{$localdir}/docker-compose.yml")) {
             $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
-            return Command::FAILURE;
-        }
-
-        $image = Config::read('docker.image', false);
-        if (!$image) {
-            $output->writeln(' - FAILED Exiting... - image param needs to be set in the config.php');
-            return Command::FAILURE;
-        }
-
-        $username = Config::read('docker.username', false);
-        if (!$username) {
-            $output->writeln(' - FAILED Exiting... - username param needs to be set in the config.php');
-            return Command::FAILURE;
-        }
-
-        $password = Config::read('docker.password', false);
-        if (!$password) {
-            $output->writeln(' - FAILED Exiting... - password param needs to be set in the config.php');
             return Command::FAILURE;
         }
 

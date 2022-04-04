@@ -41,7 +41,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
 Class DockerBuild extends Command {
 
@@ -80,7 +80,7 @@ Class DockerBuild extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('location', InputArgument::OPTIONAL, 'The desired remote docker image tag', false)
+            ->addArgument('local', InputArgument::OPTIONAL, 'The desired remote docker image tag', false)
             ->addArgument('image', InputArgument::OPTIONAL, 'The tag for the image', false)
             // ...
         ;
@@ -104,8 +104,8 @@ Class DockerBuild extends Command {
             return Command::SUCCESS;
         }
 
-        $location = $input->getArgument('location') ?: Config::read('docker.location');
-        $image    = $input->getArgument('image') ?: Config::read('docker.image');
+        $location = $input->getArgument('local') ?: Json::read('docker.local');
+        $image    = $input->getArgument('image') ?: Json::read('docker.image');
 
         $command = $this->getApplication()->find('env:default');
         $returnCode = $command->run((new ArrayInput([])), $output);

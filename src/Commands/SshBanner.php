@@ -55,6 +55,7 @@ Class SshBanner extends Command {
     {
         // ...
         $this
+            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
             

@@ -5,18 +5,18 @@
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
-        'reference' => '6219563ebb9299963e70969d79d7a4dd8e0b6f67',
-        'name' => 'merchantprotocol/protocol',
+        'reference' => 'a26f62cd516de99a478cfcf11d575896f3d70ab3',
+        'name' => 'jonathonbyrdziak/protocol',
         'dev' => true,
     ),
     'versions' => array(
-        'merchantprotocol/protocol' => array(
+        'jonathonbyrdziak/protocol' => array(
             'pretty_version' => 'dev-master',
             'version' => 'dev-master',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
-            'reference' => '6219563ebb9299963e70969d79d7a4dd8e0b6f67',
+            'reference' => 'a26f62cd516de99a478cfcf11d575896f3d70ab3',
             'dev_requirement' => false,
         ),
         'psr/container' => array(
@@ -140,6 +140,15 @@
             'install_path' => __DIR__ . '/../symfony/string',
             'aliases' => array(),
             'reference' => '92043b7d8383e48104e411bc9434b260dbeb5a10',
+            'dev_requirement' => false,
+        ),
+        'symfony/yaml' => array(
+            'pretty_version' => 'v5.4.3',
+            'version' => '5.4.3.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../symfony/yaml',
+            'aliases' => array(),
+            'reference' => 'e80f87d2c9495966768310fc531b487ce64237a2',
             'dev_requirement' => false,
         ),
     ),

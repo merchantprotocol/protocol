@@ -40,7 +40,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
 Class DockerPush extends Command {
 
@@ -89,9 +89,9 @@ Class DockerPush extends Command {
             return Command::SUCCESS;
         }
 
-        $image    = $input->getArgument('image') ?: Config::read('docker.image');
-        $username = $input->getArgument('username') ?: Config::read('docker.username');
-        $password = $input->getArgument('password') ?: Config::read('docker.password');
+        $image    = $input->getArgument('image') ?: Json::read('docker.image');
+        $username = $input->getArgument('username') ?: Json::read('docker.username');
+        $password = $input->getArgument('password') ?: Json::read('docker.password');
 
         $command = "echo '$password' | docker login --username $username --password-stdin";
         $response = Shell::passthru($command);

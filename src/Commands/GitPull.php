@@ -41,7 +41,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 Class GitPull extends Command {
 
@@ -73,7 +74,7 @@ Class GitPull extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local git directory to manage')
+            ->addArgument('local', InputArgument::OPTIONAL, 'The local git directory to manage')
             // ...
         ;
     }
@@ -100,14 +101,9 @@ Class GitPull extends Command {
         }
 
         // the .git directory
-        $repo_dir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-
-        $branch = Shell::run("git -C $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
-
-        // get the remote name
-        $remotes = Shell::run("git -C $repo_dir remote");
-        $remotearray = explode(PHP_EOL, $remotes);
-        $remote = array_shift($remotearray);
+        $repo_dir = Git::getGitLocalFolder();
+        $branch = Git::branch( $repo_dir );
+        $remote = Git::remoteName( $repo_dir );
 
         // First, run a fetch to update all origin/<branch> refs to latest:
         $response = Shell::run("git -C $repo_dir fetch --all", $return_var);

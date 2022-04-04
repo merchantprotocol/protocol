@@ -33,13 +33,14 @@
 namespace Gitcd\Utils;
 
 use Gitcd\Utils\Config;
+use Symfony\Component\Yaml\Yaml as SymfonyYaml;
 
 /**
  * Configurations Class
  *
  * Manages the complete xml configuration system via an api
  */
-Class Json extends Config
+Class Yaml extends Config
 {
 	/**
 	 * Read a property
@@ -90,8 +91,8 @@ Class Json extends Config
 				}
 			}
 		}
-		$json_pretty = json_encode($this->data, JSON_PRETTY_PRINT);
-		return ($file) ?file_put_contents( $file, $json_pretty ) :false;
+		$yaml_data = SymfonyYaml::dump($this->data, JSON_PRETTY_PRINT);
+		return ($file) ?file_put_contents( $file, $yaml_data ) :false;
 	}
 
 	/**
@@ -101,7 +102,7 @@ Class Json extends Config
 	 */
 	public static function save()
 	{
-		$file = WORKING_DIR.'protocol.json';
+		$file = WORKING_DIR.'docker-compose.yml';
 		$self = self::getInstance();
         $self->put( $file );
 	}
@@ -115,7 +116,7 @@ Class Json extends Config
     public static function lock( $file = false )
     {
 		if (!$file) {
-			$file = WORKING_DIR.'protocol.lock';
+			$file = WORKING_DIR.'docker-compose.yml';
 		}
 		$self = self::getInstance();
         $self->put( $file );
@@ -130,8 +131,7 @@ Class Json extends Config
 	{
 		$data = [];
 		if (is_file($file)) {
-        	$raw = file_get_contents($file);
-       	 	$data = json_decode($raw, true);
+        	$data = SymfonyYaml::parseFile($file);
 		}
 	    $this->set( null, $data );
 	}
@@ -146,14 +146,14 @@ Class Json extends Config
 	public static function getInstance( $file = false )
 	{
 		if (!$file) {
-			$file = WORKING_DIR.'protocol.json';
+			$file = WORKING_DIR.'docker-compose.yml';
 		}
 
 		//create the class if it does not exist
 		if (empty(self::$instances[$file]))
 		{
 			//creating the instance
-			$config = new Json( $file );
+			$config = new Yaml( $file );
 			self::$instances[$file] = $config;
 		}
 		

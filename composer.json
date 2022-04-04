@@ -15,6 +15,7 @@
     ],
     "require": {
         "symfony/console": "^5.4",
-        "symfony/lock": "^5.4"
+        "symfony/lock": "^5.4",
+        "symfony/yaml": "^5.4"
     }
 }

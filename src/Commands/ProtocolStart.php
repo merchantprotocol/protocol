@@ -43,13 +43,12 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 
-Class ProtocolInstall extends Command {
+Class ProtocolStart extends Command {
 
     use LockableTrait;
 
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'install';
-    protected static $defaultDescription = 'Creating a new cluster node from scratch: deploys the repo and builds the container';
+    protected static $defaultName = 'start';
+    protected static $defaultDescription = 'Starts a node so that the repo and docker image stay up to date and are running';
 
     protected function configure(): void
     {
@@ -57,14 +56,12 @@ Class ProtocolInstall extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command is used to install a brand new node, launch a docker container and place
-            the repo into slave mode.
+            Start up a new node. The repository will be updated and become a slave, updating whenever the remote repo updates. The latest docker image will be pulled down and started up.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
     }
@@ -81,7 +78,7 @@ Class ProtocolInstall extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Setting Up A Node For The First Time');
+        $io->title('Starting Up The Node');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -90,14 +87,22 @@ Class ProtocolInstall extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $localdir = Git::getGitLocalFolder();
         $arrInput2 = new ArrayInput([
             'localdir' => $localdir
         ]);
 
-        // pull down the docker container
-        $command = $this->getApplication()->find('repo:install');
+        // run update
+        $command = $this->getApplication()->find('git:pull');
         $returnCode = $command->run($arrInput2, $output);
+
+        // run repo slave
+        $command = $this->getApplication()->find('repo:slave');
+        $returnCode = $command->run($arrInput2, $output);
+
+        // Update docker image
+        $command = $this->getApplication()->find('docker:pull');
+        $returnCode = $command->run((new ArrayInput([])), $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');

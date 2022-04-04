@@ -40,7 +40,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 Class DockerPull extends Command {
 
@@ -65,8 +66,6 @@ Class DockerPull extends Command {
         $this
             // configure an argument
             ->addArgument('image', InputArgument::OPTIONAL, 'The desired remote docker image tag')
-            ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username')
-            ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password')
             // ...
         ;
     }
@@ -89,12 +88,7 @@ Class DockerPull extends Command {
             return Command::SUCCESS;
         }
 
-        $image    = $input->getArgument('image') ?: Config::read('docker.image');
-        $username = $input->getArgument('username') ?: Config::read('docker.username');
-        $password = $input->getArgument('password') ?: Config::read('docker.password');
-
-        $command = "echo '$password' | docker login --username $username --password-stdin";
-        $response = Shell::passthru($command);
+        $image    = $input->getArgument('image') ?: Json::read('docker.image');
 
         $command = "docker pull $image";
         $response = Shell::passthru($command);

@@ -41,15 +41,17 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
+use Gitcd\Utils\Yaml;
 
-Class RepoUpdate extends Command {
+Class ProtocolInit extends Command {
 
     use LockableTrait;
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'repo:update';
-    protected static $defaultDescription = 'Updates a repository that slept through changes';
+    protected static $defaultName = 'init';
+    protected static $defaultDescription = 'Creates the protocol.json file';
 
     protected function configure(): void
     {
@@ -57,51 +59,42 @@ Class RepoUpdate extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Assuming that you already ran repo:install on your node, took a snapshot and then
-            shutdown the node for some time.
-
-            This command will update the repository and then startup repo:slave to monitor the
-            repository in case the server was rebooted or turned on after some time.
+            Creates the protocol json file in the directory.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
             // ...
         ;
     }
 
     /**
-     *
+     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Updating Repository and Watching For Changes');
+        // is this a git repo?
+        Git::checkInitializedRepo( $output );
+        $repo_dir = Git::getGitLocalFolder();
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
+        Json::write('name', basename($repo_dir));
 
-            return Command::SUCCESS;
-        }
+        Json::write('docker.image', Yaml::read('services.app.image'));
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
-        $arrInput2 = new ArrayInput([
-            'localdir' => $localdir
-        ]);
+        $remoteurl = Git::RemoteUrl( $repo_dir );
+        Json::write('git.remote', $remoteurl);
 
-        // pull down the repo
-        $command = $this->getApplication()->find('git:pull');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $remoteName = Git::remoteName( $repo_dir );
+        Json::write('git.remotename', $remoteName);
 
-        // run repo slave
-        $command = $this->getApplication()->find('repo:slave');
-        $returnCode = $command->run($arrInput2, $output);
+        $branch = Git::branch( $repo_dir );
+        Json::write('git.branch', $branch);
+
+        Json::save();
 
         return Command::SUCCESS;
     }

@@ -51,6 +51,7 @@ Class SecurityUpdatedFiles extends Command {
     {
         // ...
         $this
+            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
             Typically it would be a rare occasion to be changing files manually on a node. This command lists files that have been changed.

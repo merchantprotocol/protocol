@@ -33,72 +33,32 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
-use Gitcd\Helpers\Shell;
-use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Git;
-use Gitcd\Utils\Json;
 
-Class DockerCompose extends Command {
+Class CompletionOverride extends Command {
 
-    use LockableTrait;
-
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'docker:compose';
-    protected static $defaultDescription = 'Run docker compose on the repository to boot up any container';
+    protected static $defaultName = 'completion';
 
     protected function configure(): void
     {
         // ...
         $this
-            // the command help shown when running the command with the "--help" option
-            ->setHelp(<<<HELP
-            Command runs modified docker-compose on your repository if your repository has a 
-            docker-compose.yml file.
-
-            HELP)
-        ;
-        $this
-            // configure an argument
-            // ...
+            ->setHidden(true)
         ;
     }
 
     /**
-     *
+     * When the node is relaunched after sleeping through assumed changes
+     * Install this command in the crontab as:
+     * @reboot /opt/protocol/protocol node:update
+     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Docker Compose');
-
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
-        }
-
-        $localdir = Git::getGitLocalFolder();
-
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
-            $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
-            return Command::SUCCESS;
-        }
-
-        $command = $this->getApplication()->find('env:default');
-        $returnCode = $command->run((new ArrayInput([])), $output);
-
-        $command = "cd $localdir && docker-compose up -d";
-        $response = Shell::passthru($command);
-
         return Command::SUCCESS;
     }
 

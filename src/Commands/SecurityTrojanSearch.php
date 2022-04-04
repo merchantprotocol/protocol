@@ -53,6 +53,7 @@ Class SecurityTrojanSearch extends Command {
     {
         // ...
         $this
+            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
             We're searching for anything that can run commands on our webserver from a browser or other remote program. The more indicators a file gives that it's using these illegal functions the higher it's trojan rating.

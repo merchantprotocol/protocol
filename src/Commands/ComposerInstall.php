@@ -40,7 +40,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 Class ComposerInstall extends Command {
 
@@ -92,7 +93,7 @@ Class ComposerInstall extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
 
         if (!file_exists("{$localdir}/composer.json")) {
             $output->writeln(' - Skipping composer install, there is no composer.json in the project');
