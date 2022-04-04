@@ -56,9 +56,11 @@ This command generates the key using default params, sets the permissions, adds 
 
 3. You're now free to run `protocol start` from inside the local repo. (a) This command will update the local repo to match the remote. (b) place the current local repo into slave mode. (c) pull down the latest docker image. (d) run docker-compose rebuild in the local dir.
 
-At this point your node should be fully operational.
+    At this point your node should be fully operational.
 
-The alias of this command is `protocol restart <local>`. Which should also be run anytime the server is rebooted. You can do that by installing the command into your crontab. `@reboot protocol restart <local>`
+4. Recovering your repo when it reboots. `protocol restart <local>` should be run anytime the server is rebooted. This command can be run from any location, making it ideal to run from a cron job. You can do that by installing the command into your crontab. `@reboot protocol restart <local>`
+
+4. When you're ready to boot down the server you can do so by running `protocol stop` from within the repo.
 
 ## ./protocol list
 
