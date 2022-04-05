@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
 Class ProtocolStop extends Command {
 
@@ -93,9 +94,13 @@ Class ProtocolStop extends Command {
         $command = $this->getApplication()->find('git:slave:stop');
         $returnCode = $command->run($arrInput, $output);
 
-        // run update
-        $command = $this->getApplication()->find('config:slave:stop');
-        $returnCode = $command->run($arrInput, $output);
+        if (Json::read('configuration.remote', false)) {
+            $command = $this->getApplication()->find('config:slave:stop');
+            $returnCode = $command->run($arrInput, $output);
+
+            $command = $this->getApplication()->find('config:unlink');
+            $returnCode = $command->run($arrInput, $output);
+        }
 
         // run update
         $command = $this->getApplication()->find('docker:compose:down');

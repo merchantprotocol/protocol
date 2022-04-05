@@ -138,6 +138,7 @@ Class ConfigSlave extends Command {
             $nodaemon = true;
         }
         $daemon = !$nodaemon;
+        $realpath = realpath($configrepo);
 
         // trigger the daemon or run it yourself
         if ($daemon) {
@@ -145,10 +146,10 @@ Class ConfigSlave extends Command {
         } else {
             $output->writeln(" - This command will run in the foreground every $increment seconds until you kill it.");
         }
-        $output->writeln(" - If any changes are made to $remoteurl we'll update $configrepo".PHP_EOL);
+        $output->writeln(" - If any changes are made to $remoteurl we'll update $realpath".PHP_EOL);
 
         // execute command
-        $command = SCRIPT_DIR."git-repo-watcher -d $configrepo -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
+        $command = SCRIPT_DIR."git-repo-watcher -d $realpath -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
             Json::write('configuration.slave.branch', $branch);

@@ -54,4 +54,70 @@ Class Dir {
         }
         return $path;
     }
+
+    /**
+     * Undocumented function
+     *
+     * @param [type] $dir
+     * @return void
+     */
+    public static function dirToArray( $dir, $ignored = [] )
+    {
+        $result = [];
+        $cdir = scandir($dir);
+        foreach ($cdir as $key => $value)
+        {
+            if (!in_array($value,array(".", "..")))
+            {
+                if (is_dir($dir.DIRECTORY_SEPARATOR.$value))
+                {
+                    if (!in_array($value, $ignored)) {
+                        self::subdirToArray($dir.DIRECTORY_SEPARATOR.$value, $result, $dir, $ignored = []);
+                    }
+                }
+                else
+                {
+                    if (!in_array($value, $ignored)) {
+                        $result[] = $value;
+                    }
+                }
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * Append the subdir
+     *
+     * @param [type] $dir
+     * @param array $result
+     * @return void
+     */
+    public static function subdirToArray( $dir, &$result = [], $webroot = '', $ignored = [] )
+    {
+        $cdir = scandir($dir);
+        $path = str_replace($webroot.DIRECTORY_SEPARATOR, '' , $dir);
+        foreach ($cdir as $key => $value)
+        {
+            if (!in_array($value,array(".", "..")))
+            {
+                if (is_dir($dir.DIRECTORY_SEPARATOR.$value))
+                {
+                    if (!in_array($value, $ignored)) {
+                        self::subdirToArray($dir.DIRECTORY_SEPARATOR.$value, $result, $webroot, $ignored);
+                    }
+                }
+                else
+                {
+                    if (!in_array($value, $ignored)) {
+                        $result[] = $path.DIRECTORY_SEPARATOR.$value;
+                    }
+                }
+            }
+        }
+        
+        return $result;
+    }
+
 }

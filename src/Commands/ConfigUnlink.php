@@ -37,40 +37,31 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
-Class ComposerInstall extends Command {
+Class ConfigUnlink extends Command {
 
-    use LockableTrait;
-
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'composer:install';
-    protected static $defaultDescription = 'Run the composer install command';
+    protected static $defaultName = 'config:unlink';
+    protected static $defaultDescription = 'Remove symlinks for the configurations in the application dir';
 
     protected function configure(): void
     {
         // ...
         $this
-            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Uses the composer.phar (Composer version 2.2.9 2022-03-15 22:13:37) which is a part of
-            this package. There's no need to install composer on your server when using this project.
-
-            1. If the project contains a composer.json file
-            2. The following modified `composer install` command will be run:
-
-            composer.phar install --working-dir=/path-to-repo/ --ignore-platform-reqs
+            This command will remove the symlinks for the configuration files in the application directory.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
             // ...
         ;
     }
@@ -83,20 +74,36 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Composer Install');
-
-        $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
-
-        if (!file_exists("{$localdir}/composer.json")) {
-            $output->writeln(' - Skipping composer install, there is no composer.json in the project');
+        // make sure we're in the application repo
+        $repo_dir = Git::getGitLocalFolder();
+        if (!$repo_dir) {
+            $output->writeln("<error>This command must be run in the application repo.</error>");
+            return Command::SUCCESS;
+        }
+        // make sure the config repo is initialized
+        $configrepo = Json::read('configuration.local', false);
+        if (!$configrepo) {
+            $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
 
-        Shell::passthru("chmod +x ".SCRIPT_DIR."composer.phar");
-        $command = SCRIPT_DIR."composer.phar install --working-dir=$localdir --ignore-platform-reqs";
-        $response = Shell::passthru($command);
+        $ignored = ['.gitignore', 'README.md', '.git'];
+        $configfiles = Dir::dirToArray($configrepo, $ignored);
+        $configfiles2 = JsonLock::read('configuration.symlinks', []);
+        foreach($configfiles + $configfiles2 as $file) {
 
+            $fullpath = $configrepo.DIRECTORY_SEPARATOR.$file;
+            $destination = $repo_dir.$file;
+            if (is_link($destination)) {
+                $command = "rm -f $destination";
+                Shell::run($command);
+            }
+        }
+        JsonLock::write('configuration.symlinks', []);
+        JsonLock::write('configuration.active', false);
+        JsonLock::save();
+
+        $output->writeln("<info>Done removing symlinks</info>");
         return Command::SUCCESS;
     }
 

@@ -53,6 +53,21 @@ Class JsonLock extends Json
 			return unlink($file);
 		}
 	}
+	
+	/**
+	 * Constructor.
+	 * 
+	 * @param string $file
+	 */
+	function __construct( $file )
+	{
+		$this->configfile = $file;
+		if (!is_file($file)) {
+			$file = WORKING_DIR.'protocol.json';
+		}
+		$raw = file_get_contents($file);
+		$this->data = json_decode($raw, true);
+	}
 
 	/**
 	 * Get Instance

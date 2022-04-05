@@ -51,7 +51,8 @@ Class Json extends Config
 	 */
 	public static function write( $property, $value = null ) {
 		//initializing
-		$self = self::getInstance();
+		$class = get_called_class();
+		$self = $class::getInstance();
 		$self->_set(array($property => $value), $self->data);
 		return $self;
 	}
@@ -86,7 +87,8 @@ Class Json extends Config
 	 */
 	public static function save()
 	{
-		$self = self::getInstance();
+		$class = get_called_class();
+		$self = $class::getInstance();
         $self->put();
 	}
 
@@ -101,7 +103,8 @@ Class Json extends Config
 		if (!$file) {
 			$file = WORKING_DIR.'protocol.lock';
 		}
-		$self = self::getInstance();
+		$class = get_called_class();
+		$self = $class::getInstance();
         $self->put( $file );
     }
 	

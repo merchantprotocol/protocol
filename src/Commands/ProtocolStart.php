@@ -40,6 +40,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
@@ -63,6 +64,7 @@ Class ProtocolStart extends Command {
         ;
         $this
             // configure an argument
+            ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
             // ...
         ;
     }
@@ -88,8 +90,17 @@ Class ProtocolStart extends Command {
             return Command::SUCCESS;
         }
 
+        // get the correct environment
+        $environment = $input->getArgument('environment') ?: Config::read('env', false);
+        if (!$environment) {
+            $question = new Question('What is the current env we need to configure protocol for globally? This must be set:', 'localhost');
+            $environment = $helper->ask($input, $output, $question);
+            Config::write('env', $environment);
+        }
+
         $localdir = Git::getGitLocalFolder();
         $arrInput = (new ArrayInput([]));
+        $arrInput1 = (new ArrayInput(['environment' => $environment]));
 
         // run update
         $command = $this->getApplication()->find('git:pull');
@@ -99,9 +110,20 @@ Class ProtocolStart extends Command {
         $command = $this->getApplication()->find('git:slave');
         $returnCode = $command->run($arrInput, $output);
 
+        if (Json::read('configuration.remote', false)) {
+            $command = $this->getApplication()->find('config:init');
+            $returnCode = $command->run($arrInput1, $output);
+
+            $command = $this->getApplication()->find('config:slave');
+            $returnCode = $command->run($arrInput, $output);
+
+            $command = $this->getApplication()->find('config:link');
+            $returnCode = $command->run($arrInput, $output);
+        }
+
         // Update docker image
-        $command = $this->getApplication()->find('docker:pull');
-        $returnCode = $command->run($arrInput, $output);
+        // $command = $this->getApplication()->find('docker:pull');
+        // $returnCode = $command->run($arrInput, $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');

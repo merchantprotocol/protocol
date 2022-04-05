@@ -37,40 +37,31 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
-Class ComposerInstall extends Command {
+Class ConfigLink extends Command {
 
-    use LockableTrait;
-
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'composer:install';
-    protected static $defaultDescription = 'Run the composer install command';
+    protected static $defaultName = 'config:link';
+    protected static $defaultDescription = 'Create symlinks for the configurations into the application dir';
 
     protected function configure(): void
     {
         // ...
         $this
-            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Uses the composer.phar (Composer version 2.2.9 2022-03-15 22:13:37) which is a part of
-            this package. There's no need to install composer on your server when using this project.
-
-            1. If the project contains a composer.json file
-            2. The following modified `composer install` command will be run:
-
-            composer.phar install --working-dir=/path-to-repo/ --ignore-platform-reqs
+            This command will create symlinks for the configuration files into the application directory.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
             // ...
         ;
     }
@@ -83,20 +74,40 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Composer Install');
-
-        $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
-
-        if (!file_exists("{$localdir}/composer.json")) {
-            $output->writeln(' - Skipping composer install, there is no composer.json in the project');
+        // make sure we're in the application repo
+        $repo_dir = Git::getGitLocalFolder();
+        if (!$repo_dir) {
+            $output->writeln("<error>This command must be run in the application repo.</error>");
+            return Command::SUCCESS;
+        }
+        // make sure the config repo is initialized
+        $configrepo = Json::read('configuration.local', false);
+        if (!$configrepo) {
+            $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
 
-        Shell::passthru("chmod +x ".SCRIPT_DIR."composer.phar");
-        $command = SCRIPT_DIR."composer.phar install --working-dir=$localdir --ignore-platform-reqs";
-        $response = Shell::passthru($command);
+        $ignored = ['.gitignore', 'README.md', '.git'];
+        $configfiles = Dir::dirToArray($configrepo, $ignored);
+        foreach($configfiles as $file) {
 
+            $fullpath = $configrepo.DIRECTORY_SEPARATOR.$file;
+            $destination = $repo_dir.$file;
+
+            $destdir = dirname($destination);
+            if (!is_dir($destdir)) {
+                Shell::run("mkdir -p $destdir");
+            }
+            $command = "ln -s $fullpath $destination";
+            Shell::run($command);
+        }
+        JsonLock::write('configuration.symlinks', $configfiles);
+
+        $environment = Config::read('env', false);
+        JsonLock::write('configuration.active', $environment);
+        JsonLock::save();
+
+        $output->writeln("<info>Done creating symlinks</info>");
         return Command::SUCCESS;
     }
 

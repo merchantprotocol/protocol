@@ -98,7 +98,7 @@ Class ConfigInit extends Command {
         // create the folder if it doesn't exist
         $foldername = basename($localdir).'-config';
         $basedir = dirname($localdir).DIRECTORY_SEPARATOR;
-        $configrepo = Json::read('configuration.local', $basedir.$foldername.DIRECTORY_SEPARATOR);
+        $configrepo = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR);
 
         if (!is_dir($configrepo)) {
             Shell::run("mkdir -p $configrepo");
@@ -116,14 +116,16 @@ Class ConfigInit extends Command {
 
         // clone down the repo if it has a remote
         if ($preExistingRemoteUrl) {
-            $arrInput = (new ArrayInput([
-                'remote' => $preExistingRemoteUrl,
-                'localdir' => $configrepo
-            ]));
+            if (!is_dir($basedir.$foldername.DIRECTORY_SEPARATOR.'.git')) {
+                $arrInput = (new ArrayInput([
+                    'remote' => $preExistingRemoteUrl,
+                    'localdir' => $basedir.$foldername
+                ]));
 
-            // run update
-            $command = $this->getApplication()->find('git:clone');
-            $returnCode = $command->run($arrInput, $output);
+                // run update
+                $command = $this->getApplication()->find('git:clone');
+                $returnCode = $command->run($arrInput, $output);
+            }
 
             Shell::run("git -C $configrepo fetch --all");
         }
@@ -136,7 +138,7 @@ Class ConfigInit extends Command {
             Shell::run("git -C $configrepo config core.fileMode false");
 
             $output->writeln("<info>The config repo is setup at $configrepo</info>");
-            Json::write('configuration.local', $configrepo);
+            Json::write('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername);
         }
 
         // create new branch

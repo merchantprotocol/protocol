@@ -11,14 +11,6 @@ default_hooks_file="$script_dir""/git-repo-watcher-hooks"
 gitcd="$(dirname $script_dir)""/protocol"
 working_dir="$(pwd)";
 
-# Check is Lock File exists, if not create it and set trap on exit
-lockfile="$working_dir/protocol.lock"
-if { set -C; 2>/dev/null >$lockfile; }; then
-    trap "rm -f $lockfile" EXIT
-else
-    exit
-fi
-
 print_usage() {
     echo ""
     echo "NAME"
