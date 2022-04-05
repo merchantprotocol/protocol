@@ -34,21 +34,22 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
+use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
-use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
-Class ProtocolStop extends Command {
+Class ConfigSlaveStop extends Command {
 
     use LockableTrait;
 
-    protected static $defaultName = 'stop';
-    protected static $defaultDescription = 'Stops running slave modes';
+    protected static $defaultName = 'config:slave:stop';
+    protected static $defaultDescription = 'Stops the config repo slave mode when its running';
 
     protected function configure(): void
     {
@@ -56,7 +57,6 @@ Class ProtocolStop extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Stops slave mode from running
 
             HELP)
         ;
@@ -67,39 +67,30 @@ Class ProtocolStop extends Command {
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
      * 
+     *
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Shutting Down The Node');
+        Git::checkInitializedRepo( $output );
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
+        // Check to see if the PID is still running, fail if it is
+        $pid = JsonLock::read('configuration.slave.pid');
+        $running = Shell::isRunning( $pid );
+        if (!$pid || !$running) {
+            $output->writeln("Slave mode is not running on the config repo");
+            JsonLock::delete();
             return Command::SUCCESS;
         }
 
-        $arrInput = new ArrayInput([]);
+        $command = "kill $pid";
+        Shell::passthru($command);
+        JsonLock::delete();
 
-        // run update
-        $command = $this->getApplication()->find('git:slave:stop');
-        $returnCode = $command->run($arrInput, $output);
-
-        // run update
-        $command = $this->getApplication()->find('config:slave:stop');
-        $returnCode = $command->run($arrInput, $output);
-
-        // run update
-        $command = $this->getApplication()->find('docker:compose:down');
-        $returnCode = $command->run($arrInput, $output);
+        $output->writeln("Slave mode stopped on the config repo");
 
         return Command::SUCCESS;
     }
