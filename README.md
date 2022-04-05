@@ -96,8 +96,8 @@ Available commands:
  key
   key:generate            Generate an openssl key
  repo
-  repo:slave              Continuous deployment keeps the local repo updated with the remote changes
-  repo:slave:stop         Stops the slave mode when its running
+  git:slave              Continuous deployment keeps the local repo updated with the remote changes
+  git:slave:stop         Stops the slave mode when its running
 
 ```
 

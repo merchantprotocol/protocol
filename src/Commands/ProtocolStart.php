@@ -96,7 +96,7 @@ Class ProtocolStart extends Command {
         $returnCode = $command->run($arrInput, $output);
 
         // run repo slave
-        $command = $this->getApplication()->find('repo:slave');
+        $command = $this->getApplication()->find('git:slave');
         $returnCode = $command->run($arrInput, $output);
 
         // Update docker image

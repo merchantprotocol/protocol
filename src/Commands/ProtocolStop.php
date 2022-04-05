@@ -90,7 +90,7 @@ Class ProtocolStop extends Command {
         $arrInput = new ArrayInput([]);
 
         // run update
-        $command = $this->getApplication()->find('repo:slave:stop');
+        $command = $this->getApplication()->find('git:slave:stop');
         $returnCode = $command->run($arrInput, $output);
 
         // run update

@@ -46,11 +46,11 @@ use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
-Class RepoSlave extends Command {
+Class GitSlave extends Command {
 
     use LockableTrait;
 
-    protected static $defaultName = 'repo:slave';
+    protected static $defaultName = 'git:slave';
     protected static $defaultDescription = 'Continuous deployment keeps the local repo updated with the remote changes';
 
     protected function configure(): void

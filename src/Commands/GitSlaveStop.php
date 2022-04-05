@@ -44,11 +44,11 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
-Class RepoSlaveStop extends Command {
+Class GitSlaveStop extends Command {
 
     use LockableTrait;
 
-    protected static $defaultName = 'repo:slave:stop';
+    protected static $defaultName = 'git:slave:stop';
     protected static $defaultDescription = 'Stops the slave mode when its running';
 
     protected function configure(): void
