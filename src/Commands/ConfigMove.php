@@ -89,17 +89,28 @@ Class ConfigMove extends Command {
         $fullpath = WORKING_DIR.$path;
         $destination = rtrim($configrepo, '/').DIRECTORY_SEPARATOR.$path;
 
-        if (file_exists($fullpath)) {
-            Git::switchBranch( $environment, $configrepo );
-
-            Shell::run("cp -R $fullpath $destination");
-            Shell::run("git -C $configrepo add -A");
-            Shell::run("git -C $configrepo commit -m '$path'");
-
-            Shell::passthru("git -C $configrepo push $origin $environment");
+        if (!file_exists($fullpath)) {
+            $output->writeln("<error>File does not exist $fullpath</error>");
+            return Command::SUCCESS;
         }
 
-        $output->writeln("<info>File has been moved to $destination</info>");
+        Git::switchBranch( $environment, $configrepo );
+
+        Shell::passthru("cp -R $fullpath $destination");
+        if (!file_exists($destination)) {
+            $output->writeln("<error>Unable to determine if file was copied. Cancelling ($destination)</error>");
+            return Command::SUCCESS;
+        }
+
+        // commit and push the config repo
+        Shell::run("git -C $configrepo add -A");
+        Shell::run("git -C $configrepo commit -m '$path'");
+        Shell::passthru("git -C $configrepo push $origin $environment");
+
+        // add file to gitignore
+        Git::addIgnore( $path, $configrepo );
+
+        $output->writeln("<info>File has been moved to $destination. It's safe to remove the file from the application repo now</info>");
         return Command::SUCCESS;
     }
 

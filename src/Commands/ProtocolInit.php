@@ -98,10 +98,7 @@ Class ProtocolInit extends Command {
         Json::save();
 
         // add the protocol.lock file to gitignore
-        $command = "echo '".<<<FILE
-        protocol.lock
-        FILE."' >> .gitignore";
-        Shell::run($command);
+        Git::addIgnore( 'protocol.lock', $repo_dir );
 
         return Command::SUCCESS;
     }

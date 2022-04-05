@@ -35,6 +35,25 @@ namespace Gitcd\Helpers;
 Class Git 
 {
     /**
+     * Add an entry to the gitignore file
+     *
+     * @param [type] $file
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function addIgnore( $file, $repo_dir = false )
+    {
+        $ignorepath = rtrim($repo_dir, '/').DIRECTORY_SEPARATOR.'.gitignore';
+
+        // @todo make sure the entry doesn't already exist
+        $command = "echo '".<<<FILE
+        $file
+        FILE."' >> $ignorepath";
+
+        Shell::run($command);
+    }
+
+    /**
      * Return the first name of the remote 
      *
      * @param boolean $repo_dir
