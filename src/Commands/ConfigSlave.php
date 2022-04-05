@@ -152,16 +152,16 @@ Class ConfigSlave extends Command {
         $command = SCRIPT_DIR."git-repo-watcher -d $realpath -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
-            Json::write('configuration.slave.branch', $branch);
-            Json::write('configuration.slave.remote', $remoteurl);
-            Json::write('configuration.slave.remotename', $remoteName);
-            Json::write('configuration.slave.local', $repo_dir);
-            Json::write('configuration.slave.increment', $increment);
+            JsonLock::write('configuration.slave.branch', $branch);
+            JsonLock::write('configuration.slave.remote', $remoteurl);
+            JsonLock::write('configuration.slave.remotename', $remoteName);
+            JsonLock::write('configuration.slave.local', $realpath);
+            JsonLock::write('configuration.slave.increment', $increment);
 
             $pid = Shell::background($command);
-            Json::write('configuration.slave.pid', $pid);
+            JsonLock::write('configuration.slave.pid', $pid);
             sleep(1);
-            Json::lock();
+            Json::save();
 
             return Command::SUCCESS;
         }

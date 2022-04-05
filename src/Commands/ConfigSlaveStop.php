@@ -81,14 +81,12 @@ Class ConfigSlaveStop extends Command {
         $pid = JsonLock::read('configuration.slave.pid');
         $running = Shell::isRunning( $pid );
         if (!$pid || !$running) {
-            $output->writeln("Slave mode is not running on the config repo");
-            JsonLock::delete();
+            $output->writeln("Slave mode is not running on the config repo ($pid)");
             return Command::SUCCESS;
         }
 
         $command = "kill $pid";
         Shell::passthru($command);
-        JsonLock::delete();
 
         $output->writeln("Slave mode stopped on the config repo");
 

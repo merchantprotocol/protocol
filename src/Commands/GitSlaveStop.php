@@ -82,13 +82,11 @@ Class GitSlaveStop extends Command {
         $running = Shell::isRunning( $pid );
         if (!$pid || !$running) {
             $output->writeln("Slave mode is not running");
-            JsonLock::delete();
             return Command::SUCCESS;
         }
 
         $command = "kill $pid";
         Shell::passthru($command);
-        JsonLock::delete();
 
         $output->writeln("Slave mode stopped");
 

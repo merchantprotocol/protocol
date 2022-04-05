@@ -98,32 +98,37 @@ Class ProtocolStart extends Command {
             Config::write('env', $environment);
         }
 
+        $devEnvs = ['localhost', 'local', 'dev', 'development'];
         $localdir = Git::getGitLocalFolder();
         $arrInput = (new ArrayInput([]));
         $arrInput1 = (new ArrayInput(['environment' => $environment]));
 
-        // run update
-        $command = $this->getApplication()->find('git:pull');
-        $returnCode = $command->run($arrInput, $output);
+        if (!in_array($environment, $devEnvs)) {
+            // run update
+            $command = $this->getApplication()->find('git:pull');
+            $returnCode = $command->run($arrInput, $output);
 
-        // run repo slave
-        $command = $this->getApplication()->find('git:slave');
-        $returnCode = $command->run($arrInput, $output);
+            // run repo slave
+            $command = $this->getApplication()->find('git:slave');
+            $returnCode = $command->run($arrInput, $output);
+        }
 
         if (Json::read('configuration.remote', false)) {
             $command = $this->getApplication()->find('config:init');
             $returnCode = $command->run($arrInput1, $output);
 
-            $command = $this->getApplication()->find('config:slave');
-            $returnCode = $command->run($arrInput, $output);
+            if (!in_array($environment, $devEnvs)) {
+                $command = $this->getApplication()->find('config:slave');
+                $returnCode = $command->run($arrInput, $output);
+            }
 
             $command = $this->getApplication()->find('config:link');
             $returnCode = $command->run($arrInput, $output);
         }
 
         // Update docker image
-        // $command = $this->getApplication()->find('docker:pull');
-        // $returnCode = $command->run($arrInput, $output);
+        $command = $this->getApplication()->find('docker:pull');
+        $returnCode = $command->run($arrInput, $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');
