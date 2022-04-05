@@ -77,12 +77,10 @@ Class ConfigEnv extends Command {
         $helper = $this->getHelper('question');
 
         $environment = $input->getArgument('environment', false);
-        if (!$environment) {
-            $question = new Question('What is the current env we need to configure protocol for globally? This must be set:', 'localhost');
-            $environment = $helper->ask($input, $output, $question);
+        if ($environment) {
+            Config::write('env', $environment);
         }
-        Config::write('env', $environment);
-
+        $environment = Config::read('env');
         $output->writeln("<info>Environment set to $environment</info>");
         return Command::SUCCESS;
     }
