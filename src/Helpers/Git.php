@@ -66,6 +66,42 @@ Class Git
     }
 
     /**
+     * Create a new branch and switch to it
+     *
+     * @param [type] $branch
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function createBranch( $branch, $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = " -C $repo_dir ";
+        }
+
+        $command = "git $repo_dir checkout -b $branch";
+        $branchstring = Shell::run( $command );
+    }
+
+    /**
+     * return an array of branches
+     *
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function branches( $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = " -C $repo_dir ";
+        }
+        $command = "git $repo_dir branch";
+        $branchstring = Shell::run( $command );
+        $branchstring = str_replace('*','', $branchstring);
+        $branches = explode(PHP_EOL, $branchstring);
+        $branches = array_map('trim', $branches);
+        return $branches;
+    }
+
+    /**
      * Return the branch name
      *
      * @param boolean $repo_dir
