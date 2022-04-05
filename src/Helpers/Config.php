@@ -45,16 +45,60 @@ Class Config {
      */
     public static function read( $property = null, $default = null )
     {
-        $configfile = CONFIG_DIR.'config.php';
-
-        $global = UtilConfig::getInstance();
+        // update the default
+        $global = self::getGlobal();
         $default = $global->get( $property, $default );
 
+        // override the default
+        $configfile = CONFIG_DIR.'config.php';
         if (file_exists($configfile))
         {
-            $config = UtilConfig::getInstance( $configfile );
+            $config = self::getConfig();
             $default = $config->get( $property, $default );
         }
         return $default;
+    }
+
+    /**
+     * Write the value to the local config.php file
+     *
+     * @param [type] $property
+     * @param [type] $value
+     * @return void
+     */
+    public static function write( $property = null, $value = null )
+    {
+        if (is_null($property)) {
+            return false;
+        }
+        $config = Config::getConfig( CONFIG_DIR.'config.php' );
+        $config->set($property, $value);
+        $config->put();
+    }
+
+    /**
+     * Return the config.php instance
+     *
+     * @return void
+     */
+    public static function getConfig()
+    {
+        $configfile = CONFIG_DIR.'config.php';
+        if (!file_exists($configfile)) {
+            @touch($configfile);
+        }
+        $config = UtilConfig::getInstance( $configfile );
+        return $config;
+    }
+
+    /**
+     * Return the config.php instance
+     *
+     * @return void
+     */
+    public static function getGlobal()
+    {
+        $config = UtilConfig::getInstance();
+        return $config;
     }
 }

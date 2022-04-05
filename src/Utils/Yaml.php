@@ -43,35 +43,6 @@ use Symfony\Component\Yaml\Yaml as SymfonyYaml;
 Class Yaml extends Config
 {
 	/**
-	 * Read a property
-	 *
-	 * @param string $property
-	 * @param any $default
-	 */
-	public static function read( $property = null, $default = null ) 
-	{
-		//initializing
-		$self = self::getInstance();
-		return $self->get( $property, $default );
-	}
-	
-	/**
-	 * Write a value
-	 * 
-	 * Method will set a value and create the tree if it does not exist
-	 *
-	 * @param string $property
-	 * @param any $value
-	 */
-	public static function write( $property, $value = null ) {
-		//initializing
-		$self = self::getInstance();
-		$self->_set(array($property => $value), $self->data);
-		return $self;
-	}
-	
-
-	/**
 	 * file_put_contents
 	 * 
 	 * Method will create a configuration file
@@ -79,10 +50,7 @@ Class Yaml extends Config
 	 * @param unknown_type $file
 	 */
 	function put( $file = null ) {
-		
-		if (is_null($file)) {
-			return false;
-		}
+		$file = $this->configfile;
 		
 		if (file_exists($file)) {
 			if (fileperms($file) !== 33279) {
@@ -129,11 +97,8 @@ Class Yaml extends Config
 	 */
 	function __construct( $file )
 	{
-		$data = [];
-		if (is_file($file)) {
-        	$data = SymfonyYaml::parseFile($file);
-		}
-	    $this->set( null, $data );
+		$this->configfile = $file;
+		$this->data = SymfonyYaml::parseFile($this->configfile);
 	}
 
 	/**
@@ -148,16 +113,6 @@ Class Yaml extends Config
 		if (!$file) {
 			$file = WORKING_DIR.'docker-compose.yml';
 		}
-
-		//create the class if it does not exist
-		if (empty(self::$instances[$file]))
-		{
-			//creating the instance
-			$config = new Yaml( $file );
-			self::$instances[$file] = $config;
-		}
-		
-		//return an instance of this instantiation
-		return self::$instances[$file];
+		return parent::getInstance( $file );
 	}
 }

@@ -42,49 +42,6 @@ use Gitcd\Utils\Config;
 Class JsonLock extends Json
 {
 	/**
-	 * Read a property
-	 *
-	 * @param string $property
-	 * @param any $default
-	 */
-	public static function read( $property = null, $default = null ) 
-	{
-		//initializing
-		$self = self::getInstance();
-		return $self->get( $property, $default );
-	}
-	
-	/**
-	 * Write a value
-	 * 
-	 * Method will set a value and create the tree if it does not exist
-	 *
-	 * @param string $property
-	 * @param any $value
-	 */
-	public static function write( $property, $value = null ) {
-		//initializing
-		$self = self::getInstance();
-		$self->_set(array($property => $value), $self->data);
-		return $self;
-	}
-	
-	/**
-	 * Constructor.
-	 * 
-	 * @param string $file
-	 */
-	function __construct( $file )
-	{
-		$raw = [];
-		if (is_file($file)) {
-        	$raw = file_get_contents($file);
-		}
-        $data = json_decode($raw, true);
-	    $this->set( null, $data );
-	}
-
-	/**
 	 * Delete it
 	 *
 	 * @return void
@@ -106,19 +63,7 @@ Class JsonLock extends Json
 	 */
 	public static function getInstance( $file = false )
 	{
-		if (!$file) {
-			$file = WORKING_DIR.'protocol.lock';
-		}
-
-		//create the class if it does not exist
-		if (empty(self::$instances[$file]))
-		{
-			//creating the instance
-			$config = new Json( $file );
-			self::$instances[$file] = $config;
-		}
-		
-		//return an instance of this instantiation
-		return self::$instances[$file];
+		$file = WORKING_DIR.'protocol.lock';
+		return parent::getInstance( $file );
 	}
 }

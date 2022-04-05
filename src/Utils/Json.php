@@ -40,20 +40,7 @@ use Gitcd\Utils\Config;
  * Manages the complete xml configuration system via an api
  */
 Class Json extends Config
-{
-	/**
-	 * Read a property
-	 *
-	 * @param string $property
-	 * @param any $default
-	 */
-	public static function read( $property = null, $default = null ) 
-	{
-		//initializing
-		$self = self::getInstance();
-		return $self->get( $property, $default );
-	}
-	
+{	
 	/**
 	 * Write a value
 	 * 
@@ -68,7 +55,6 @@ Class Json extends Config
 		$self->_set(array($property => $value), $self->data);
 		return $self;
 	}
-	
 
 	/**
 	 * file_put_contents
@@ -77,10 +63,9 @@ Class Json extends Config
 	 *
 	 * @param unknown_type $file
 	 */
-	function put( $file = null ) {
-		
-		if (is_null($file)) {
-			return false;
+	function put( $file = false ) {
+		if (!$file) {
+			$file = $this->configfile;
 		}
 		
 		if (file_exists($file)) {
@@ -101,9 +86,8 @@ Class Json extends Config
 	 */
 	public static function save()
 	{
-		$file = WORKING_DIR.'protocol.json';
 		$self = self::getInstance();
-        $self->put( $file );
+        $self->put();
 	}
 
     /**
@@ -128,12 +112,9 @@ Class Json extends Config
 	 */
 	function __construct( $file )
 	{
-		$data = [];
-		if (is_file($file)) {
-        	$raw = file_get_contents($file);
-       	 	$data = json_decode($raw, true);
-		}
-	    $this->set( null, $data );
+		$this->configfile = $file;
+		$raw = file_get_contents($this->configfile);
+		$this->data = json_decode($raw, true);
 	}
 
 	/**
@@ -148,16 +129,6 @@ Class Json extends Config
 		if (!$file) {
 			$file = WORKING_DIR.'protocol.json';
 		}
-
-		//create the class if it does not exist
-		if (empty(self::$instances[$file]))
-		{
-			//creating the instance
-			$config = new Json( $file );
-			self::$instances[$file] = $config;
-		}
-		
-		//return an instance of this instantiation
-		return self::$instances[$file];
+		return parent::getInstance( $file );
 	}
 }

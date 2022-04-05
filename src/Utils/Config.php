@@ -40,6 +40,13 @@ namespace Gitcd\Utils;
 Class Config 
 {
 	/**
+	 * The config file to read and write from
+	 *
+	 * @var [type]
+	 */
+	public $configfile;
+
+	/**
 	 * Complex Data Array
 	 * 
 	 * Holds the entire configuration set in a protected array so that 
@@ -64,7 +71,8 @@ Class Config
 	public static function read( $property = null, $default = null ) 
 	{
 		//initializing
-		$self = self::getInstance();
+		$class = get_called_class();
+		$self = $class::getInstance();
 		return $self->get( $property, $default );
 	}
 	
@@ -106,7 +114,8 @@ Class Config
 	 */
 	public static function write( $property, $value = null ) {
 		//initializing
-		$self = self::getInstance();
+		$class = get_called_class();
+		$self = $class::getInstance();
 		$self->_set(array($property => $value), $self->data);
 		return $self;
 	}
@@ -118,8 +127,8 @@ Class Config
 	 *
 	 * @param unknown_type $block
 	 */
-	function set( $path, $block ) {
-		$this->_set( array($path => $this->parse_args($block, $this->get($path))), $this->data );
+	function set( $path, $value ) {
+		$this->_set([$path => $value], $this->data);
 		return $this;
 	}
 	
@@ -133,8 +142,9 @@ Class Config
 	{
 		$separator = '.'; // set this to any string that won't occur in your keys
 		foreach ($data as $name => $value) {
+
 			if (strpos($name, $separator) === false && !$name) {
-				$array = $value;
+				$array = $value; 
 			} elseif (strpos($name, $separator) === false) {
 				// If the array doesn't contain a special separator character, just set the key/value pair. 
 				// If $value is an array, you will of course set nested key/value pairs just fine.
@@ -171,10 +181,9 @@ Class Config
 	 *
 	 * @param unknown_type $file
 	 */
-	function put( $file = null ) {
-		
-		if (is_null($file)) {
-			return false;
+	function put( $file = false ) {
+		if (!$file) {
+			$file = $this->configfile;
 		}
 		
 		if (file_exists($file)) {
@@ -195,7 +204,12 @@ Class Config
 	 */
 	function __construct( $file )
 	{
-	    $this->set( null, require $file );
+		$this->configfile = $file;
+		$data = require $this->configfile;
+		if (!is_array($data)) {
+			$data = [];
+		}
+		$this->data = $data;
 	}
 	
 	/**
@@ -215,7 +229,8 @@ Class Config
 		if (empty(self::$instances[$file]))
 		{
 			//creating the instance
-			$config = new Config( $file );
+			$class = get_called_class();
+			$config = new $class( $file );
 			self::$instances[$file] = $config;
 		}
 		
