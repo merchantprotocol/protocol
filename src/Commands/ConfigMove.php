@@ -76,6 +76,13 @@ Class ConfigMove extends Command {
     {
         $path = $input->getArgument('path', false);
 
+        // make sure we're in the application repo
+        $repo_dir = Git::getGitLocalFolder();
+        if (!$repo_dir) {
+            $output->writeln("<error>This command must be run in the application repo.</error>");
+            return Command::SUCCESS;
+        }
+
         $configrepo = Json::read('configuration.local', false);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
@@ -108,7 +115,7 @@ Class ConfigMove extends Command {
         Shell::passthru("git -C $configrepo push $origin $environment");
 
         // add file to gitignore
-        Git::addIgnore( $path, $configrepo );
+        Git::addIgnore( $path, $repo_dir );
 
         $output->writeln("<info>File has been moved to $destination. It's safe to remove the file from the application repo now</info>");
         return Command::SUCCESS;

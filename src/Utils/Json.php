@@ -113,8 +113,11 @@ Class Json extends Config
 	function __construct( $file )
 	{
 		$this->configfile = $file;
-		$raw = file_get_contents($this->configfile);
-		$this->data = json_decode($raw, true);
+		$this->data = [];
+		if (is_file($this->configfile)) {
+			$raw = file_get_contents($this->configfile);
+			$this->data = json_decode($raw, true);
+		}
 	}
 
 	/**
