@@ -83,6 +83,23 @@ Class Git
     }
 
     /**
+     * Switch to branch
+     *
+     * @param [type] $branch
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function switchBranch( $branch, $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = " -C $repo_dir ";
+        }
+
+        $command = "git $repo_dir checkout $branch";
+        $branchstring = Shell::run( $command );
+    }
+
+    /**
      * return an array of branches
      *
      * @param boolean $repo_dir

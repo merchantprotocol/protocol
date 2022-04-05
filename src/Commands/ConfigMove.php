@@ -34,47 +34,34 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
-Class GitClone extends Command {
+Class ConfigMove extends Command {
 
-    use LockableTrait;
-
-    // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'git:clone';
-    protected static $defaultDescription = 'Clone from remote repo';
+    protected static $defaultName = 'config:mv';
+    protected static $defaultDescription = 'Move a current file into the configurations repo and remove it from the current repo.';
 
     protected function configure(): void
     {
         // ...
         $this
-            ->setHidden(true)
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command was intended to clone down an application repository from a remote source
-            to a local directory.
-
-            After cloning the repo it will run composer:install from this project and init your repo
-            submodules recursively.
-
-            Finally this command will tell your repo to ignore file permissions, and to not ask for edits when
-            running git commands.
-
-            After you run this command you can expect to have your local repo setup and ready to be used.
+            Sending a relative file path to this command will move the file from the application repo into the configurations repo. Additionally the file will be added to the application repos .gitignore file and the config repo will be pushed to it's remote.
 
             HELP)
         ;
         $this
             // configure an argument
-            ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addArgument('path', InputArgument::REQUIRED, 'The path to the file you want to move')
             // ...
         ;
     }
@@ -87,35 +74,32 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Cloning a Git Repo');
+        $path = $input->getArgument('path', false);
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
+        $configrepo = Json::read('configuration.local', false);
+        if (!$configrepo) {
+            $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
 
-        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $environment = Config::read('env', false);
+        $origin = Git::remoteName( $configrepo );
+        $branch = Git::branch( $configrepo );
 
-        $command = "git clone $remoteurl $localdir";
-        $response = Shell::passthru($command);
+        $fullpath = WORKING_DIR.$path;
+        $destination = rtrim($configrepo, '/').DIRECTORY_SEPARATOR.$path;
 
-        // run composer install
-        $command = $this->getApplication()->find('composer:install');
-        $returnCode = $command->run((new ArrayInput([
-            'localdir' => $localdir
-        ])), $output);
+        if (file_exists($fullpath)) {
+            Git::switchBranch( $environment, $configrepo );
 
-        // update the submodules
-        $command = "git -C $localdir submodule update --init --recursive";
-        $response = Shell::passthru($command);
+            Shell::run("cp -R $fullpath $destination");
+            Shell::run("git -C $configrepo add -A");
+            Shell::run("git -C $configrepo commit -m '$path'");
 
-        $response = Shell::run("git -C $localdir config core.mergeoptions --no-edit");
-        $response = Shell::run("git -C $localdir config core.fileMode false");
+            Shell::passthru("git -C $configrepo push $origin $environment");
+        }
 
+        $output->writeln("<info>File has been moved to $destination</info>");
         return Command::SUCCESS;
     }
 

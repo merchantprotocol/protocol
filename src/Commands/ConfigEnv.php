@@ -74,8 +74,6 @@ Class ConfigEnv extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $helper = $this->getHelper('question');
-
         $environment = $input->getArgument('environment', false);
         if ($environment) {
             Config::write('env', $environment);
