@@ -125,10 +125,10 @@ Class ConfigInit extends Command {
 
         // init repo
         if (!is_dir($configrepo.'.git')) {
-            Shell::run("git -C $configrepo init");
+            if (!Git::initialize( $configrepo )) {
+                $output->writeln("<error>Unable to create a git repo in ($configrepo)</error>");
+            }
             Shell::run("git -C $configrepo branch -m $environment");
-            Shell::run("git -C $configrepo config core.mergeoptions --no-edit");
-            Shell::run("git -C $configrepo config core.fileMode false");
 
             $output->writeln("<info>The config repo is setup at $configrepo</info>");
             Json::write('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername);
