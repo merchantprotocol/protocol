@@ -46,7 +46,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         if (!$origin) {
             $origin = self::remoteName( $repo_dir );
@@ -68,7 +68,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         Shell::run("git $repo_dir add -A");
         Shell::run("git $repo_dir commit -m '$message'");
@@ -83,7 +83,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         $response = Shell::run("git $repo_dir status");
         if (strpos($response, 'Untracked files')===false) {
@@ -120,7 +120,7 @@ Class Git
     public static function remoteName( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         $remotes = Shell::run("git $repo_dir remote");
         $remotearray = explode(PHP_EOL, $remotes);
@@ -136,7 +136,7 @@ Class Git
     public static function RemoteUrl( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         $command = "git $repo_dir config --get remote.origin.url";
         return Shell::run( $command );
@@ -152,7 +152,7 @@ Class Git
     public static function createBranch( $branch, $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
 
         $command = "git $repo_dir checkout -b $branch";
@@ -169,7 +169,7 @@ Class Git
     public static function switchBranch( $branch, $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
 
         $command = "git $repo_dir checkout $branch";
@@ -185,7 +185,7 @@ Class Git
     public static function branches( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         $command = "git $repo_dir branch";
         $branchstring = Shell::run( $command );
@@ -204,10 +204,24 @@ Class Git
     public static function branch( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C $repo_dir ";
+            $repo_dir = " -C '$repo_dir' ";
         }
         $command = "git $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'";
         return Shell::run( $command );
+    }
+
+    /**
+     * truncates the dir but leaves the .git and optionally leaves the specified array of files
+     *
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function truncateBranch( $repo_dir = false, $ignore = [] )
+    {
+        if ($repo_dir) {
+            $repo_dir = " -C '$repo_dir' ";
+        }
+
     }
 
     /**
@@ -255,6 +269,33 @@ Class Git
         $command = 'git log';
         $response = Shell::run($command);
         if (strpos($response, 'not a git repository') !== false) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Initializes a new repo 
+     *
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function initialize( $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = Dir::realpath( $repo_dir );
+            if (!$repo_dir) {
+                return false;
+            }
+            $cRepoDir = " -C '$repo_dir' ";
+        }
+        if (!is_dir($repo_dir)) {
+            Shell::run("mkdir -p '$repo_dir'");
+        }
+        Shell::run("git $cRepoDir init");
+        Shell::run("git $cRepoDir config core.mergeoptions --no-edit");
+        Shell::run("git $cRepoDir config core.fileMode false");
+        if (!is_dir($repo_dir.'.git')) {
             return false;
         }
         return true;
