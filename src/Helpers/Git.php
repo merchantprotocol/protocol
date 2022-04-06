@@ -46,7 +46,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C '$repo_dir' ";
+            $cRepoDir = " -C '$repo_dir' ";
         }
         if (!$origin) {
             $origin = self::remoteName( $repo_dir );
@@ -54,7 +54,7 @@ Class Git
         if (!$branch) {
             $branch = self::branch( $repo_dir );
         }
-        Shell::passthru("git $repo_dir push $origin $branch");
+        Shell::passthru("git $cRepoDir push $origin $branch");
     }
 
     /**
@@ -219,9 +219,33 @@ Class Git
     public static function truncateBranch( $repo_dir = false, $ignore = [] )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $cRepoDir = " -C '$repo_dir' ";
         }
+        $files = Dir::dirToArray( $repo_dir, $ignore );
+        $files = array_reverse($files); // directories are handled last
+        foreach ($files as $file) {
+            $absoluteFilePath = Dir::realpath($repo_dir).$file;
+            if (is_file($absoluteFilePath)) {
+                Shell::run("rm -f '$absoluteFilePath'");
+            } elseif (is_dir($file)) {
+                rmdir($file); // safe dir removal requires dir to be empty
+            }
+        }
+        return true;
+    }
 
+    /**
+     * Fetch all for the given repo
+     *
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function fetch( $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $cRepoDir = " -C '$repo_dir' ";
+        }
+        Shell::run("git $cRepoDir fetch --all");
     }
 
     /**

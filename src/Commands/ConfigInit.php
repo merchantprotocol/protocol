@@ -101,7 +101,7 @@ Class ConfigInit extends Command {
         $configrepo = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR);
 
         if (!is_dir($configrepo)) {
-            Shell::run("mkdir -p $configrepo");
+            Shell::run("mkdir -p '$configrepo'");
         }
 
         // get the remote url
@@ -120,7 +120,7 @@ Class ConfigInit extends Command {
                 $returnCode = $command->run($arrInput, $output);
             }
 
-            Shell::run("git -C $configrepo fetch --all");
+            Git::fetch( $configrepo );
         }
 
         // init repo

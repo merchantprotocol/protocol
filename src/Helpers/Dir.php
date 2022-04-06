@@ -83,7 +83,9 @@ Class Dir
         } else {
             $path = $default;
         }
-        $path = rtrim($path, '/').DIRECTORY_SEPARATOR;
+        if (is_dir($path)) {
+            $path = rtrim($path, '/').DIRECTORY_SEPARATOR;
+        }
         return $path;
     }
 
@@ -104,6 +106,7 @@ Class Dir
                 if (is_dir($dir.DIRECTORY_SEPARATOR.$value))
                 {
                     if (!in_array($value, $ignored)) {
+                        $result[] = $dir.DIRECTORY_SEPARATOR.$value;
                         self::subdirToArray($dir.DIRECTORY_SEPARATOR.$value, $result, $dir, $ignored = []);
                     }
                 }
