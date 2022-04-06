@@ -138,7 +138,7 @@ Class ConfigSlave extends Command {
             $nodaemon = true;
         }
         $daemon = !$nodaemon;
-        $realpath = realpath($configrepo);
+        $realpath = Dir::realpath($configrepo);
 
         // trigger the daemon or run it yourself
         if ($daemon) {

@@ -35,6 +35,64 @@ namespace Gitcd\Helpers;
 Class Git 
 {
     /**
+     * push the changes
+     *
+     * @param boolean $repo_dir
+     * @param boolean $origin
+     * @param boolean $branch
+     * @return void
+     */
+    public static function push( $repo_dir = false, $origin = false, $branch = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = Dir::realpath($repo_dir);
+            $repo_dir = " -C $repo_dir ";
+        }
+        if (!$origin) {
+            $origin = self::remoteName( $repo_dir );
+        }
+        if (!$branch) {
+            $branch = self::branch( $repo_dir );
+        }
+        Shell::passthru("git $repo_dir push $origin $branch");
+    }
+
+    /**
+     * Adds and commits all untracked changes to a repo. Requires a message
+     *
+     * @param [type] $message
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function commit( $message, $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = Dir::realpath($repo_dir);
+            $repo_dir = " -C $repo_dir ";
+        }
+        Shell::run("git $repo_dir add -A");
+        Shell::run("git $repo_dir commit -m '$message'");
+    }
+
+    /**
+     * Untracked changes
+     *
+     * @return boolean
+     */
+    public static function hasUntrackedFiles( $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = Dir::realpath($repo_dir);
+            $repo_dir = " -C $repo_dir ";
+        }
+        $response = Shell::run("git $repo_dir status");
+        if (strpos($response, 'Untracked files')===false) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Add an entry to the gitignore file
      *
      * @param [type] $file

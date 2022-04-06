@@ -94,7 +94,7 @@ Class ConfigCopy extends Command {
         $branch = Git::branch( $configrepo );
 
         $fullpath = WORKING_DIR.$path;
-        $configwebroot = rtrim(realpath($configrepo), '/').DIRECTORY_SEPARATOR;
+        $configwebroot = Dir::realpath($configrepo);
         $destination_dir = dirname($configwebroot.$path);
         $destination = $configwebroot.$path;
 

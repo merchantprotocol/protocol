@@ -93,8 +93,6 @@ Class ConfigMove extends Command {
         }
 
         $environment = Config::read('env', false);
-        $origin = Git::remoteName( $configrepo );
-        $branch = Git::branch( $configrepo );
 
         $fullpath = WORKING_DIR.$path;
         if (is_link( $fullpath )) {
@@ -102,7 +100,7 @@ Class ConfigMove extends Command {
             return Command::SUCCESS;
         }
 
-        $configwebroot = rtrim(realpath($configrepo), '/').DIRECTORY_SEPARATOR;
+        $configwebroot = Dir::realpath($configrepo);
         $destination_dir = dirname($configwebroot.$path);
         $destination = $configwebroot.$path;
 
@@ -124,9 +122,8 @@ Class ConfigMove extends Command {
 
         // commit and push the config repo
         $output->writeln("<info>Pushing to remote config repo</info>");
-        Shell::run("git -C $configrepo add -A");
-        Shell::run("git -C $configrepo commit -m '$path'");
-        Shell::passthru("git -C $configrepo push $origin $environment");
+        Git::commit( $path, $configrepo );
+        Git::push( $configrepo );
         $output->writeln(""); // blank line
 
         // add file to gitignore

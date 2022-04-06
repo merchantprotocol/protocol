@@ -88,7 +88,7 @@ Class ComposerInstall extends Command {
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
 
-        if (!file_exists("{$localdir}/composer.json")) {
+        if (!file_exists("{$localdir}composer.json")) {
             $output->writeln(' - Skipping composer install, there is no composer.json in the project');
             return Command::SUCCESS;
         }

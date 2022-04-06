@@ -83,6 +83,7 @@ Class Dir
         } else {
             $path = $default;
         }
+        $path = rtrim($path, '/').DIRECTORY_SEPARATOR;
         return $path;
     }
 
