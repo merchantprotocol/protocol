@@ -48,10 +48,10 @@ use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
-Class ConfigNew extends Command {
+Class ConfigSwitch extends Command {
 
-    protected static $defaultName = 'config:new';
-    protected static $defaultDescription = 'Create a new environment';
+    protected static $defaultName = 'config:switch';
+    protected static $defaultDescription = 'Switch to a different environment';
 
     protected function configure(): void
     {
@@ -59,15 +59,13 @@ Class ConfigNew extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command will help you create a new configuration environment. Run the command and it will interactively walk you through your options to create a new environment for you.
-
-            What is the environment name?
-            Do you want to copy an existing environment or create a new one?
+            Switch the current application to a different config environment.
 
             HELP)
         ;
         $this
             // configure an argument
+            ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
             // ...
         ;
     }
@@ -105,78 +103,32 @@ Class ConfigNew extends Command {
             }
         }
 
-        // get the correct environment
-        $question = new Question('New Environment Name: ');
-        $newName = $helper->ask($input, $output, $question);
+        $newName = $input->getArgument('environment', false);
+        if (!$newName) {
+            // get the correct environment
+            Git::fetch( $configrepo );
+            $branches = Git::branches( $configrepo );
+            $branchStr = implode(', ',$branches);
+            $currentBranch = Git::branch( $configrepo );
 
-        $slug = Str::slugify( $newName );
-        if ($newName != $slug) {
-            $question = new ConfirmationQuestion("We cleaned the name you gave us, is this okay? ($slug) [Y/n]");
-            if (!$helper->ask($input, $output, $question)) {
+            $output->writeln("<info>You have the following environments: $branchStr</info>");
+            $question = new Question("You are on env ($currentBranch), switch to what environment?: ");
+            $newName = $helper->ask($input, $output, $question);
+
+            if (!in_array($newName, $branches)) {
+                $output->writeln("<info>That's not a valid branch, quitting...</info>");
                 return Command::SUCCESS;
             }
         }
-        $newName = $slug;
-
-        $activeEnv = JsonLock::read('configuration.active', false);
-        if ($activeEnv) {
-            $output->writeln("<info>The $activeEnv environment is currently active. We need to disable this env to proceed.</info>");
-            $question = new ConfirmationQuestion("Can we unlink the currently active env? [Y/n]");
-            if (!$helper->ask($input, $output, $question)) {
-                return Command::SUCCESS;
-            }
-
-            $command = $this->getApplication()->find('config:unlink');
-            $returnCode = $command->run((new ArrayInput([])), $output);
-        }
-
-        // do they want to copy another env?
-        $question = new ConfirmationQuestion("To copy an existing environment enter (y), or to start fresh enter (n): ");
 
         $command = $this->getApplication()->find('config:unlink');
         $returnCode = $command->run((new ArrayInput([])), $output);
 
-        // copy another branch
-        if ($helper->ask($input, $output, $question)) {
-            // pull the latest branches
-            Git::fetch( $configrepo );
-            $branches = Git::branches( $configrepo );
-            $branchStr = implode(', ',$branches);
-
-            $output->writeln("<info>You have the following environments: $branchStr</info>");
-            $question = new Question('Type the name of the environment you\'d like to copy: ');
-            $copyEnv = $helper->ask($input, $output, $question);
-            if (!in_array($copyEnv, $branches)) {
-                $question = new Question('We couldn\'t understand that. Type the name of the environment you\'d like to copy: ');
-                $copyEnv = $helper->ask($input, $output, $question);
-            }
-
-            // Copy a branch
-            Git::switchBranch( $copyEnv, $configrepo );
-            Git::createBranch( $newName, $configrepo );
-
-        // create a clean branch
-        } else {
-            Git::createBranch( $newName, $configrepo );
-
-            $ignored = ['.gitignore', 'README.md', '.git'];
-            Git::truncateBranch( $configrepo, $ignored );
-        }
+        Git::switchBranch( $newName, $configrepo );
+        $output->writeln("<info>Switched! Your new environment is $newName.</info>");
 
         $command = $this->getApplication()->find('config:link');
         $returnCode = $command->run((new ArrayInput([])), $output);
-        
-        $output->writeln("<info>Your new config environment has been created</info>");
-        Shell::passthru("ls -la $configrepo");
-        $output->writeln("");
-
-        $question = new ConfirmationQuestion("Do you want to save this new environment to remote? [Y/n]");
-        if ($helper->ask($input, $output, $question)) {
-            Git::push( $configrepo );
-            $output->writeln("");
-        }
-        
-        $output->writeln("<info>Done! Your new environment has been created.</info>");
         return Command::SUCCESS;
     }
 
