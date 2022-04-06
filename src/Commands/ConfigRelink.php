@@ -66,9 +66,6 @@ Class ConfigRelink extends Command {
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
      * 
      * @param InputInterface $input
      * @param OutputInterface $output
