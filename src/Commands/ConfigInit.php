@@ -103,16 +103,9 @@ Class ConfigInit extends Command {
         if (!is_dir($configrepo)) {
             Shell::run("mkdir -p $configrepo");
         }
+
         // get the remote url
         $preExistingRemoteUrl = Json::read('configuration.remote', false);
-        $configRemoteUrl = $preExistingRemoteUrl ?: Git::RemoteUrl( $configrepo );
-        if (!$configRemoteUrl) {
-            $question = new Question('What is the remote git url for your config repo?', false);
-            $configRemoteUrl = $helper->ask($input, $output, $question);
-
-            Shell::passthru("git -C $configrepo remote add origin $configRemoteUrl");
-            Json::write('configuration.remote', $configRemoteUrl);
-        }
 
         // clone down the repo if it has a remote
         if ($preExistingRemoteUrl) {
@@ -139,6 +132,16 @@ Class ConfigInit extends Command {
 
             $output->writeln("<info>The config repo is setup at $configrepo</info>");
             Json::write('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername);
+        }
+
+        // If there is no remote url, then get it and set it
+        $configRemoteUrl = $preExistingRemoteUrl ?: Git::RemoteUrl( $configrepo );
+        if (!$configRemoteUrl) {
+            $question = new Question('What is the remote git url for your config repo?', false);
+            $configRemoteUrl = $helper->ask($input, $output, $question);
+
+            Shell::passthru("git -C $configrepo remote add origin $configRemoteUrl");
+            Json::write('configuration.remote', $configRemoteUrl);
         }
 
         // create new branch
