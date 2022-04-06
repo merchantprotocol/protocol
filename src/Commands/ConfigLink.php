@@ -91,10 +91,12 @@ Class ConfigLink extends Command {
         $configfiles = Dir::dirToArray($configrepo, $ignored);
         foreach($configfiles as $file) {
 
+            if (is_dir($file)) continue;
+
             $relpath = Dir::dirDepthToElipsis( dirname($file) ).$configrepo.DIRECTORY_SEPARATOR.$file;
             $destination = $repo_dir.$file;
-            $destdir = dirname($destination);
 
+            $destdir = dirname($destination);
             if (!is_dir($destdir)) {
                 Shell::run("mkdir -p '$destdir'");
             }
