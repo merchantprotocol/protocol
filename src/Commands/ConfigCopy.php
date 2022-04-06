@@ -43,12 +43,11 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
-Class ConfigMove extends Command {
+Class ConfigCopy extends Command {
 
-    protected static $defaultName = 'config:mv';
-    protected static $defaultDescription = 'Move a current file into the configurations repo and create a symlink back.';
+    protected static $defaultName = 'config:cp';
+    protected static $defaultDescription = 'Copy a current file into the configurations repo and remove it from the current repo.';
 
     protected function configure(): void
     {
@@ -56,9 +55,7 @@ Class ConfigMove extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Sending a relative file path to this command will move the file from the application repo into the configurations repo. Additionally the file will be added to the application repos .gitignore file and the config repo will be pushed to it's remote.
-
-            A symlink will be added back into the application repo.
+            Sending a relative file path to this command will copy the file from the application repo into the configurations repo. Additionally the file will be added to the application repos .gitignore file and the config repo will be pushed to it's remote.
 
             HELP)
         ;
@@ -97,11 +94,6 @@ Class ConfigMove extends Command {
         $branch = Git::branch( $configrepo );
 
         $fullpath = WORKING_DIR.$path;
-        if (is_link( $fullpath )) {
-            $output->writeln("<error>Cannot move a symlink.</error>");
-            return Command::SUCCESS;
-        }
-
         $configwebroot = rtrim(realpath($configrepo), '/').DIRECTORY_SEPARATOR;
         $destination_dir = dirname($configwebroot.$path);
         $destination = $configwebroot.$path;
@@ -113,44 +105,24 @@ Class ConfigMove extends Command {
 
         Git::switchBranch( $environment, $configrepo );
         if (!is_dir($destination_dir)) {
-            Shell::passthru("mkdir -p '$destination_dir'");
+            Shell::passthru("mkdir -p $destination_dir");
         }
 
-        Shell::passthru("cp -R '$fullpath' '$destination'");
+        Shell::passthru("cp -R $fullpath $destination");
         if (!file_exists($destination)) {
             $output->writeln("<error>Unable to determine if file was copied. Cancelling ($destination)</error>");
             return Command::SUCCESS;
         }
 
         // commit and push the config repo
-        $output->writeln("<info>Pushing to remote config repo</info>");
         Shell::run("git -C $configrepo add -A");
         Shell::run("git -C $configrepo commit -m '$path'");
         Shell::passthru("git -C $configrepo push $origin $environment");
-        $output->writeln(""); // blank line
 
         // add file to gitignore
         Git::addIgnore( $path, $repo_dir );
 
-        // make sure we're in a location within the repo
-        if (strpos($fullpath, WORKING_DIR) !== false && is_file($fullpath)) {
-            Shell::passthru("rm -f '$fullpath'");
-            Shell::run("git -C $repo_dir rm --cached '$fullpath'");
-
-            // create a reverse symlink
-            $command = "ln -s $destination $fullpath";
-            Shell::run($command);
-
-            // remember the symlink for removal later
-            $configfiles = JsonLock::read('configuration.symlinks', []);
-            if (!in_array($path, $configfiles)) {
-                $configfiles[] = $path;
-                JsonLock::write('configuration.symlinks', $configfiles);
-                JsonLock::save();
-            }
-        }
-
-        $output->writeln("<info>File has been moved to $destination.</info>");
+        $output->writeln("<info>File has been moved to $destination. It's safe to remove the file from the application repo now</info>");
         return Command::SUCCESS;
     }
 

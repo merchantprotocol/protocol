@@ -34,21 +34,20 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
-use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
-Class ConfigLink extends Command {
+Class ConfigRelink extends Command {
 
-    protected static $defaultName = 'config:link';
-    protected static $defaultDescription = 'Create symlinks for the configurations into the application dir';
+    protected static $defaultName = 'config:refresh';
+    protected static $defaultDescription = 'Clears all links and rebuilds them';
 
     protected function configure(): void
     {
@@ -56,7 +55,7 @@ Class ConfigLink extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            This command will create symlinks for the configuration files into the application directory.
+            Good to do when you've made a change in the configuration repository and you just need to refresh the links.
 
             HELP)
         ;
@@ -67,7 +66,10 @@ Class ConfigLink extends Command {
     }
 
     /**
-     *
+     * When the node is relaunched after sleeping through assumed changes
+     * Install this command in the crontab as:
+     * @reboot /opt/protocol/pipeline node:update
+     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -80,33 +82,24 @@ Class ConfigLink extends Command {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
-        // make sure the config repo is initialized
+
         $configrepo = Json::read('configuration.local', false);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
 
-        $ignored = ['.gitignore', 'README.md', '.git'];
-        $configfiles = Dir::dirToArray($configrepo, $ignored);
-        foreach($configfiles as $file) {
+        $localdir = Git::getGitLocalFolder();
+        $arrInput = (new ArrayInput([]));
 
-            $fullpath = realpath($configrepo).DIRECTORY_SEPARATOR.$file;
-            $destination = realpath($repo_dir).DIRECTORY_SEPARATOR.$file;
-            $destdir = dirname($destination);
-            if (!is_dir($destdir)) {
-                Shell::run("mkdir -p '$destdir'");
-            }
-            $command = "ln -s '$fullpath' '$destination'";
-            Shell::run($command);
-        }
-        JsonLock::write('configuration.symlinks', $configfiles);
+        $command = $this->getApplication()->find('config:unlink');
+        $returnCode = $command->run($arrInput, $output);
 
-        $environment = Config::read('env', false);
-        JsonLock::write('configuration.active', $environment);
-        JsonLock::save();
+        $command = $this->getApplication()->find('config:link');
+        $returnCode = $command->run($arrInput, $output);
 
-        $output->writeln("<info>Done creating symlinks</info>");
+        $output->writeln("<info>Symlinks refreshed</info>");
+
         return Command::SUCCESS;
     }
 
