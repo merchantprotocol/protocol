@@ -47,7 +47,7 @@ use Gitcd\Utils\Json;
 Class ConfigCopy extends Command {
 
     protected static $defaultName = 'config:cp';
-    protected static $defaultDescription = 'Copy a current file into the configurations repo and remove it from the current repo.';
+    protected static $defaultDescription = 'Copy a file into the configurations repo.';
 
     protected function configure(): void
     {

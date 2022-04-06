@@ -47,7 +47,7 @@ use Gitcd\Utils\Json;
 Class ConfigEnv extends Command {
 
     protected static $defaultName = 'config:env';
-    protected static $defaultDescription = 'Set the current environment';
+    protected static $defaultDescription = 'Set the global environment for the server';
 
     protected function configure(): void
     {
@@ -55,7 +55,7 @@ Class ConfigEnv extends Command {
         $this
             // the command help shown when running the command with the "--help" option
             ->setHelp(<<<HELP
-            Initializes the configuration repository for the current application repo.
+            Sets the global environment which affects non-interactive commands.
 
             HELP)
         ;

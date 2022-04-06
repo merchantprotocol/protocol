@@ -48,7 +48,7 @@ use Gitcd\Utils\JsonLock;
 Class ConfigMove extends Command {
 
     protected static $defaultName = 'config:mv';
-    protected static $defaultDescription = 'Move a current file into the configurations repo and create a symlink back.';
+    protected static $defaultDescription = 'Move a file into the config repo, delete it from the app repo and create a symlink back.';
 
     protected function configure(): void
     {

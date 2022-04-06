@@ -2,7 +2,7 @@
 
 PROTOCOL is a command line tool designed to help you keep a highly available application in sync.
 
-## USE CASE
+## USE CASE - CI/CD
 
 You have a PHP application like Laravel that you track in a private git repo. You've decided to use docker running on an EC2 VPS to serve your PHP application. 
 
@@ -22,6 +22,43 @@ I wanted something that was quick to setup, whether I was running a single node 
 My solution was to create a master/slave continuous deployment system. I have always lived by the idea that the MASTER branch should always be production ready. All of our work should be done on feature branches and only merged into master after all tests have passed and manual QA has been done. Therefore having a tool that builds worker nodes and keeps them in sync with the master repo was the ideal solution.
 
 Once installed, any commits made to the master repo will immediately be replicated to the slave node, thanks to PROTOCOL.
+
+## USE CASE - Multiple Configuration Environments
+
+Let's say you have multiple production nodes, multiple staging servers for each of your new feature branches, and every developer has their own development environment on their localhost. Maybe your CI/CD even has it's own testing configurations that are deployed during automated testing.
+
+That's a lot of different configuration environments that could all demand their own configuration setup.
+
+On top of that complexity you might even have multiple configurations files for your docker container, or your nginx configs, or your cron configs, or multiple configurations files for your application.
+
+That could be a lot of different configuration files for each environment.
+
+Like most people you probably don't want to commit your secrets into the application repo itself, specially if you're working on an open source project. You also don't want to be overwriting other peoples configurations and other environments configurations by committing them to the application repository.
+
+### So what's the solution?
+
+This original solution was designed by Github, and we at Merchant Protocol have fully developed the idea.
+
+We've decided to use a git repository so that our configuration files are backed up in case a node goes down, and the only set of configuration files are not stored on the nodes. Having our config files in a git repo also gives us the added benefit of being able to see a history of our configuration changes, allowing us to rollback configurations and attach them to the incremental changes of the application repo.
+
+A git repo also gives us the backbone of managing multiple configuration files and even multiple configuration environments when we introduce branches. This is all compatible with Github, Gitlab, Gitea and any other remote git repo management system you might use.
+
+So our architecture is simple. We use a git repo to house all of our configurations files. The branches are named after each of the different types of environments. Developers can even create and backup their own custom configurations.
+
+We use simple symbolic linking of the application files from the config repo into the application repo.
+
+And `Protocol` manages the entire process for us. Protocol even provides us with the added benefit of `slave mode` which will keep our production environments in sync with a remote repo, or disable slave mode and pin your configuration state to the application commits.
+
+Using `protocol config:init` will create your new configurations directory and initialize it for you. Just create a remote repo on your platform of choice and provide it with the remote url when asked.
+
+You can now use `protocol config:cp` or `protocol config:mv` to move your configurations files into your new config repo. The config files will be stored in .gitignore on your application repo and symlinked from the config repo to the application repo.
+
+`protocol config:save` will commit your changes and push your config repo.
+
+You can easily `protocol config:new` create a new config environment and switch between them with `protocol config:switch`.
+
+
+
 
 ## System Requirements
 
@@ -65,7 +102,7 @@ This command generates the key using default params, sets the permissions, adds 
 ## ./protocol list
 
 ```
-Protocol 0.2.0
+Protocol 0.3.0
 
 Usage:
   command [options] [arguments]
@@ -79,25 +116,42 @@ Options:
   -v|vv|vvv, --verbose  Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
 
 Available commands:
+  exec                    Enters the container
   help                    Display help for a command
   init                    Creates the protocol.json file
   list                    List commands
+  restart                 Used within a crontab to restart a node
   start                   Starts a node so that the repo and docker image stay up to date and are running
   stop                    Stops running slave modes
+ config
+  config:cp               Copy a file into the configurations repo.
+  config:env              Set the global environment for the server
+  config:init             Initialize the configuration repository
+  config:link             Create symlinks for the configurations into the application dir
+  config:mv               Move a file into the config repo, delete it from the app repo and create a symlink back.
+  config:new              Create a new environment
+  config:refresh          Clears all links and rebuilds them
+  config:save             Saves the current environment to the remote
+  config:slave            Keep the config repo updated with the remote changes
+  config:slave:stop       Stops the config repo slave mode when its running
+  config:switch           Switch to a different environment
+  config:unlink           Remove symlinks for the configurations in the application dir
  docker
   docker:build            Builds the docker image from source
   docker:compose          Run docker compose on the repository to boot up any container
   docker:compose:down     shuts down docker
   docker:compose:rebuild  Pulls down a new copy and rebuilds the image
+  docker:logs             Show the docker container logs
   docker:pull             Docker pull and update an image
   docker:push             Pushes the docker image to the remote repository
  git
   git:pull                Pull from github and update the local repo
+  git:slave               Continuous deployment keeps the local repo updated with the remote changes
+  git:slave:stop          Stops the slave mode when its running
  key
   key:generate            Generate an openssl key
- repo
-  git:slave              Continuous deployment keeps the local repo updated with the remote changes
-  git:slave:stop         Stops the slave mode when its running
+ nginx
+  nginx:logs              Show the nginx logs within the container
 
 ```
 
