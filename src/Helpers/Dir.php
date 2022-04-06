@@ -32,7 +32,38 @@
  */
 namespace Gitcd\Helpers;
 
-Class Dir {
+Class Dir 
+{
+    /**
+     * Creates an elipsis backup
+     *
+     * @param [type] $path
+     * @return void
+     */
+    public static function dirDepthToElipsis( $path )
+    {
+        $count = self::countDirDepth( $path );
+        return str_repeat('..'.DIRECTORY_SEPARATOR, $count);
+    }
+
+    /**
+     * Counts the relative or absolute path depth
+     *
+     * @param [string] $path
+     * @return int
+     */
+    public static function countDirDepth( $path )
+    {
+        if (is_file($path)) {
+            $path = dirname($path);
+        }
+        $cleanpath = rtrim(ltrim(ltrim($path, '.'), '/'), '/');
+        if (!$cleanpath) {
+            return 0;
+        }
+        $dirArray = explode(DIRECTORY_SEPARATOR, $cleanpath);
+        return count( $dirArray );
+    }
 
     /**
      * Returns the real path whether it exists or not

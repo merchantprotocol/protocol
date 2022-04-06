@@ -91,14 +91,15 @@ Class ConfigLink extends Command {
         $configfiles = Dir::dirToArray($configrepo, $ignored);
         foreach($configfiles as $file) {
 
-            $fullpath = realpath($configrepo).DIRECTORY_SEPARATOR.$file;
-            $destination = realpath($repo_dir).DIRECTORY_SEPARATOR.$file;
+            $relpath = Dir::dirDepthToElipsis( dirname($file) ).$configrepo.DIRECTORY_SEPARATOR.$file;
+            $destination = $repo_dir.$file;
             $destdir = dirname($destination);
+
             if (!is_dir($destdir)) {
                 Shell::run("mkdir -p '$destdir'");
             }
-            $command = "ln -s '$fullpath' '$destination'";
-            Shell::run($command);
+            $linkcmd = "ln -s '$relpath' '$file'";
+            Shell::run($linkcmd);
         }
         JsonLock::write('configuration.symlinks', $configfiles);
 

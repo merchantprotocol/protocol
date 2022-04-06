@@ -137,17 +137,9 @@ Class ConfigMove extends Command {
             Shell::passthru("rm -f '$fullpath'");
             Shell::run("git -C $repo_dir rm --cached '$fullpath'");
 
-            // create a reverse symlink
-            $command = "ln -s $destination $fullpath";
-            Shell::run($command);
-
-            // remember the symlink for removal later
-            $configfiles = JsonLock::read('configuration.symlinks', []);
-            if (!in_array($path, $configfiles)) {
-                $configfiles[] = $path;
-                JsonLock::write('configuration.symlinks', $configfiles);
-                JsonLock::save();
-            }
+            // refresh symlinks
+            $command = $this->getApplication()->find('config:refresh');
+            $returnCode = $command->run((new ArrayInput([])), $output);
         }
 
         $output->writeln("<info>File has been moved to $destination.</info>");
