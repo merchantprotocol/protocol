@@ -90,6 +90,13 @@ Class GitPull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // command should only have one running instance
+        if (!$this->lock()) {
+            $output->writeln('The command is already running in another process.');
+
+            return Command::SUCCESS;
+        }
+
         $io = new SymfonyStyle($input, $output);
         $io->title('Pulling Git Repo');
 
