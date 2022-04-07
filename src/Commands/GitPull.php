@@ -93,13 +93,6 @@ Class GitPull extends Command {
         $io = new SymfonyStyle($input, $output);
         $io->title('Pulling Git Repo');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
-        }
-
         // the .git directory
         $repo_dir   = $input->getArgument('local') ?: Git::getGitLocalFolder();
         $branch = Git::branch( $repo_dir );

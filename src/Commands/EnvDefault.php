@@ -80,9 +80,6 @@ Class EnvDefault extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Configuring the environment variables');
-
         $PROTOCOL_WEBROOT = Git::getGitLocalFolder();
         if ($PROTOCOL_WEBROOT) putenv("PROTOCOL_WEBROOT={$PROTOCOL_WEBROOT}");
 
@@ -90,7 +87,7 @@ Class EnvDefault extends Command {
         $DOCKER_HOSTNAME = Shell::run("hostname");
         $response = putenv("DOCKER_HOSTNAME={$DOCKER_HOSTNAME}");
 
-
+        $output->writeln("<info>Env variables set</info>");
         return Command::SUCCESS;
     }
 

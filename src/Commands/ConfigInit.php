@@ -151,16 +151,18 @@ Class ConfigInit extends Command {
             $output->writeln("<info>Your new environment branch was created at $configrepo</info>");
         }
 
-        // copy the templated files over
-        $templatedir = TEMPLATES_DIR.'configrepo'.DIRECTORY_SEPARATOR;
-        if (!file_exists($configrepo.'README.md')) {
-            Shell::run("cp -R $templatedir $configrepo");
-            Shell::run("git -C $configrepo add -A");
-            Shell::run("git -C $configrepo commit -m 'initial commit'");
-        }
+        // copy the templated files 
+        if (!$preExistingRemoteUrl) {
+            $templatedir = TEMPLATES_DIR.'configrepo'.DIRECTORY_SEPARATOR;
+            if (!file_exists($configrepo.'README.md')) {
+                Shell::run("cp -R $templatedir $configrepo");
+                Shell::run("git -C $configrepo add -A");
+                Shell::run("git -C $configrepo commit -m 'initial commit'");
+            }
 
-        // connect to the current repo
-        Json::write('configuration.environments', Git::branches( $configrepo ));
+            // connect to the current repo
+            Json::write('configuration.environments', Git::branches( $configrepo ));
+        }
 
         // is this config repo connected?
         if (!$preExistingRemoteUrl) {
