@@ -76,13 +76,6 @@ Class KeyGenerate extends Command {
         $io = new SymfonyStyle($input, $output);
         $io->title('Generating Key Pair');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
-        }
-
         $email = 'worker@ec2.com';
         $HOME = Shell::run('echo $HOME');
         $keyfile = $HOME.'/.ssh/id_ed25519_ContinuousDeliverySystem';
