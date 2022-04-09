@@ -98,7 +98,7 @@ Class SshBanner extends Command {
         $response = Shell::run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak");
         $sshconfig = <<<SETTINGS
 
-        PrintMotd No
+        PrintMotd no
 
         SETTINGS;
         $response = Shell::run("echo '$sshconfig' >> /etc/ssh/sshd_config");
