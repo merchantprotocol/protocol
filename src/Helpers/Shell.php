@@ -35,7 +35,128 @@ namespace Gitcd\Helpers;
 use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
 
-Class Shell {
+Class Shell
+{
+    CONST MAC = 'mac';
+    CONST LINUX = 'linux';
+    CONST CYGWIN = 'cygwin';
+    CONST MINGW = 'mingw';
+
+    /**
+     * Return the process
+     *
+     * @param [type] $process
+     * @param boolean $column
+     * @return boolean
+     */
+    public static function hasProcess( $process, $column = false )
+    {
+        $processes = Self::getProcesses();
+        $has = [];
+        foreach ($processes as $ps) {
+            $string = implode(" ", $ps);
+            if (strpos($string, $process)!==false) {
+                $has[] = $ps;
+            }
+        }
+        return $has;
+    }
+
+    /**
+     * Returns an array of processes
+     *
+     * @param boolean $process
+     * @return boolean
+     */
+    public static function getProcesses()
+    {
+        $dash = '';
+        if (SELF::MAC != self::getOS()) {
+            $dash = '-';
+        }
+        $cmd = <<<CMD
+        ps -exo %mem,%cpu,pid,command | awk '{OORS=ORS; ORS=""; print $1"   "$2"   "$3"   "; ORS=OORS; $1="";$2="";$3=""; print $0; }'
+        CMD;
+
+        $processes = Shell::run($cmd);
+        return self::shellTableToArray($processes);
+    }
+
+    /**
+     * Function that converts shell tables to an array
+     *
+     * @param [type] $blob
+     * @return void
+     */
+    public static function shellTableToArray( $blob )
+    {
+        $processes = explode(PHP_EOL, $blob);
+
+        $keys = array_shift($processes);
+        $keys = preg_split("/\s{2,}/", $keys);
+
+        $psArray = [];
+        foreach ($processes as $ps) {
+            $values = preg_split("/\s{2,}/", $ps);
+            $row = [];
+            foreach ($values as $key => $value) {
+                $row[ $keys[$key] ] = $value;
+            }
+            $psArray[] = $row;
+        }
+        return $psArray;
+    }
+
+    /**
+     * returns the process
+     *
+     * @param boolean $process
+     * @return boolean
+     */
+    public static function getProcess( $process = false )
+    {
+        $filter = "";
+        if ($process) {
+            $filter = "| grep $process";
+        }
+
+        $cmd = "ps aux $filter";
+        $processes = Shell::run($cmd);
+        $processes = explode(PHP_EOL, $processes);
+
+        foreach ($processes as $key => $_ps) {
+            if (strpos($_ps, "0:00.00 grep $process")!==false) {
+                unset($processes[$key]);
+            }
+            if (strpos($_ps, $cmd)!==false) {
+                unset($processes[$key]);
+            }
+        }
+        var_dump($processes);
+
+    }
+
+    /**
+     * determines what operating system we're running
+     *
+     * @return void
+     */
+    public static function getOS()
+    {
+        $uname = Shell::run("uname -a");
+
+        if (strpos($uname, "Linux")!==false) {
+            return SELF::LINUX;
+        } elseif (strpos($uname, "Darwin")!==false) {
+            return SELF::MAC;
+        } elseif (strpos($uname, "CYGWIN")!==false) {
+            return SELF::CYGWIN;
+        } elseif (strpos($uname, "MINGW")!==false) {
+            return SELF::MINGW;
+        }
+
+        return 'unknown';
+    }
 
     /**
      * Provides a passthrough exec option
