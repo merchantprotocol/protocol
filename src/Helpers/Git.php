@@ -35,6 +35,29 @@ namespace Gitcd\Helpers;
 Class Git 
 {
     /**
+     * If you notice your .git folder bloating, this is the cleansing you need
+     *
+     * @param boolean $repo_dir
+     * @return void
+     */
+    public static function clean( $repo_dir = false )
+    {
+        if ($repo_dir) {
+            $repo_dir = Dir::realpath($repo_dir);
+            $cRepoDir = " -C '$repo_dir' ";
+        }
+        $origin = self::remoteName( $repo_dir );
+
+        Shell::passthru(<<<CMD
+        git $cRepoDir remote prune $origin \
+            && git $cRepoDir repack \
+            && git $cRepoDir prune-packed \
+            && git $cRepoDir reflog expire --expire=1.month.ago \
+            && git $cRepoDir gc --aggressive
+        CMD);
+    }
+
+    /**
      * push the changes
      *
      * @param boolean $repo_dir
