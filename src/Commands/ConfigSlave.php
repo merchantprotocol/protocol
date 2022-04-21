@@ -140,16 +140,9 @@ Class ConfigSlave extends Command {
         $daemon = !$nodaemon;
         $realpath = Dir::realpath($configrepo);
 
-        // trigger the daemon or run it yourself
-        if ($daemon) {
-            $output->writeln(" - This command will run in the background every $increment seconds until you kill it.");
-        } else {
-            $output->writeln(" - This command will run in the foreground every $increment seconds until you kill it.");
-        }
-        $output->writeln(" - If any changes are made to $remoteurl we'll update $realpath".PHP_EOL);
-
-        // execute command
+        $output->writeln(" - If any changes are made to <info>$remoteurl</info> we'll update <info>$realpath</info>".PHP_EOL);
         $command = SCRIPT_DIR."git-repo-watcher -d $realpath -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
+
         if ($daemon) {
             // Run the command in the background as a daemon
             JsonLock::write('configuration.slave.branch', $branch);
@@ -161,12 +154,14 @@ Class ConfigSlave extends Command {
             $pid = Shell::background($command);
             JsonLock::write('configuration.slave.pid', $pid);
             sleep(1);
-            Json::save();
+            JsonLock::save();
 
+            $output->writeln(" - This command will run in the <info>background</info> every $increment seconds until you kill it.".PHP_EOL);
             return Command::SUCCESS;
         }
 
         // run the command as a passthru to the user
+        $output->writeln(" - This command will run in the <info>foreground</info> every $increment seconds until you kill it.".PHP_EOL);
         Shell::passthru($command);
         return Command::SUCCESS;
     }
