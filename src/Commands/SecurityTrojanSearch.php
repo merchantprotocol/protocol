@@ -78,8 +78,7 @@ Class SecurityTrojanSearch extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Looking For Possible Trojan Horses');
+        $output->writeln('<comment>Checking for possible trojan horses</comment>');
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
 

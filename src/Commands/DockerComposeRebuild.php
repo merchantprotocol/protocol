@@ -90,8 +90,7 @@ Class DockerComposeRebuild extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Docker Compose Rebuild');
+        $output->writeln('<comment>Docker-compose rebuild</comment>');
 
         $localdir = Git::getGitLocalFolder();
 

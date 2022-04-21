@@ -76,8 +76,7 @@ Class DockerCompose extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Docker Compose');
+        $output->writeln('<comment>Docker-compose up</comment>');
 
         $localdir = Git::getGitLocalFolder();
 

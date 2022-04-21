@@ -78,8 +78,7 @@ Class DockerPull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Pulling Image From Remote');
+        $output->writeln('<comment>Pulling remote docker image</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {

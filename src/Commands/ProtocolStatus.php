@@ -44,6 +44,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
@@ -73,8 +74,6 @@ Class ProtocolStatus extends Command {
 
     /**
      * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
      * 
      * @param InputInterface $input
      * @param OutputInterface $output
@@ -136,6 +135,10 @@ Class ProtocolStatus extends Command {
             )];
         }
 
+        // check to see that the crontab is installed
+        $tableRows[] = ["Crontab Restart Command Installed", (
+            Crontab::hasCrontabRestart( $repo_dir ) ?"<info>YES</info>" :"<comment>NO</comment>"
+        )];
 
         // display the output
         $table = new Table($output);

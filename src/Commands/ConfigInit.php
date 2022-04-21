@@ -76,8 +76,7 @@ Class ConfigInit extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Initializing Configuration Repo');
+        $output->writeln('<comment>Initializing configuration repo</comment>');
         $helper = $this->getHelper('question');
 
         $localdir = Git::getGitLocalFolder();

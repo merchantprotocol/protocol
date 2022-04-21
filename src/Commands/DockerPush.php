@@ -79,8 +79,7 @@ Class DockerPush extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Pushing Image To Remote');
+        $output->writeln('<comment>Pushing docker image to remote</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {

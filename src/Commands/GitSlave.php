@@ -87,8 +87,6 @@ Class GitSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
@@ -96,7 +94,7 @@ Class GitSlave extends Command {
             return Command::SUCCESS;
         }
         Git::checkInitializedRepo( $output );
-        $io->title('Continously Monitoring Repository For Changes');
+        $output->writeln('<comment>Continuously monitoring git repo for remote changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
         $running = Shell::isLockedPIDStillRunning();

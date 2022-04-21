@@ -87,8 +87,6 @@ Class ConfigSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
@@ -110,7 +108,7 @@ Class ConfigSlave extends Command {
             return Command::SUCCESS;
         }
 
-        $io->title('Continously Monitoring Config Repository For Changes');
+        $output->writeln('<comment>Continuously monitoring configuration repo for changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
         $pid = JsonLock::read('configuration.slave.pid');

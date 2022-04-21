@@ -73,8 +73,7 @@ Class KeyGenerate extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Generating Key Pair');
+        $output->writeln('<comment>Generating key pair</comment>');
 
         $email = 'worker@ec2.com';
         $HOME = Shell::run('echo $HOME');

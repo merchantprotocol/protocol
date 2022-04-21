@@ -87,8 +87,7 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Cloning a Git Repo');
+        $output->writeln('<comment>Cloning a git repo</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {

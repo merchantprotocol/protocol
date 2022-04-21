@@ -42,6 +42,8 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
+use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Crontab;
 use Gitcd\Utils\Json;
 
 Class ProtocolStop extends Command {
@@ -78,8 +80,7 @@ Class ProtocolStop extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Shutting Down The Node');
+        $output->writeln('<comment>Stopping this protocol node</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -88,6 +89,7 @@ Class ProtocolStop extends Command {
             return Command::SUCCESS;
         }
 
+        $localdir = Git::getGitLocalFolder();
         $arrInput = new ArrayInput([]);
 
         // run update
@@ -104,6 +106,13 @@ Class ProtocolStop extends Command {
 
         // run update
         $command = $this->getApplication()->find('docker:compose:down');
+        $returnCode = $command->run($arrInput, $output);
+
+        // remove the job from crontab
+        Crontab::removeCrontabRestart( $localdir );
+
+        // end with status
+        $command = $this->getApplication()->find('status');
         $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;

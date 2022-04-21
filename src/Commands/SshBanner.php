@@ -80,8 +80,7 @@ Class SshBanner extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Updating the SSH Banner');
+        $output->writeln('<comment>Updating the ssh banner</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -95,13 +94,13 @@ Class SshBanner extends Command {
         $returnCode = $command->run((new ArrayInput([])), $output);
 
         // Update the sshd_config file to not display the default banner
-        $response = Shell::run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak");
+        $response = Shell::run("sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak");
         $sshconfig = <<<SETTINGS
 
         PrintMotd no
 
         SETTINGS;
-        $response = Shell::run("echo '$sshconfig' >> /etc/ssh/sshd_config");
+        $response = Shell::run("sudo echo '$sshconfig' >> /etc/ssh/sshd_config");
 
         // write the etc/profile to include the new banner
 
@@ -109,20 +108,20 @@ Class SshBanner extends Command {
         if (strpos($banner_file, '/') !== 0) {
             $banner_file = WEBROOT_DIR.$banner_file;
         }
-        $response = Shell::run("cp /etc/profile /etc/profile.bak");
+        $response = Shell::run("sudo cp /etc/profile /etc/profile.bak");
         $etcprofile = <<<SETTINGS
 
         $banner_file
 
         SETTINGS;
         // write the new file
-        $response = Shell::run("echo '$etcprofile' >> /etc/profile");
+        $response = Shell::run("sudo echo '$etcprofile' >> /etc/profile");
 
 
         // empty the default file and lock it so the system cannot override it
-        $response = Shell::run("chattr -i /etc/motd");
-        $response = Shell::run("cat '' > /etc/motd");
-        $response = Shell::run("chattr +i /etc/motd");
+        $response = Shell::run("sudo chattr -i /etc/motd");
+        $response = Shell::run("sudo cat '' > /etc/motd");
+        $response = Shell::run("sudo chattr +i /etc/motd");
 
 
         return Command::SUCCESS;

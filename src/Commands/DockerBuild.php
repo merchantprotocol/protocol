@@ -94,8 +94,7 @@ Class DockerBuild extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Building Docker Image');
+        $output->writeln('<comment>Building docker image</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {

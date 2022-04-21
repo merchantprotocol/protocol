@@ -83,8 +83,7 @@ Class ComposerInstall extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Composer Install');
+        $output->writeln('<comment>Composer install</comment>');
 
         $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
 

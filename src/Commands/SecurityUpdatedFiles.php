@@ -72,8 +72,7 @@ Class SecurityUpdatedFiles extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Looking For Changed Files');
+        $output->writeln('<comment>Looking for changed files</comment>');
 
         $localdir = Dir::realpath(Config::read('localdir', false));
         if ($localdir) {

@@ -43,6 +43,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Crontab;
 use Gitcd\Utils\Json;
 
 Class ProtocolStart extends Command {
@@ -80,8 +81,7 @@ Class ProtocolStart extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Starting Up The Node');
+        $output->writeln('<comment>Starting up the protocol node</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -103,6 +103,7 @@ Class ProtocolStart extends Command {
         $arrInput = (new ArrayInput([]));
         $arrInput1 = (new ArrayInput(['environment' => $environment]));
 
+        // if not a local dev env
         if (!in_array($environment, $devEnvs)) {
             // run update
             $command = $this->getApplication()->find('git:pull');
@@ -126,12 +127,19 @@ Class ProtocolStart extends Command {
             $returnCode = $command->run($arrInput, $output);
         }
 
+        // add crontab restart command
+        Crontab::addCrontabRestart( $localdir );
+
         // Update docker image
         $command = $this->getApplication()->find('docker:pull');
         $returnCode = $command->run($arrInput, $output);
 
         // run docker compose
         $command = $this->getApplication()->find('docker:compose:rebuild');
+        $returnCode = $command->run($arrInput, $output);
+
+        // end with status
+        $command = $this->getApplication()->find('status');
         $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;

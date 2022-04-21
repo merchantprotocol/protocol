@@ -97,8 +97,7 @@ Class GitPull extends Command {
             return Command::SUCCESS;
         }
 
-        $io = new SymfonyStyle($input, $output);
-        $io->title('Pulling Git Repo');
+        $output->writeln('<comment>Pulling a git repo</comment>');
 
         // the .git directory
         $repo_dir   = $input->getArgument('local') ?: Git::getGitLocalFolder();
