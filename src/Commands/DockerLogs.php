@@ -72,7 +72,15 @@ Class DockerLogs extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $name = Json::read('docker.container_name');
+        $name = Json::read('docker.container_name', false);
+        if (!$name) {
+            $names = Docker::getContainerNamesFromDockerComposeFile();
+            if (count($names)==1) {
+                $name = array_pop($names);
+                Json::write('docker.container_name', $name);
+                Json::save();
+            }
+        }
 
         $command = "docker logs --follow $name";
         $response = Shell::passthru($command);
