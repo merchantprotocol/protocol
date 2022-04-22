@@ -40,6 +40,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 
 Class DockerLogs extends Command {
