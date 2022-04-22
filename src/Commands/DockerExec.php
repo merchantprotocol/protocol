@@ -41,6 +41,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 
 Class DockerExec extends Command {
@@ -77,7 +78,15 @@ Class DockerExec extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $cmd = $input->getArgument('cmd') ?: "/bin/bash";
-        $name = Json::read('docker.container_name');
+        $name = Json::read('docker.container_name', false);
+        if (!$name) {
+            $names = Docker::getContainerNamesFromDockerComposeFile();
+            if (count($names)==1) {
+                $name = array_pop($names);
+                Json::write('docker.container_name', $name);
+                Json::save();
+            }
+        }
 
         $command = "docker exec -it $name $cmd";
         $response = Shell::passthru($command);
