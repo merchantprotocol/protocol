@@ -86,21 +86,28 @@ Class ConfigLink extends Command {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
-
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
+        $working_dir = WORKING_DIR;
         $ignored = ['.gitignore', 'README.md', '.git'];
         $configfiles = Dir::dirToArray($configrepo, $ignored);
-        foreach($configfiles as $file) {
 
-            if (is_dir($file)) continue;
+        foreach($configfiles as $sourcepath) 
+        {
+            if (is_dir($sourcepath)) continue;
+            if ($sourcepath=="/Users/jonathonbyrdziak/Sites/merchantprotocol/matomo-identity-resolution-config/.env")continue;
 
-            $relpath = Dir::dirDepthToElipsis( dirname($file) ).$configrepo.DIRECTORY_SEPARATOR.$file;
-            $destination = $repo_dir.$file;
+            $fulllink = str_replace($configrepo, $repo_dir, $sourcepath);
+            $linkdir = dirname($fulllink).DIRECTORY_SEPARATOR;
 
-            $destdir = dirname($destination);
-            if (!is_dir($destdir)) {
-                Shell::run("mkdir -p '$destdir'");
+            $filename = basename($sourcepath);
+            $linkpath = str_replace(dirname($configrepo).DIRECTORY_SEPARATOR, '', $sourcepath);
+            $dirpath = str_replace($filename, '',  $linkpath);
+            $relpath = Dir::dirDepthToElipsis( $dirpath ).$dirpath.$filename;
+
+            if (!is_dir($linkdir)) {
+                Shell::run("mkdir -p '$linkdir'");
             }
-            $linkcmd = "ln -s '$relpath' '$file'";
+            $linkcmd = "cd $linkdir && ln -s '$relpath' '$filename' && cd $working_dir";
             Shell::run($linkcmd);
         }
         JsonLock::write('configuration.symlinks', $configfiles);

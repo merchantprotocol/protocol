@@ -33,6 +33,7 @@
 namespace Gitcd\Utils;
 
 use Gitcd\Utils\Config;
+use Gitcd\Helpers\Git;
 use Symfony\Component\Yaml\Yaml as SymfonyYaml;
 
 /**
@@ -111,7 +112,8 @@ Class Yaml extends Config
 	public static function getInstance( $file = false )
 	{
 		if (!$file) {
-			$file = WORKING_DIR.'docker-compose.yml';
+			$repo_dir = Git::getGitLocalFolder();
+			$file = $repo_dir.'docker-compose.yml';
 		}
 		return parent::getInstance( $file );
 	}

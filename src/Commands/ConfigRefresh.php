@@ -44,7 +44,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 
-Class ConfigRelink extends Command {
+Class ConfigRefresh extends Command {
 
     protected static $defaultName = 'config:refresh';
     protected static $defaultDescription = 'Clears all links and rebuilds them';
@@ -86,7 +86,6 @@ Class ConfigRelink extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Git::getGitLocalFolder();
         $arrInput = (new ArrayInput([]));
 
         $command = $this->getApplication()->find('config:unlink');

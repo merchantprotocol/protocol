@@ -79,6 +79,7 @@ Class ConfigMove extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $path = $input->getArgument('path', false);
+        $output->writeln("<info>Moving file ($path)</info>");
 
         // make sure we're in the application repo
         $repo_dir = Git::getGitLocalFolder();
@@ -92,21 +93,21 @@ Class ConfigMove extends Command {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         $environment = Config::read('env', false);
 
-        $fullpath = WORKING_DIR.$path;
-        if (is_link( $fullpath )) {
+        $currentpath = WORKING_DIR.$path;
+        if (is_link( $currentpath )) {
             $output->writeln("<error>Cannot move a symlink.</error>");
             return Command::SUCCESS;
         }
 
-        $configwebroot = Dir::realpath($configrepo);
-        $destination_dir = dirname($configwebroot.$path);
-        $destination = $configwebroot.$path;
+        $newpath = str_replace($repo_dir, $configrepo, $currentpath);
+        $destination_dir = dirname($newpath);
 
-        if (!file_exists($fullpath)) {
-            $output->writeln("<error>File does not exist $fullpath</error>");
+        if (!file_exists($currentpath)) {
+            $output->writeln("<error>File does not exist $currentpath</error>");
             return Command::SUCCESS;
         }
 
@@ -115,32 +116,26 @@ Class ConfigMove extends Command {
             Shell::passthru("mkdir -p '$destination_dir'");
         }
 
-        Shell::passthru("cp -R '$fullpath' '$destination'");
-        if (!file_exists($destination)) {
-            $output->writeln("<error>Unable to determine if file was copied. Cancelling ($destination)</error>");
+        Shell::passthru("cp -R '$currentpath' '$newpath'");
+        if (!file_exists($newpath)) {
+            $output->writeln("<error>Unable to determine if file was copied. Cancelling ($newpath)</error>");
             return Command::SUCCESS;
         }
-
-        // commit and push the config repo
-        $output->writeln("<info>Pushing to remote config repo</info>");
-        Git::commit( $path, $configrepo );
-        Git::push( $configrepo );
-        $output->writeln(""); // blank line
 
         // add file to gitignore
         Git::addIgnore( $path, $repo_dir );
 
         // make sure we're in a location within the repo
-        if (strpos($fullpath, WORKING_DIR) !== false && is_file($fullpath)) {
-            Shell::passthru("rm -f '$fullpath'");
-            Shell::run("git -C $repo_dir rm --cached '$fullpath'");
+        if (strpos($currentpath, WORKING_DIR) !== false && is_file($currentpath)) {
+            Shell::passthru("rm -f '$currentpath'");
+            Shell::run("git -C $repo_dir rm --cached '$currentpath'");
 
             // refresh symlinks
             $command = $this->getApplication()->find('config:refresh');
             $returnCode = $command->run((new ArrayInput([])), $output);
         }
 
-        $output->writeln("<info>File has been moved to $destination.</info>");
+        $output->writeln("<info>File has been moved to $newpath.</info>");
         return Command::SUCCESS;
     }
 

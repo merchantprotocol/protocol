@@ -92,6 +92,7 @@ Class ConfigSave extends Command {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         Git::commit( 'Saving untracked changes', $configrepo );
         Git::push( $configrepo );

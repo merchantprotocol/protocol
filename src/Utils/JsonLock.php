@@ -33,6 +33,7 @@
 namespace Gitcd\Utils;
 
 use Gitcd\Utils\Config;
+use Gitcd\Helpers\Git;
 
 /**
  * Configurations Class
@@ -63,7 +64,8 @@ Class JsonLock extends Json
 	{
 		$this->configfile = $file;
 		if (!is_file($file)) {
-			$file = WORKING_DIR.'protocol.json';
+			$repo_dir = Git::getGitLocalFolder();
+			$file = $repo_dir.'protocol.json';
 		}
 		$raw = file_get_contents($file);
 		$this->data = json_decode($raw, true);
@@ -78,7 +80,8 @@ Class JsonLock extends Json
 	 */
 	public static function getInstance( $file = false )
 	{
-		$file = WORKING_DIR.'protocol.lock';
+		$repo_dir = Git::getGitLocalFolder();
+		$file = $repo_dir.'protocol.lock';
 		return parent::getInstance( $file );
 	}
 }

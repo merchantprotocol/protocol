@@ -86,16 +86,18 @@ Class ConfigUnlink extends Command {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
-
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
+        $working_dir = WORKING_DIR;
         $ignored = ['.gitignore', 'README.md', '.git'];
         $configfiles = Dir::dirToArray($configrepo, $ignored);
         $configfiles2 = JsonLock::read('configuration.symlinks', []);
-        foreach($configfiles + $configfiles2 as $file) {
 
-            $fullpath = $configrepo.DIRECTORY_SEPARATOR.$file;
-            $destination = $repo_dir.$file;
-            if (is_link($destination)) {
-                $command = "rm -f $destination";
+        foreach($configfiles + $configfiles2 as $sourcepath)
+        {
+            $fulllink = str_replace($configrepo, $repo_dir, $sourcepath);
+
+            if (is_link($fulllink)) {
+                $command = "rm -f $fulllink";
                 Shell::run($command);
             }
         }

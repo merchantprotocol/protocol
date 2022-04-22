@@ -88,18 +88,16 @@ Class ConfigCopy extends Command {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         $environment = Config::read('env', false);
-        $origin = Git::remoteName( $configrepo );
-        $branch = Git::branch( $configrepo );
 
-        $fullpath = WORKING_DIR.$path;
-        $configwebroot = Dir::realpath($configrepo);
-        $destination_dir = dirname($configwebroot.$path);
-        $destination = $configwebroot.$path;
+        $currentpath = WORKING_DIR.$path;
+        $newpath = str_replace($repo_dir, $configrepo, $currentpath);
+        $destination_dir = dirname($newpath);
 
-        if (!file_exists($fullpath)) {
-            $output->writeln("<error>File does not exist $fullpath</error>");
+        if (!file_exists($currentpath)) {
+            $output->writeln("<error>File does not exist $currentpath</error>");
             return Command::SUCCESS;
         }
 
@@ -108,21 +106,16 @@ Class ConfigCopy extends Command {
             Shell::passthru("mkdir -p $destination_dir");
         }
 
-        Shell::passthru("cp -R $fullpath $destination");
-        if (!file_exists($destination)) {
-            $output->writeln("<error>Unable to determine if file was copied. Cancelling ($destination)</error>");
+        Shell::passthru("cp -R $currentpath $newpath");
+        if (!file_exists($newpath)) {
+            $output->writeln("<error>Unable to determine if file was copied. Cancelling ($newpath)</error>");
             return Command::SUCCESS;
         }
-
-        // commit and push the config repo
-        Shell::run("git -C $configrepo add -A");
-        Shell::run("git -C $configrepo commit -m '$path'");
-        Shell::passthru("git -C $configrepo push $origin $environment");
 
         // add file to gitignore
         Git::addIgnore( $path, $repo_dir );
 
-        $output->writeln("<info>File has been moved to $destination. It's safe to remove the file from the application repo now</info>");
+        $output->writeln("<info>File has been moved to $newpath. It's safe to remove the file from the application repo and save the configuration</info>");
         return Command::SUCCESS;
     }
 

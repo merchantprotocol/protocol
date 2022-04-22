@@ -90,7 +90,14 @@ Class ProtocolStatus extends Command {
 
         $repo_dir = Git::getGitLocalFolder();
         $configrepo = Json::read('configuration.local', false);
+        $configrepo = Dir::realpath($repo_dir.$configrepo);
+
         $tableRows = [];
+        $tableRows[] = ["Environment", "<info>".Config::read('env', 'not set')."</info>"];
+
+        $branch = Git::branch($configrepo);
+        $configmatch = Config::read('env', 'not set') == $branch;
+        $tableRows[] = ["Configuration Branch", $configmatch ?"<info>$branch</info>" :"<comment>$branch</comment>"];
 
         // Check to see if the PID is still running, fail if it is
         $pid = JsonLock::read('slave.pid');
@@ -116,8 +123,7 @@ Class ProtocolStatus extends Command {
             $tableRows[] = ["Configuration Slave Mode", "<comment>STOPPED</comment>"];
 
             // do an additional check for dangling processes
-            $realpath = Dir::realpath($configrepo);
-            $processes = Shell::hasProcess("git-repo-watcher -d $realpath");
+            $processes = Shell::hasProcess("git-repo-watcher -d $configrepo");
             if (!empty($processes)) {
                 $pids = array_column($processes, "PID");
                 $pids = implode(",", $pids);

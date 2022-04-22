@@ -33,6 +33,7 @@
 namespace Gitcd\Utils;
 
 use Gitcd\Utils\Config;
+use Gitcd\Helpers\Git;
 
 /**
  * Configurations Class
@@ -133,7 +134,8 @@ Class Json extends Config
 	public static function getInstance( $file = false )
 	{
 		if (!$file) {
-			$file = WORKING_DIR.'protocol.json';
+			$repo_dir = Git::getGitLocalFolder();
+			$file = $repo_dir.'protocol.json';
 		}
 		return parent::getInstance( $file );
 	}

@@ -97,23 +97,24 @@ Class Dir
      */
     public static function dirToArray( $dir, $ignored = [] )
     {
+        $dir = rtrim($dir, '/').DIRECTORY_SEPARATOR;
         $result = [];
         $cdir = scandir($dir);
         foreach ($cdir as $key => $value)
         {
             if (!in_array($value,array(".", "..")))
             {
-                if (is_dir($dir.DIRECTORY_SEPARATOR.$value))
+                if (is_dir($dir.$value))
                 {
                     if (!in_array($value, $ignored)) {
-                        $result[] = $dir.DIRECTORY_SEPARATOR.$value;
-                        self::subdirToArray($dir.DIRECTORY_SEPARATOR.$value, $result, $dir, $ignored = []);
+                        $result[] = $dir.$value;
+                        self::subdirToArray($dir.$value, $result, $dir, $ignored = []);
                     }
                 }
                 else
                 {
                     if (!in_array($value, $ignored)) {
-                        $result[] = $value;
+                        $result[] = $dir.$value;
                     }
                 }
             }
