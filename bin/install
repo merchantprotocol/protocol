@@ -8,7 +8,7 @@ echo "Platform is $PLATFORM"
 
 case "$PLATFORM" in
 
-    "Amazon Linux")
+    ("\"Amazon Linux\"")
         echo "Updating the system"
         sudo yum update -y
 
@@ -47,7 +47,7 @@ case "$PLATFORM" in
 
     ;;
 
-    "Ubuntu")
+    ("\"Ubuntu\"")
         echo "Installing Docker"
 
         sudo apt-get remove docker docker-engine docker.io containerd runc -y
