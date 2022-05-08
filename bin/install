@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+set +x
 
 PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 echo "Platform is $PLATFORM"
@@ -23,6 +23,8 @@ case "$PLATFORM" in
         sudo groupadd docker
         sudo usermod -aG docker $USER
 
+        docker -v
+
 
         echo "Installing Docker-Compose"
 
@@ -30,20 +32,26 @@ case "$PLATFORM" in
         sudo mv docker-compose-$(uname -s)-$(uname -m) /usr/local/bin/docker-compose
         sudo chmod -v +x /usr/local/bin/docker-compose
 
+        docker-compose -v
+
 
         echo "Installing php7.4"
         sudo amazon-linux-extras enable php7.4
         sudo yum install -y php-cli php-pdo php-fpm php-json php-mysqlnd
 
+        php -v
 
         echo "Installing GIT"
         sudo yum install -y git
 
+        git --version
 
         echo "Installing composer"
         sudo curl -sS https://getcomposer.org/installer | sudo php
         sudo mv composer.phar /usr/local/bin/composer
         sudo ln -s /usr/local/bin/composer /usr/bin/composer
+
+        composer --version
 
     ;;
 
@@ -99,3 +107,4 @@ git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
 sudo chmod +x $HOME/protocol/protocol
 sudo ln -s $HOME/protocol/protocol /usr/bin/protocol
 
+protocol --version
