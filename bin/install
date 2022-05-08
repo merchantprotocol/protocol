@@ -6,7 +6,7 @@ PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 echo "Platform is $PLATFORM"
 
 
-case $PLATFORM in
+case "$PLATFORM" in
 
     "Amazon Linux")
         echo "Updating the system"
