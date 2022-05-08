@@ -86,11 +86,12 @@ Class ProtocolRestart extends Command {
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
-        $local   = $input->getArgument('local');
+        $localdir = Git::getGitLocalFolder();
+
+        $local   = $input->getArgument('local', $localdir);
         $command = "cd $local && ".WEBROOT_DIR."protocol start";
         Shell::passthru($command);
 
