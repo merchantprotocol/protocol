@@ -83,8 +83,10 @@ Class ProtocolInit extends Command {
 
         Json::write('name', basename($repo_dir));
 
-        Json::write('docker.container_name', Yaml::read('services.app.container_name'));
-        Json::write('docker.image', Yaml::read('services.app.image'));
+        if (file_exists("{$repo_dir}/docker-compose.yml")) {
+            Json::write('docker.container_name', Yaml::read('services.app.container_name'));
+            Json::write('docker.image', Yaml::read('services.app.image'));
+        }
 
         $remoteurl = Git::RemoteUrl( $repo_dir );
         Json::write('git.remote', $remoteurl);
