@@ -71,8 +71,15 @@ You can easily `protocol config:new` create a new config environment and switch 
 ## Installation
 
 ```
-# git clone https://github.com/merchantprotocol/protocol.git /opt/protocol
-# chmod +x /opt/protocol/protocol
+# sudo curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | bash
+```
+
+If you want to install protocol independently, you can just clone down the repo
+
+```
+# git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
+# chmod +x $HOME/protocol/protocol
+# protocol self::global
 ```
 
 You should then make protocol globally available by creating a symlink into a $PATH directory.

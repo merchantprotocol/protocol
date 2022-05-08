@@ -1,0 +1,101 @@
+#!/bin/bash
+
+set -x
+
+PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
+echo "Platform is $PLATFORM"
+
+
+case $PLATFORM in
+
+    "Amazon Linux")
+        echo "Updating the system"
+        sudo yum update -y
+
+
+        echo "Installing Docker"
+
+        sudo amazon-linux-extras enable docker
+        sudo yum install -y docker
+        sudo systemctl enable docker.service
+        sudo systemctl start docker.service
+
+        sudo groupadd docker
+        sudo usermod -aG docker $USER
+
+
+        echo "Installing Docker-Compose"
+
+        wget https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) 
+        sudo mv docker-compose-$(uname -s)-$(uname -m) /usr/local/bin/docker-compose
+        sudo chmod -v +x /usr/local/bin/docker-compose
+
+
+        echo "Installing php7.4"
+        sudo amazon-linux-extras enable php7.4
+        sudo yum install -y php-cli php-pdo php-fpm php-json php-mysqlnd
+
+
+        echo "Installing GIT"
+        sudo yum install -y git
+
+
+        echo "Installing composer"
+        sudo curl -sS https://getcomposer.org/installer | sudo php
+        sudo mv composer.phar /usr/local/bin/composer
+        sudo ln -s /usr/local/bin/composer /usr/bin/composer
+
+    ;;
+
+    "Ubuntu")
+        echo "Installing Docker"
+
+        sudo apt-get remove docker docker-engine docker.io containerd runc -y
+        sudo apt-get update -y
+        sudo apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release
+        rm -f /usr/share/keyrings/docker-archive-keyring.gpg
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+        echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        sudo apt-get update -y
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io git
+
+        sudo groupadd docker
+        sudo usermod -aG docker $USER
+
+        sudo systemctl enable docker.service
+        sudo systemctl enable containerd.service
+        sudo systemctl start docker.service
+        sudo systemctl start containerd.service
+
+
+
+        echo "Installing Docker-Compose"
+
+        sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+        docker-compose --version
+
+
+
+        echo "Installing GIT"
+
+        sudo apt-get install git
+    ;;
+
+esac
+
+echo "Installing Protocol"
+
+git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
+sudo chmod +x $HOME/protocol/protocol
+sudo ln -s $HOME/protocol/protocol /usr/bin/protocol
+
