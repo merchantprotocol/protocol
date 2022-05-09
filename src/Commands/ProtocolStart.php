@@ -83,6 +83,7 @@ Class ProtocolStart extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $output->writeln('<comment>Starting up the protocol node</comment>');
+        $helper = $this->getHelper('question');
 
         // command should only have one running instance
         if (!$this->lock()) {
