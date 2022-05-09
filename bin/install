@@ -36,6 +36,7 @@ case "$PLATFORM" in
 
 
         echo "Installing php7.4"
+        sudo amazon-linux-extras disable php7.1
         sudo amazon-linux-extras enable php7.4
         sudo yum install -y php-cli php-pdo php-fpm php-json php-mysqlnd
 
