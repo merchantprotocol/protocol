@@ -246,12 +246,17 @@ Class Shell
      */
     public static function isRunning( $pid )
     {
-        try{
+        if (!$pid) return false;
+
+        $test = intval($pid);
+        if ($pid != $test) return false;
+
+        try {
             $result = shell_exec(sprintf("ps %d", $pid));
             if( count(preg_split("/\n/", $result)) > 2){
                 return true;
             }
-        }catch(Exception $e){}
+        } catch(Exception $e) {}
 
         return false;
     }
