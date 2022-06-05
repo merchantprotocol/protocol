@@ -136,16 +136,16 @@ Class GitSlave extends Command {
         $command = SCRIPT_DIR."git-repo-watcher -d '$repo_dir' -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
-            Json::write('git.branch', $branch, $repo_dir);
-            Json::write('git.remote', $remoteurl, $repo_dir);
-            Json::write('git.remotename', $remoteName, $repo_dir);
-            Json::write('git.local', $repo_dir, $repo_dir);
-            Json::write('slave.increment', $increment, $repo_dir);
+            JsonLock::write('git.branch', $branch, $repo_dir);
+            JsonLock::write('git.remote', $remoteurl, $repo_dir);
+            JsonLock::write('git.remotename', $remoteName, $repo_dir);
+            JsonLock::write('git.local', $repo_dir, $repo_dir);
+            JsonLock::write('slave.increment', $increment, $repo_dir);
 
             $pid = Shell::background($command);
-            Json::write('slave.pid', $pid, $repo_dir);
+            JsonLock::write('slave.pid', $pid, $repo_dir);
             sleep(1);
-            Json::lock( false, $repo_dir);
+            JsonLock::save( $repo_dir );
 
             return Command::SUCCESS;
         }
