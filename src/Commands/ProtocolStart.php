@@ -40,6 +40,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
@@ -87,6 +88,7 @@ Class ProtocolStart extends Command {
         Git::checkInitializedRepo( $output, $repo_dir );
 
         $output->writeln('<comment>Starting up the protocol node</comment>');
+        $helper = $this->getHelper('question');
 
         // command should only have one running instance
         if (!$this->lock()) {
