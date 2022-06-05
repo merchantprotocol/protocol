@@ -33,8 +33,26 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Config as UtilConfig;
+use Gitcd\Utils\Json;
 
 Class Config {
+
+    /**
+     * Return the configuration repo folder
+     *
+     * @param [type] $repo_dir
+     * @return void
+     */
+    public static function repo( $repo_dir )
+    {
+        $foldername = basename($repo_dir).'-config';
+
+        $path = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR, $repo_dir);
+        if (strpos($path, '..')!==false) {
+            $path = $repo_dir.$path;
+        }
+        return Dir::realpath($path);
+    }
 
     /**
      * 

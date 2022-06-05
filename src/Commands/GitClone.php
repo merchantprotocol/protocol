@@ -91,7 +91,6 @@ Class GitClone extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getArgument('repo_dir'), $input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
 
         $output->writeln('<comment>Cloning a git repo</comment>');
 

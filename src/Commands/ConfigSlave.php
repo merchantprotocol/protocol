@@ -105,11 +105,7 @@ Class ConfigSlave extends Command {
         }
 
         // check that the config repo exists
-        $path = Json::read('configuration.local', false, $repo_dir);
-        if (strpos($path, '..')!==false) {
-            $path = $repo_dir.$path;
-        }
-        $configrepo = Dir::realpath($path);
+        $configrepo = Config::repo($repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
@@ -143,17 +139,16 @@ Class ConfigSlave extends Command {
             $nodaemon = true;
         }
         $daemon = !$nodaemon;
-        $realpath = Dir::realpath($configrepo);
 
-        $output->writeln(" - If any changes are made to <info>$remoteurl</info> we'll update <info>$realpath</info>".PHP_EOL);
-        $command = SCRIPT_DIR."git-repo-watcher -d $realpath -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
+        $output->writeln(" - If any changes are made to <info>$remoteurl</info> we'll update <info>$configrepo</info>".PHP_EOL);
+        $command = SCRIPT_DIR."git-repo-watcher -d $configrepo -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
 
         if ($daemon) {
             // Run the command in the background as a daemon
             JsonLock::write('configuration.slave.branch', $branch, $repo_dir);
             JsonLock::write('configuration.slave.remote', $remoteurl, $repo_dir);
             JsonLock::write('configuration.slave.remotename', $remoteName, $repo_dir);
-            JsonLock::write('configuration.slave.local', $realpath, $repo_dir);
+            JsonLock::write('configuration.slave.local', $configrepo, $repo_dir);
             JsonLock::write('configuration.slave.increment', $increment, $repo_dir);
 
             $pid = Shell::background($command);

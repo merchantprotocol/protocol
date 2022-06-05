@@ -78,11 +78,11 @@ Class ConfigInit extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('<comment>Initializing configuration repo</comment>');
-        $helper = $this->getHelper('question');
-
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
+
+        $output->writeln('<comment>Initializing configuration repo</comment>');
+        $helper = $this->getHelper('question');
 
         if (!file_exists("{$repo_dir}/protocol.json")) {
             $output->writeln(' - first initialize this repository to work with protocol by running `protocol init`');
@@ -98,9 +98,9 @@ Class ConfigInit extends Command {
         }
 
         // create the folder if it doesn't exist
-        $foldername = basename($repo_dir).'-config';
+        $configrepo = Config::repo($repo_dir);
         $basedir = dirname($repo_dir).DIRECTORY_SEPARATOR;
-        $configrepo = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR, $repo_dir);
+        $foldername = basename($repo_dir).'-config';
 
         if (!is_dir($configrepo)) {
             Shell::run("mkdir -p '$configrepo'");

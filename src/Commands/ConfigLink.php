@@ -85,12 +85,11 @@ Class ConfigLink extends Command {
             return Command::SUCCESS;
         }
         // make sure the config repo is initialized
-        $configrepo = Json::read('configuration.local', false, $repo_dir);
+        $configrepo = Config::repo($repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
-        $configrepo = Dir::realpath($repo_dir.$configrepo);
         $working_dir = WORKING_DIR;
         $ignored = ['.gitignore', 'README.md', '.git'];
         $configfiles = Dir::dirToArray($configrepo, $ignored);

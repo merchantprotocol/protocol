@@ -90,12 +90,11 @@ Class ConfigMove extends Command {
             return Command::SUCCESS;
         }
 
-        $configrepo = Json::read('configuration.local', false, $repo_dir);
+        $configrepo = Config::repo($repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
-        $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         $environment = Config::read('env', false);
 

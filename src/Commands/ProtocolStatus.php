@@ -83,8 +83,7 @@ Class ProtocolStatus extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        $configrepo = Json::read('configuration.local', false, $repo_dir );
-        $configrepo = Dir::realpath($repo_dir.$configrepo);
+        $configrepo = Config::repo($repo_dir);
 
         $tableRows = [];
         $tableRows[] = ["Environment", "<info>".Config::read('env', 'not set')."</info>"];

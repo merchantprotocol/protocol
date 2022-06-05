@@ -91,12 +91,11 @@ Class ConfigSave extends Command {
         }
 
         // make sure we have a config repo to start with
-        $configrepo = Json::read('configuration.local', false, $repo_dir);
+        $configrepo = Config::repo($repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
-        $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         Git::commit( 'Saving untracked changes', $configrepo );
         Git::push( $configrepo );
