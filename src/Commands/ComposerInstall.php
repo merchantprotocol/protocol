@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -70,7 +71,8 @@ Class ComposerInstall extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
+            ->addArgument('repo_dir', InputArgument::OPTIONAL, 'The local dir to run composer install in', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -85,15 +87,15 @@ Class ComposerInstall extends Command {
     {
         $output->writeln('<comment>Composer install</comment>');
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Git::getGitLocalFolder());
+        $repo_dir = Dir::realpath($input->getArgument('repo_dir'), $input->getOption('dir'));
 
-        if (!file_exists("{$localdir}composer.json")) {
+        if (!file_exists("{$repo_dir}composer.json")) {
             $output->writeln(' - Skipping composer install, there is no composer.json in the project');
             return Command::SUCCESS;
         }
 
         Shell::passthru("chmod +x ".SCRIPT_DIR."composer.phar");
-        $command = SCRIPT_DIR."composer.phar install --working-dir=$localdir --ignore-platform-reqs";
+        $command = SCRIPT_DIR."composer.phar install --working-dir='$repo_dir' --ignore-platform-reqs";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

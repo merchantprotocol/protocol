@@ -37,10 +37,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 
 Class DockerBuild extends Command {
@@ -82,6 +84,7 @@ Class DockerBuild extends Command {
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The desired remote docker image tag', false)
             ->addArgument('image', InputArgument::OPTIONAL, 'The tag for the image', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -94,23 +97,28 @@ Class DockerBuild extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Building docker image</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
+        // should cd into this dir
 
-        $location = $input->getArgument('local') ?: Json::read('docker.local');
-        $image    = $input->getArgument('image') ?: Json::read('docker.image');
+        $location = $input->getArgument('local') ?: Json::read('docker.local', false, $repo_dir);
+        $image    = $input->getArgument('image') ?: Json::read('docker.image', false, $repo_dir);
 
         $command = $this->getApplication()->find('env:default');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run((new ArrayInput([
+                '--dir' => $repo_dir
+            ])), $output);
 
         $locationCmd = " -f {$location}Dockerfile $location";
-        $command = "docker build -t $image $locationCmd";
+        $command = "cd '$repo_dir' && docker build -t $image $locationCmd";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

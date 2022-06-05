@@ -37,9 +37,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 
 Class NginxLogs extends Command {
@@ -60,6 +62,7 @@ Class NginxLogs extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -72,8 +75,12 @@ Class NginxLogs extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $arrInput = new ArrayInput([
-            'cmd' => 'tail -f /var/log/php7.4-fpm.log /var/log/php-fpm/error.log /var/log/nginx/error.log' 
+            'cmd' => 'tail -f /var/log/php7.4-fpm.log /var/log/php-fpm/error.log /var/log/nginx/error.log',
+            '--dir' => $repo_dir
         ]);
 
         // run update

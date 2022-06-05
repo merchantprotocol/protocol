@@ -37,10 +37,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 
@@ -65,6 +67,7 @@ Class DockerExec extends Command {
         $this
             // configure an argument
             ->addArgument('cmd', InputArgument::OPTIONAL, 'The command you want to run on the container', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -77,14 +80,17 @@ Class DockerExec extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $cmd = $input->getArgument('cmd') ?: "/bin/bash";
-        $name = Json::read('docker.container_name', false);
+        $name = Json::read('docker.container_name', false, $repo_dir);
         if (!$name) {
             $names = Docker::getContainerNamesFromDockerComposeFile();
             if (count($names)==1) {
                 $name = array_pop($names);
-                Json::write('docker.container_name', $name);
-                Json::save();
+                Json::write('docker.container_name', $name, $repo_dir);
+                Json::save($repo_dir);
             }
         }
 

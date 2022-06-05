@@ -47,9 +47,12 @@ Class JsonLock extends Json
 	 *
 	 * @return void
 	 */
-	public static function delete()
+	public static function delete( $repo_dir = false )
 	{
-		$file = WORKING_DIR.'protocol.lock';
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
+		$file = $repo_dir.'protocol.lock';
 		if (is_file($file)) {
 			return unlink($file);
 		}
@@ -58,16 +61,23 @@ Class JsonLock extends Json
 	/**
 	 * Constructor.
 	 * 
-	 * @param string $file
+	 * @param string $file // is the lock file location
+	 * @param string $repo_dir // is the directory of the repo
 	 */
-	function __construct( $file )
+	function __construct( $file, $repo_dir = false )
 	{
+		// set the lock file
 		$this->configfile = $file;
+
+		// if the lock file does not exist
 		if (!is_file($file)) {
-			$repo_dir = Git::getGitLocalFolder();
-			$file = $repo_dir.'protocol.json';
+			// we need to find the json file to populate our initial data
+			if (is_file($repo_dir.'protocol.json')) {
+				$file = $repo_dir.'protocol.json';
+			}
 		}
 		$raw = file_get_contents($file);
+
 		$this->data = json_decode($raw, true);
 	}
 
@@ -78,10 +88,12 @@ Class JsonLock extends Json
 	 * 
 	 * @param $file string
 	 */
-	public static function getInstance( $file = false )
+	public static function getInstance( $file = false, $repo_dir = false )
 	{
-		$repo_dir = Git::getGitLocalFolder();
+		if (!$repo_dir) {
+			$repo_dir = Git::getGitLocalFolder();
+		}
 		$file = $repo_dir.'protocol.lock';
-		return parent::getInstance( $file );
+		return parent::getInstance( $file, $repo_dir );
 	}
 }

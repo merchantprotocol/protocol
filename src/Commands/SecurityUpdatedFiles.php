@@ -74,9 +74,9 @@ Class SecurityUpdatedFiles extends Command {
     {
         $output->writeln('<comment>Looking for changed files</comment>');
 
-        $localdir = Dir::realpath(Config::read('localdir', false));
-        if ($localdir) {
-            $exclude = " -path $localdir ";
+        $repo_dir = Dir::realpath(Config::read('repo_dir', false));
+        if ($repo_dir) {
+            $exclude = " -path '$repo_dir' ";
         }
 
         $command = "find / $exclude -type f -mtime -15 2>&1 | grep -v 'Permission denied' | grep -v 'Operation not permitted'";

@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
@@ -66,6 +67,7 @@ Class ConfigMove extends Command {
         $this
             // configure an argument
             ->addArgument('path', InputArgument::REQUIRED, 'The path to the file you want to move')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -82,13 +84,13 @@ Class ConfigMove extends Command {
         $output->writeln("<info>Moving file ($path)</info>");
 
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
 
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
@@ -128,7 +130,7 @@ Class ConfigMove extends Command {
         // make sure we're in a location within the repo
         if (strpos($currentpath, WORKING_DIR) !== false && is_file($currentpath)) {
             Shell::passthru("rm -f '$currentpath'");
-            Shell::run("git -C $repo_dir rm --cached '$currentpath'");
+            Shell::run("git -C '$repo_dir' rm --cached '$currentpath'");
 
             // refresh symlinks
             $command = $this->getApplication()->find('config:refresh');

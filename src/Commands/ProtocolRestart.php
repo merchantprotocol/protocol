@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -68,6 +69,7 @@ Class ProtocolRestart extends Command {
         $this
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -83,17 +85,23 @@ Class ProtocolRestart extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
             return Command::SUCCESS;
         }
+        $arrInput = new ArrayInput([
+                '--dir' => $repo_dir
+            ]);
 
-        $localdir = Git::getGitLocalFolder();
+        $command = $this->getApplication()->find('stop');
+        $returnCode = $command->run($arrInput, $output);
 
-        $local   = $input->getArgument('local', $localdir);
-        $command = "cd $local && ".WEBROOT_DIR."protocol start";
-        Shell::passthru($command);
+        $command = $this->getApplication()->find('start');
+        $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;
     }

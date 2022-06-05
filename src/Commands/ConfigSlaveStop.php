@@ -41,6 +41,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -62,6 +63,7 @@ Class ConfigSlaveStop extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -75,10 +77,11 @@ Class ConfigSlaveStop extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        Git::checkInitializedRepo( $output );
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
 
         // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('configuration.slave.pid');
+        $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
         $running = Shell::isRunning( $pid );
         if (!$pid || !$running) {
             $output->writeln("Slave mode is not running on the config repo ($pid)");

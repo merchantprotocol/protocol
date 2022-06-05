@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -78,6 +79,7 @@ Class DockerComposeRebuild extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -90,19 +92,22 @@ Class DockerComposeRebuild extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Docker-compose rebuild</comment>');
 
-        $localdir = Git::getGitLocalFolder();
-
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
+        if (!file_exists("{$repo_dir}/docker-compose.yml")) {
             $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
             return Command::FAILURE;
         }
 
         $command = $this->getApplication()->find('env:default');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run((new ArrayInput([
+                '--dir' => $repo_dir
+            ])), $output);
 
-        $command = "cd $localdir && docker-compose up --build -d";
+        $command = "cd '$repo_dir' && docker-compose up --build -d";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

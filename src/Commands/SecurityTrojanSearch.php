@@ -64,7 +64,7 @@ Class SecurityTrojanSearch extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local git directory to manage')
+            ->addArgument('repo_dir', InputArgument::OPTIONAL, 'The local git directory to manage')
             // ...
         ;
     }
@@ -80,11 +80,11 @@ Class SecurityTrojanSearch extends Command {
     {
         $output->writeln('<comment>Checking for possible trojan horses</comment>');
 
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $repo_dir = Dir::realpath($input->getArgument('repo_dir'), Config::read('repo_dir'));
 
         // Building the command
         $changedwithin = "7";
-        $find = "find $localdir -type f -mtime -{$changedwithin} 2>&1 | grep -v 'No such file or directory' | grep -v 'Permission denied' | grep -v 'Operation not permitted'";
+        $find = "find '$repo_dir' -type f -mtime -{$changedwithin} 2>&1 | grep -v 'No such file or directory' | grep -v 'Permission denied' | grep -v 'Operation not permitted'";
         $trojanCommandsGrep = [
             'eval', 'base64_decode', 'gzinflate', 'str_rot13'
         ];

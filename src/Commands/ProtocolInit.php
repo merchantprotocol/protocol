@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -65,6 +66,7 @@ Class ProtocolInit extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -78,26 +80,26 @@ Class ProtocolInit extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         // is this a git repo?
-        Git::checkInitializedRepo( $output );
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
 
-        Json::write('name', basename($repo_dir));
+        Json::write('name', basename($repo_dir), $repo_dir);
 
         if (file_exists("{$repo_dir}/docker-compose.yml")) {
-            Json::write('docker.container_name', Yaml::read('services.app.container_name'));
-            Json::write('docker.image', Yaml::read('services.app.image'));
+            Json::write('docker.container_name', Yaml::read('services.app.container_name', null, $repo_dir), $repo_dir);
+            Json::write('docker.image', Yaml::read('services.app.image', null, $repo_dir), $repo_dir);
         }
 
         $remoteurl = Git::RemoteUrl( $repo_dir );
-        Json::write('git.remote', $remoteurl);
+        Json::write('git.remote', $remoteurl, $repo_dir);
 
         $remoteName = Git::remoteName( $repo_dir );
-        Json::write('git.remotename', $remoteName);
+        Json::write('git.remotename', $remoteName, $repo_dir);
 
         $branch = Git::branch( $repo_dir );
-        Json::write('git.branch', $branch);
+        Json::write('git.branch', $branch, $repo_dir);
 
-        Json::save();
+        Json::save($repo_dir);
 
         // add the protocol.lock file to gitignore
         Git::addIgnore( 'protocol.lock', $repo_dir );

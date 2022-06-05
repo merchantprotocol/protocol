@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
@@ -65,6 +66,7 @@ Class ConfigSave extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -77,17 +79,19 @@ Class ConfigSave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $helper = $this->getHelper('question');
 
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
 
         // make sure we have a config repo to start with
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;

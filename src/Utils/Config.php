@@ -68,11 +68,11 @@ Class Config
 	 * @param string $property
 	 * @param any $default
 	 */
-	public static function read( $property = null, $default = null ) 
+	public static function read( $property = null, $default = null, $repo_dir = false ) 
 	{
 		//initializing
 		$class = get_called_class();
-		$self = $class::getInstance();
+		$self = $class::getInstance( false, $repo_dir );
 		return $self->get( $property, $default );
 	}
 	
@@ -84,8 +84,10 @@ Class Config
 	 */
 	function get( $property = null, $default = null ) 
 	{
-		if (!is_string($property) && $default !== null) return $default;
-		
+		if (!is_string($property) && $default !== null) {
+			return $default;
+		}
+
 		//initializing
 		$pts = explode('.', $property);
 		$recurse = $this->data;
@@ -112,10 +114,10 @@ Class Config
 	 * @param string $property
 	 * @param any $value
 	 */
-	public static function write( $property, $value = null ) {
+	public static function write( $property, $value = null, $repo_dir = false ) {
 		//initializing
 		$class = get_called_class();
-		$self = $class::getInstance();
+		$self = $class::getInstance( false, $repo_dir );
 		$self->_set(array($property => $value), $self->data);
 		return $self;
 	}
@@ -219,7 +221,7 @@ Class Config
 	 * 
 	 * @param $file string
 	 */
-	public static function getInstance( $file = false )
+	public static function getInstance( $file = false, $repo_dir = false )
 	{
 		if (!$file) {
 			$file = WEBROOT_DIR.'config'.DIRECTORY_SEPARATOR.'global.php';
@@ -230,7 +232,7 @@ Class Config
 		{
 			//creating the instance
 			$class = get_called_class();
-			$config = new $class( $file );
+			$config = new $class( $file, $repo_dir );
 			self::$instances[$file] = $config;
 		}
 		

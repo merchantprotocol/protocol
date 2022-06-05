@@ -36,10 +36,12 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 
 Class DockerPush extends Command {
@@ -67,6 +69,7 @@ Class DockerPush extends Command {
             ->addArgument('image', InputArgument::OPTIONAL, 'The desired remote docker image tag')
             ->addArgument('username', InputArgument::OPTIONAL, 'Your docker username')
             ->addArgument('password', InputArgument::OPTIONAL, 'Your docker password')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -79,18 +82,19 @@ Class DockerPush extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+
         $output->writeln('<comment>Pushing docker image to remote</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
-        $image    = $input->getArgument('image') ?: Json::read('docker.image');
-        $username = $input->getArgument('username') ?: Json::read('docker.username');
-        $password = $input->getArgument('password') ?: Json::read('docker.password');
+        $image    = $input->getArgument('image') ?: Json::read('docker.image', $repo_dir);
+        $username = $input->getArgument('username') ?: Json::read('docker.username', $repo_dir);
+        $password = $input->getArgument('password') ?: Json::read('docker.password', $repo_dir);
 
         $command = "echo '$password' | docker login --username $username --password-stdin";
         $response = Shell::passthru($command);

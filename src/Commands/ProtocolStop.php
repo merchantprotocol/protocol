@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -65,6 +66,7 @@ Class ProtocolStop extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -80,6 +82,9 @@ Class ProtocolStop extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Stopping this protocol node</comment>');
 
         // command should only have one running instance
@@ -89,14 +94,15 @@ Class ProtocolStop extends Command {
             return Command::SUCCESS;
         }
 
-        $localdir = Git::getGitLocalFolder();
-        $arrInput = new ArrayInput([]);
+        $arrInput = new ArrayInput([
+                '--dir' => $repo_dir
+            ]);
 
         // run update
         $command = $this->getApplication()->find('git:slave:stop');
         $returnCode = $command->run($arrInput, $output);
 
-        if (Json::read('configuration.remote', false)) {
+        if (Json::read('configuration.remote', false, $repo_dir)) {
             $command = $this->getApplication()->find('config:slave:stop');
             $returnCode = $command->run($arrInput, $output);
 
@@ -109,7 +115,7 @@ Class ProtocolStop extends Command {
         $returnCode = $command->run($arrInput, $output);
 
         // remove the job from crontab
-        Crontab::removeCrontabRestart( $localdir );
+        Crontab::removeCrontabRestart( $repo_dir );
 
         // end with status
         $command = $this->getApplication()->find('status');

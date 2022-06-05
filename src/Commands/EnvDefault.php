@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -65,6 +66,7 @@ Class EnvDefault extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -80,8 +82,8 @@ Class EnvDefault extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $PROTOCOL_WEBROOT = Git::getGitLocalFolder();
-        if ($PROTOCOL_WEBROOT) putenv("PROTOCOL_WEBROOT={$PROTOCOL_WEBROOT}");
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        if ($repo_dir) putenv("PROTOCOL_WEBROOT={$repo_dir}");
 
         // Set the hostname environment variable
         $DOCKER_HOSTNAME = Shell::run("hostname");

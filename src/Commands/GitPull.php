@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -75,6 +76,7 @@ Class GitPull extends Command {
         $this
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -90,6 +92,9 @@ Class GitPull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
@@ -100,12 +105,11 @@ Class GitPull extends Command {
         $output->writeln('<comment>Pulling a git repo</comment>');
 
         // the .git directory
-        $repo_dir   = $input->getArgument('local') ?: Git::getGitLocalFolder();
         $branch = Git::branch( $repo_dir );
         $remote = Git::remoteName( $repo_dir );
 
         // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("git -C $repo_dir fetch --all", $return_var);
+        $response = Shell::run("git -C '$repo_dir' fetch --all", $return_var);
         if ($response) $output->writeln($response);
 
         // if the fetch failed, then stop
@@ -116,18 +120,18 @@ Class GitPull extends Command {
 
         // resets the master branch to what you just fetched. 
         // The --hard option changes all the files in your working tree to match the files in origin/master
-        $response = Shell::run("git -C $repo_dir reset --hard $remote/$branch");
+        $response = Shell::run("git -C '$repo_dir' reset --hard $remote/$branch");
         if ($response) $output->writeln($response);
-        $response = Shell::run("git -C $repo_dir reset --hard HEAD");
+        $response = Shell::run("git -C '$repo_dir' reset --hard HEAD");
         if ($response) $output->writeln($response);
 
 
         // run composer install
         $command = $this->getApplication()->find('composer:install');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
 
         // Update the submodules
-        $command = "git -C $repo_dir submodule update --init --recursive";
+        $command = "git -C '$repo_dir' submodule update --init --recursive";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

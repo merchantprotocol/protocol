@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -66,6 +67,7 @@ Class ProtocolStart extends Command {
         $this
             // configure an argument
             ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -81,6 +83,9 @@ Class ProtocolStart extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Starting up the protocol node</comment>');
 
         // command should only have one running instance
@@ -99,9 +104,14 @@ Class ProtocolStart extends Command {
         }
 
         $devEnvs = ['localhost', 'local', 'dev', 'development'];
-        $localdir = Git::getGitLocalFolder();
-        $arrInput = (new ArrayInput([]));
-        $arrInput1 = (new ArrayInput(['environment' => $environment]));
+
+        $arrInput = (new ArrayInput([
+                '--dir' => $repo_dir
+            ]));
+        $arrInput1 = (new ArrayInput([
+                '--dir' => $repo_dir,
+                'environment' => $environment
+            ]));
 
         // if not a local dev env
         if (!in_array($environment, $devEnvs)) {
@@ -114,7 +124,7 @@ Class ProtocolStart extends Command {
             $returnCode = $command->run($arrInput, $output);
         }
 
-        if (Json::read('configuration.remote', false)) {
+        if (Json::read('configuration.remote', false, $repo_dir)) {
             $command = $this->getApplication()->find('config:init');
             $returnCode = $command->run($arrInput1, $output);
 
@@ -128,7 +138,7 @@ Class ProtocolStart extends Command {
         }
 
         // add crontab restart command
-        Crontab::addCrontabRestart( $localdir );
+        Crontab::addCrontabRestart( $repo_dir );
 
         // Update docker image
         $command = $this->getApplication()->find('docker:pull');

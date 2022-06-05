@@ -74,6 +74,7 @@ Class ConfigSlave extends Command {
             // configure an argument
             ->addOption('increment', 'i', InputOption::VALUE_OPTIONAL, 'How many seconds to sleep between remote checks')
             ->addOption('no-daemon', 'no-d', InputOption::VALUE_OPTIONAL, 'Do not run as a background service', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -87,6 +88,9 @@ Class ConfigSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
@@ -95,14 +99,17 @@ Class ConfigSlave extends Command {
         }
 
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
 
         // check that the config repo exists
-        $configrepo = Json::read('configuration.local', false);
+        $path = Json::read('configuration.local', false, $repo_dir);
+        if (strpos($path, '..')!==false) {
+            $path = $repo_dir.$path;
+        }
+        $configrepo = Dir::realpath($path);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
@@ -111,7 +118,7 @@ Class ConfigSlave extends Command {
         $output->writeln('<comment>Continuously monitoring configuration repo for changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('configuration.slave.pid');
+        $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
         $running = Shell::isRunning( $pid );
         if ($running) {
             $output->writeln("Slave mode is already running on the config repo");
@@ -143,16 +150,16 @@ Class ConfigSlave extends Command {
 
         if ($daemon) {
             // Run the command in the background as a daemon
-            JsonLock::write('configuration.slave.branch', $branch);
-            JsonLock::write('configuration.slave.remote', $remoteurl);
-            JsonLock::write('configuration.slave.remotename', $remoteName);
-            JsonLock::write('configuration.slave.local', $realpath);
-            JsonLock::write('configuration.slave.increment', $increment);
+            JsonLock::write('configuration.slave.branch', $branch, $repo_dir);
+            JsonLock::write('configuration.slave.remote', $remoteurl, $repo_dir);
+            JsonLock::write('configuration.slave.remotename', $remoteName, $repo_dir);
+            JsonLock::write('configuration.slave.local', $realpath, $repo_dir);
+            JsonLock::write('configuration.slave.increment', $increment, $repo_dir);
 
             $pid = Shell::background($command);
-            JsonLock::write('configuration.slave.pid', $pid);
+            JsonLock::write('configuration.slave.pid', $pid, $repo_dir);
             sleep(1);
-            JsonLock::save();
+            JsonLock::save($repo_dir);
 
             $output->writeln(" - This command will run in the <info>background</info> every $increment seconds until you kill it.".PHP_EOL);
             return Command::SUCCESS;

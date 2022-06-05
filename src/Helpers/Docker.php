@@ -65,9 +65,9 @@ Class Docker
      * @param [type] $service
      * @return boolean
      */
-    public static function getContainerNamesFromDockerComposeFile()
+    public static function getContainerNamesFromDockerComposeFile( $repo_dir = false )
     {
-        $dockerServices = Yaml::read('services');
+        $dockerServices = Yaml::read('services', null, $repo_dir);
         $containerNames = [];
         foreach ($dockerServices as $services => $serviceConfigs) {
             if (array_key_exists('container_name', $serviceConfigs)) {

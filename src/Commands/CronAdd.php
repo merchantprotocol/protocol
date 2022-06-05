@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -69,6 +70,7 @@ Class CronAdd extends Command {
         $this
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -84,15 +86,15 @@ Class CronAdd extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
 
             return Command::SUCCESS;
         }
-
-        // the .git directory
-        $repo_dir   = $input->getArgument('local') ?: Git::getGitLocalFolder();
 
         // add crontab restart command
         $output->writeln('<info>Adding cron job</info>');

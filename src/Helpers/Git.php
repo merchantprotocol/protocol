@@ -158,10 +158,11 @@ Class Git
      */
     public static function RemoteUrl( $repo_dir = false )
     {
+        $branch = Git::remoteName( $repo_dir );
         if ($repo_dir) {
             $repo_dir = " -C '$repo_dir' ";
         }
-        $command = "git $repo_dir config --get remote.origin.url";
+        $command = "git $repo_dir config --get remote.$branch.url";
         return Shell::run( $command );
     }
 
@@ -278,7 +279,10 @@ Class Git
      */
     public static function getGitLocalFolder()
     {
-        $path = WORKING_DIR;
+        $path = null;
+        if (is_dir(WORKING_DIR.'.git')) {
+            $path = WORKING_DIR;
+        }
         for ($i=0; $i<10; $i++) {
             if ($path == '//') {
                 break;
@@ -297,9 +301,9 @@ Class Git
      * @param [type] $output
      * @return void
      */
-    public static function checkInitializedRepo( $output )
+    public static function checkInitializedRepo( $output, $repo_dir = null )
     {
-        if (self::isInitializedRepo()) {
+        if (self::isInitializedRepo($repo_dir)) {
             return true;
         }
         $output->writeln(PHP_EOL."     fatal: not a git repository (or any of the parent directories): .git".PHP_EOL);
@@ -311,9 +315,17 @@ Class Git
      *
      * @return boolean
      */
-    public static function isInitializedRepo()
+    public static function isInitializedRepo( $repo_dir = null )
     {
-        $command = 'git log';
+        $cd = '';
+        if (!is_null($repo_dir)) {
+            // if we implicitly set the repodir but it does not exist
+            if (!is_dir($repo_dir)) {
+                return false;
+            }
+            $cd = "cd $repo_dir &&";
+        }
+        $command = "$cd git log";
         $response = Shell::run($command);
         if (strpos($response, 'not a git repository') !== false) {
             return false;

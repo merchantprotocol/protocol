@@ -50,10 +50,14 @@ Class Json extends Config
 	 * @param string $property
 	 * @param any $value
 	 */
-	public static function write( $property, $value = null ) {
+	public static function write( $property, $value = null, $repo_dir = false )
+	{
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
 		//initializing
 		$class = get_called_class();
-		$self = $class::getInstance();
+		$self = $class::getInstance( false, $repo_dir );
 		$self->_set(array($property => $value), $self->data);
 		return $self;
 	}
@@ -65,7 +69,8 @@ Class Json extends Config
 	 *
 	 * @param unknown_type $file
 	 */
-	function put( $file = false ) {
+	function put( $file = false )
+	{
 		if (!$file) {
 			$file = $this->configfile;
 		}
@@ -86,10 +91,13 @@ Class Json extends Config
 	 *
 	 * @return void
 	 */
-	public static function save()
+	public static function save( $repo_dir = false )
 	{
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
 		$class = get_called_class();
-		$self = $class::getInstance();
+		$self = $class::getInstance( false, $repo_dir );
         $self->put();
 	}
 
@@ -99,13 +107,16 @@ Class Json extends Config
      * @param boolean $file
      * @return void
      */
-    public static function lock( $file = false )
+    public static function lock( $file = false, $repo_dir = false )
     {
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
 		if (!$file) {
-			$file = WORKING_DIR.'protocol.lock';
+			$file = $repo_dir.'protocol.lock';
 		}
 		$class = get_called_class();
-		$self = $class::getInstance();
+		$self = $class::getInstance( false, $repo_dir );
         $self->put( $file );
     }
 	
@@ -131,12 +142,14 @@ Class Json extends Config
 	 * 
 	 * @param $file string
 	 */
-	public static function getInstance( $file = false )
+	public static function getInstance( $file = false, $repo_dir = false )
 	{
-		if (!$file) {
+		if (!$repo_dir) {
 			$repo_dir = Git::getGitLocalFolder();
+		}
+		if (!$file) {
 			$file = $repo_dir.'protocol.json';
 		}
-		return parent::getInstance( $file );
+		return parent::getInstance( $file, $repo_dir );
 	}
 }

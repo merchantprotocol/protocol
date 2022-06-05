@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
@@ -68,6 +69,7 @@ Class ConfigNew extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -83,14 +85,14 @@ Class ConfigNew extends Command {
         $helper = $this->getHelper('question');
 
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
 
         // make sure we have a config repo to start with
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
@@ -118,7 +120,7 @@ Class ConfigNew extends Command {
         }
         $newName = $slug;
 
-        $activeEnv = JsonLock::read('configuration.active', false);
+        $activeEnv = JsonLock::read('configuration.active', false, $repo_dir);
         if ($activeEnv) {
             $output->writeln("<info>The $activeEnv environment is currently active. We need to disable this env to proceed.</info>");
             $question = new ConfirmationQuestion("Can we unlink the currently active env? [Y/n]");
@@ -127,14 +129,14 @@ Class ConfigNew extends Command {
             }
 
             $command = $this->getApplication()->find('config:unlink');
-            $returnCode = $command->run((new ArrayInput([])), $output);
+            $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
         }
 
         // do they want to copy another env?
         $question = new ConfirmationQuestion("To copy an existing environment enter (y), or to start fresh enter (n): ");
 
         $command = $this->getApplication()->find('config:unlink');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
 
         // copy another branch
         if ($helper->ask($input, $output, $question)) {

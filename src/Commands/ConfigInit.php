@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
@@ -64,6 +65,7 @@ Class ConfigInit extends Command {
         $this
             // configure an argument
             ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -79,9 +81,10 @@ Class ConfigInit extends Command {
         $output->writeln('<comment>Initializing configuration repo</comment>');
         $helper = $this->getHelper('question');
 
-        $localdir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
 
-        if (!file_exists("{$localdir}/protocol.json")) {
+        if (!file_exists("{$repo_dir}/protocol.json")) {
             $output->writeln(' - first initialize this repository to work with protocol by running `protocol init`');
             return Command::SUCCESS;
         }
@@ -95,23 +98,24 @@ Class ConfigInit extends Command {
         }
 
         // create the folder if it doesn't exist
-        $foldername = basename($localdir).'-config';
-        $basedir = dirname($localdir).DIRECTORY_SEPARATOR;
-        $configrepo = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR);
+        $foldername = basename($repo_dir).'-config';
+        $basedir = dirname($repo_dir).DIRECTORY_SEPARATOR;
+        $configrepo = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR, $repo_dir);
 
         if (!is_dir($configrepo)) {
             Shell::run("mkdir -p '$configrepo'");
         }
 
         // get the remote url
-        $preExistingRemoteUrl = Json::read('configuration.remote', false);
+        $preExistingRemoteUrl = Json::read('configuration.remote', false, $repo_dir);
 
         // clone down the repo if it has a remote
         if ($preExistingRemoteUrl) {
             if (!is_dir($basedir.$foldername.DIRECTORY_SEPARATOR.'.git')) {
                 $arrInput = (new ArrayInput([
                     'remote' => $preExistingRemoteUrl,
-                    'localdir' => $basedir.$foldername
+                    'repo_dir' => $basedir.$foldername,
+                    '--dir' => $repo_dir
                 ]));
 
                 // run update
@@ -127,10 +131,10 @@ Class ConfigInit extends Command {
             if (!Git::initialize( $configrepo )) {
                 $output->writeln("<error>Unable to create a git repo in ($configrepo)</error>");
             }
-            Shell::run("git -C $configrepo branch -m $environment");
+            Shell::run("git -C '$configrepo' branch -m $environment");
 
             $output->writeln("<info>The config repo is setup at $configrepo</info>");
-            Json::write('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername);
+            Json::write('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername, $repo_dir);
         }
 
         // If there is no remote url, then get it and set it
@@ -139,13 +143,13 @@ Class ConfigInit extends Command {
             $question = new Question('What is the remote git url for your config repo?', false);
             $configRemoteUrl = $helper->ask($input, $output, $question);
 
-            Shell::passthru("git -C $configrepo remote add origin $configRemoteUrl");
-            Json::write('configuration.remote', $configRemoteUrl);
+            Shell::passthru("git -C '$configrepo' remote add origin '$configRemoteUrl'");
+            Json::write('configuration.remote', $configRemoteUrl, $repo_dir);
         }
 
         // create new branch
         if ($environment !== Git::branch( $configrepo )) {
-            Shell::run("git -C $configrepo checkout -b $environment");
+            Shell::run("git -C '$configrepo' checkout -b $environment");
 
             $output->writeln("<info>Your new environment branch was created at $configrepo</info>");
         }
@@ -154,20 +158,20 @@ Class ConfigInit extends Command {
         if (!$preExistingRemoteUrl) {
             $templatedir = TEMPLATES_DIR.'configrepo'.DIRECTORY_SEPARATOR;
             if (!file_exists($configrepo.'README.md')) {
-                Shell::run("cp -R $templatedir $configrepo");
-                Shell::run("git -C $configrepo add -A");
-                Shell::run("git -C $configrepo commit -m 'initial commit'");
+                Shell::run("cp -R '$templatedir' '$configrepo'");
+                Shell::run("git -C '$configrepo' add -A");
+                Shell::run("git -C '$configrepo' commit -m 'initial commit'");
             }
 
             // connect to the current repo
-            Json::write('configuration.environments', Git::branches( $configrepo ));
+            Json::write('configuration.environments', Git::branches( $configrepo ), $repo_dir);
         }
 
         // is this config repo connected?
         if (!$preExistingRemoteUrl) {
             $question = new ConfirmationQuestion('Do you want to push your config repo? [y/n]', false);
             if ($helper->ask($input, $output, $question)) {
-                Shell::passthru("git -C $configrepo push --all origin");
+                Shell::passthru("git -C '$configrepo' push --all origin");
                 $output->writeln(""); // empty line after push
             }
         }
@@ -177,7 +181,7 @@ Class ConfigInit extends Command {
         } else {
             $output->writeln("<info>Done.</info>");
         }
-        Json::save();
+        Json::save($repo_dir);
 
         return Command::SUCCESS;
     }

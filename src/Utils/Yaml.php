@@ -69,9 +69,12 @@ Class Yaml extends Config
 	 *
 	 * @return void
 	 */
-	public static function save()
+	public static function save( $repo_dir = false )
 	{
-		$file = WORKING_DIR.'docker-compose.yml';
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
+		$file = $repo_dir.'docker-compose.yml';
 		$self = self::getInstance();
         $self->put( $file );
 	}
@@ -82,10 +85,13 @@ Class Yaml extends Config
      * @param boolean $file
      * @return void
      */
-    public static function lock( $file = false )
+    public static function lock( $file = false, $repo_dir = false )
     {
+		if (!$repo_dir) {
+			$repo_dir = WORKING_DIR;
+		}
 		if (!$file) {
-			$file = WORKING_DIR.'docker-compose.yml';
+			$file = $repo_dir.'docker-compose.yml';
 		}
 		$self = self::getInstance();
         $self->put( $file );
@@ -109,10 +115,12 @@ Class Yaml extends Config
 	 * 
 	 * @param $file string
 	 */
-	public static function getInstance( $file = false )
+	public static function getInstance( $file = false, $repo_dir = false )
 	{
-		if (!$file) {
+		if (!$repo_dir) {
 			$repo_dir = Git::getGitLocalFolder();
+		}
+		if (!$file) {
 			$file = $repo_dir.'docker-compose.yml';
 		}
 		return parent::getInstance( $file );

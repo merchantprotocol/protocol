@@ -74,6 +74,7 @@ Class GitSlave extends Command {
             // configure an argument
             ->addOption('increment', 'i', InputOption::VALUE_OPTIONAL, 'How many seconds to sleep between remote checks')
             ->addOption('no-daemon', 'no-d', InputOption::VALUE_OPTIONAL, 'Do not run as a background service', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -87,13 +88,15 @@ Class GitSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
 
             return Command::SUCCESS;
         }
-        Git::checkInitializedRepo( $output );
         $output->writeln('<comment>Continuously monitoring git repo for remote changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
@@ -102,11 +105,10 @@ Class GitSlave extends Command {
             $output->writeln("Slave mode is already running");
             exit(0);
         }
-        JsonLock::delete();
-
-        $repo_dir = Git::getGitLocalFolder();
+        JsonLock::delete( $repo_dir );
         $remoteName = Git::remoteName( $repo_dir );
         $remoteurl = Git::RemoteUrl( $repo_dir );
+
         if (!$remoteurl) {
             $output->writeln("Your local repo is not connected to a remote source of truth. cancelling...");
             return Command::FAILURE;
@@ -131,19 +133,19 @@ Class GitSlave extends Command {
         $output->writeln(" - If any changes are made to $remoteurl we'll update $repo_dir".PHP_EOL);
 
         // execute command
-        $command = SCRIPT_DIR."git-repo-watcher -d $repo_dir -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
+        $command = SCRIPT_DIR."git-repo-watcher -d '$repo_dir' -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
         if ($daemon) {
             // Run the command in the background as a daemon
-            Json::write('git.branch', $branch);
-            Json::write('git.remote', $remoteurl);
-            Json::write('git.remotename', $remoteName);
-            Json::write('git.local', $repo_dir);
-            Json::write('slave.increment', $increment);
+            Json::write('git.branch', $branch, $repo_dir);
+            Json::write('git.remote', $remoteurl, $repo_dir);
+            Json::write('git.remotename', $remoteName, $repo_dir);
+            Json::write('git.local', $repo_dir, $repo_dir);
+            Json::write('slave.increment', $increment, $repo_dir);
 
             $pid = Shell::background($command);
-            Json::write('slave.pid', $pid);
+            Json::write('slave.pid', $pid, $repo_dir);
             sleep(1);
-            Json::lock();
+            Json::lock( false, $repo_dir);
 
             return Command::SUCCESS;
         }

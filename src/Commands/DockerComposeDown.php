@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -63,6 +64,7 @@ Class DockerComposeDown extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -75,16 +77,17 @@ Class DockerComposeDown extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $io = new SymfonyStyle($input, $output);
 
-        $localdir = Git::getGitLocalFolder();
-
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
+        if (!file_exists("{$repo_dir}/docker-compose.yml")) {
             $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
             return Command::SUCCESS;
         }
 
-        $command = "cd $localdir && docker-compose down";
+        $command = "cd '$repo_dir' && docker-compose down";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

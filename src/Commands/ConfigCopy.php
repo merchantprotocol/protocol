@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
@@ -62,6 +63,7 @@ Class ConfigCopy extends Command {
         $this
             // configure an argument
             ->addArgument('path', InputArgument::REQUIRED, 'The path to the file you want to move')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -77,13 +79,13 @@ Class ConfigCopy extends Command {
         $path = $input->getArgument('path', false);
 
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
 
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;

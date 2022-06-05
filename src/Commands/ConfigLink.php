@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
@@ -62,6 +63,7 @@ Class ConfigLink extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -75,13 +77,15 @@ Class ConfigLink extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
         }
         // make sure the config repo is initialized
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir);
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
@@ -107,14 +111,14 @@ Class ConfigLink extends Command {
             if (!is_dir($linkdir)) {
                 Shell::run("mkdir -p '$linkdir'");
             }
-            $linkcmd = "cd $linkdir && ln -s '$relpath' '$filename' && cd $working_dir";
+            $linkcmd = "cd '$linkdir' && ln -s '$relpath' '$filename' && cd '$working_dir'";
             Shell::run($linkcmd);
         }
-        JsonLock::write('configuration.symlinks', $configfiles);
+        JsonLock::write('configuration.symlinks', $configfiles, $repo_dir);
 
         $environment = Config::read('env', false);
-        JsonLock::write('configuration.active', $environment);
-        JsonLock::save();
+        JsonLock::write('configuration.active', $environment, $repo_dir);
+        JsonLock::save($repo_dir);
 
         $output->writeln("<info>Done creating symlinks</info>");
         return Command::SUCCESS;

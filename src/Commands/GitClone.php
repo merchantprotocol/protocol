@@ -37,10 +37,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 
 Class GitClone extends Command {
@@ -74,7 +76,8 @@ Class GitClone extends Command {
         $this
             // configure an argument
             ->addArgument('remote', InputArgument::OPTIONAL, 'The remote git url to clone from')
-            ->addArgument('localdir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addArgument('repo_dir', InputArgument::OPTIONAL, 'The local url to clone to', false)
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path')
             // ...
         ;
     }
@@ -87,33 +90,41 @@ Class GitClone extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getArgument('repo_dir'), $input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Cloning a git repo</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
-        $remoteurl = $input->getArgument('remote') ?: Config::read('remote');
-        $localdir = Dir::realpath($input->getArgument('localdir'), Config::read('localdir'));
+        $remoteurl = $input->getArgument('remote') ?: Config::read('remote', $repo_dir);
 
-        $command = "git clone $remoteurl $localdir";
+        if (is_null($repo_dir)) {
+            $name = explode('/', $remoteurl);
+            $name = array_pop($name);
+            $repo_dir = Dir::realpath(str_replace('.git','',$name));
+        }
+
+        $command = "git clone '$remoteurl' '$repo_dir'";
         $response = Shell::passthru($command);
 
         // run composer install
         $command = $this->getApplication()->find('composer:install');
         $returnCode = $command->run((new ArrayInput([
-            'localdir' => $localdir
+            '--dir' => $repo_dir,
+            'repo_dir' => $repo_dir
         ])), $output);
 
         // update the submodules
-        $command = "git -C $localdir submodule update --init --recursive";
+        $command = "git -C '$repo_dir' submodule update --init --recursive";
         $response = Shell::passthru($command);
 
-        $response = Shell::run("git -C $localdir config core.mergeoptions --no-edit");
-        $response = Shell::run("git -C $localdir config core.fileMode false");
+        $response = Shell::run("git -C '$repo_dir' config core.mergeoptions --no-edit");
+        $response = Shell::run("git -C '$repo_dir' config core.fileMode false");
 
         return Command::SUCCESS;
     }

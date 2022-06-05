@@ -41,6 +41,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -62,6 +63,7 @@ Class GitSlaveStop extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -75,20 +77,42 @@ Class GitSlaveStop extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        Git::checkInitializedRepo( $output );
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
 
         // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('slave.pid');
-        $running = Shell::isRunning( $pid );
-        if (!$pid || !$running) {
+        $pids = [];
+        $pid = JsonLock::read('slave.pid', null, $repo_dir);
+        if ($pid) {
+            $pids = [$pid];
+        }
+
+        $processes = Shell::hasProcess("git-repo-watcher -d '$repo_dir'");
+        $processes2 = Shell::hasProcess("git-repo-watcher -d $repo_dir");
+        $processes = $processes+ $processes2;
+        if (!empty($processes)) {
+            $pids = $pids + array_column($processes, "PID");
+        }
+
+        if (empty($pids)) {
             $output->writeln("Slave mode is not running");
             return Command::SUCCESS;
         }
 
-        $command = "kill $pid";
-        Shell::passthru($command);
+        $count = 0;
+        foreach ($pids as $pid)
+        {
+            $running = Shell::isRunning( $pid );
+            if (!$running) continue;
 
-        $output->writeln("Slave mode stopped");
+            $command = "kill $pid";
+            Shell::passthru($command);
+            $count++;
+        }
+        JsonLock::write('slave.pid', null, $repo_dir);
+        JsonLock::save($repo_dir);
+
+        $output->writeln("$count slave commands stopped out of ". count($pids));
 
         return Command::SUCCESS;
     }

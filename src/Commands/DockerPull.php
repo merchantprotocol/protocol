@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -66,6 +67,7 @@ Class DockerPull extends Command {
         $this
             // configure an argument
             ->addArgument('image', InputArgument::OPTIONAL, 'The desired remote docker image tag')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -78,16 +80,17 @@ Class DockerPull extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+
         $output->writeln('<comment>Pulling remote docker image</comment>');
 
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
-        $image    = $input->getArgument('image') ?: Json::read('docker.image');
+        $image    = $input->getArgument('image') ?: Json::read('docker.image', false, $repo_dir);
 
         $command = "docker pull $image";
         $response = Shell::passthru($command);

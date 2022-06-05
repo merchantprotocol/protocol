@@ -34,8 +34,10 @@ namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
@@ -64,6 +66,7 @@ Class DockerCompose extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -76,19 +79,22 @@ Class DockerCompose extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         $output->writeln('<comment>Docker-compose up</comment>');
 
-        $localdir = Git::getGitLocalFolder();
-
-        if (!file_exists("{$localdir}/docker-compose.yml")) {
+        if (!file_exists("{$repo_dir}/docker-compose.yml")) {
             $output->writeln(' - Skipping docker compose, there is no docker-compose.yml in the project');
             return Command::SUCCESS;
         }
 
         $command = $this->getApplication()->find('env:default');
-        $returnCode = $command->run((new ArrayInput([])), $output);
+        $returnCode = $command->run((new ArrayInput([
+                '--dir' => $repo_dir
+            ])), $output);
 
-        $command = "cd $localdir && docker-compose up -d";
+        $command = "cd '$repo_dir' && docker-compose up -d";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

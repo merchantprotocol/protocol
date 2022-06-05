@@ -37,6 +37,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
@@ -63,6 +64,7 @@ Class ReleaseChangelog extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -143,8 +145,10 @@ Class ReleaseChangelog extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
+
         // make sure we're in the application repo
-        $repo_dir = Git::getGitLocalFolder();
         if (!$repo_dir) {
             $output->writeln("<error>This command must be run in the application repo.</error>");
             return Command::SUCCESS;
@@ -157,13 +161,13 @@ Class ReleaseChangelog extends Command {
         list($user, $project) = explode('/', $cleanurl);
 
         // make sure we have a token
-        $token = Json::read('git.token', false);
+        $token = Json::read('git.token', false, $repo_dir);
         if (!$token) {
             $generateTokenUrl = 'https://github.com/settings/tokens/new?description=protocol-cli-tool&scopes=repo';
             $question = new Question("You need to a github personal access token to access your repo, go here to create one. <info>$generateTokenUrl</info>. Enter your Token:", '');
             $token = $helper->ask($input, $output, $question);
-            Json::write('git.token', $token);
-            Json::save();
+            Json::write('git.token', $token, $repo_dir);
+            Json::save($repo_dir);
         }
 
         // push tags

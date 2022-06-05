@@ -37,8 +37,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
 use Symfony\Component\Console\Helper\Table;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
@@ -50,8 +50,6 @@ use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
 Class ProtocolStatus extends Command {
-
-    use LockableTrait;
 
     protected static $defaultName = 'status';
     protected static $defaultDescription = 'Checks on the system to see its health';
@@ -68,6 +66,7 @@ Class ProtocolStatus extends Command {
         ;
         $this
             // configure an argument
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
     }
@@ -81,32 +80,33 @@ Class ProtocolStatus extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        Git::checkInitializedRepo( $output, $repo_dir );
 
-            return Command::SUCCESS;
-        }
-
-        $repo_dir = Git::getGitLocalFolder();
-        $configrepo = Json::read('configuration.local', false);
+        $configrepo = Json::read('configuration.local', false, $repo_dir );
         $configrepo = Dir::realpath($repo_dir.$configrepo);
 
         $tableRows = [];
         $tableRows[] = ["Environment", "<info>".Config::read('env', 'not set')."</info>"];
-
-        $branch = Git::branch($configrepo);
-        $configmatch = Config::read('env', 'not set') == $branch;
-        $tableRows[] = ["Configuration Branch", $configmatch ?"<info>$branch</info>" :"<comment>$branch</comment>"];
+        if (Git::isInitializedRepo( $configrepo )) {
+            $branch = Git::branch($configrepo);
+            $configmatch = Config::read('env', 'not set') == $branch;
+            $tableRows[] = ["Configuration Branch", $configmatch ?"<info>$branch</info>" :"<comment>$branch</comment>"];
+        } else {
+            $tableRows[] = ["Configuration Branch", "<comment>NONE</comment>"];
+        }
 
         // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('slave.pid');
+        $pid = JsonLock::read('slave.pid', null, $repo_dir );
         $running = Shell::isRunning( $pid );
+
         if (!$pid || !$running) {
             $tableRows[] = ["Repository Slave Mode", "<comment>STOPPED</comment>"];
 
             // do an additional check for dangling processes
-            $processes = Shell::hasProcess("git-repo-watcher -d $repo_dir");
+            $processes = Shell::hasProcess("git-repo-watcher -d '$repo_dir'");
+            $processes2 = Shell::hasProcess("git-repo-watcher -d $repo_dir");
+            $processes = $processes+ $processes2;
             if (!empty($processes)) {
                 $pids = array_column($processes, "PID");
                 $pids = implode(",", $pids);
@@ -116,25 +116,27 @@ Class ProtocolStatus extends Command {
             $tableRows[] = ["Repository Slave Mode", "<info>RUNNING</info>"];
         }
 
-        // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('configuration.slave.pid');
-        $running = Shell::isRunning( $pid );
-        if (!$pid || !$running) {
-            $tableRows[] = ["Configuration Slave Mode", "<comment>STOPPED</comment>"];
+        if (Git::isInitializedRepo( $configrepo )) {
+            // Check to see if the PID is still running, fail if it is
+            $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir );
+            $running = Shell::isRunning( $pid );
+            if (!$pid || !$running) {
+                $tableRows[] = ["Configuration Slave Mode", "<comment>STOPPED</comment>"];
 
-            // do an additional check for dangling processes
-            $processes = Shell::hasProcess("git-repo-watcher -d $configrepo");
-            if (!empty($processes)) {
-                $pids = array_column($processes, "PID");
-                $pids = implode(",", $pids);
-                $tableRows[] = ["Dangling Configuration Watchers", "<error>$pids</error>"];
+                // do an additional check for dangling processes
+                $processes = Shell::hasProcess("git-repo-watcher -d $configrepo");
+                if (!empty($processes)) {
+                    $pids = array_column($processes, "PID");
+                    $pids = implode(",", $pids);
+                    $tableRows[] = ["Dangling Configuration Watchers", "<error>$pids</error>"];
+                }
+            } else {
+                $tableRows[] = ["Configuration Slave Mode", "<info>RUNNING</info>"];
             }
-        } else {
-            $tableRows[] = ["Configuration Slave Mode", "<info>RUNNING</info>"];
         }
 
         // let's check on docker
-        $containers = Docker::getContainerNamesFromDockerComposeFile();
+        $containers = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
         foreach ($containers as $container) {
             $tableRows[] = ["Docker Service ($container)", (
                 Docker::isDockerContainerRunning( $container )?"<info>RUNNING</info>":"<comment>STOPPED</comment>"
