@@ -47,16 +47,72 @@ If you already have an application in mind, then skip this step.
 ```
 mkdir helloworld
 cd helloworld
-``
+```
 
 Add an index.php script
 
 ```
-cat "<?php phpinfo();" > index.php
+echo "<?php phpinfo();" > index.php
 ```
+
+And lastly make this a git repository
+
+```
+git init
+```
+
+Make sure your local git folder is connected to a remote repository:
+
+```
+git remote add origin git@github.com:merchantprotocol/helloworld.git
+```
+
+If you haven't committed your local changes because you're following this guide literally, then do that now.
+
+```
+git add -A
+git commit -m 'initial commit'
+git push origin master
+```
+
 
 #### 3. Configure Your Project With Protocol
 
+Now we want to initialize the project with Protocol:
+
+```
+protocol init
+```
+
+This is going to add a protocol.json file into your repository which contains defaults for managing your web app.
+
+#### 4. Enabling CI/CD Mode
+
+There's no reason you'd actually want to do this on your local machine that I can imagine. But if you're ready to setup this repository location as a slave to the remote matching branch, then follow this step.
+
+This command will activate the current repository as a slave to its master.
+
+```
+protocol git:slave
+```
+
+You can now run the status function to see that slave mode is running
+
+```
+protocol status
+```
+
+You can go test the slave mode by adding a file to the remote repository. Within 10 seconds you should see that file appear within your local repo. The great thing about this slave mode is that it does not wipe out any changed files within the current local repo directory. The files will only be changed if you overwrite them with changes from the remote (master) repository.
+
+If the local repository gets changed to the extent that it gets off track from the master repo, then it will disconnect slave mode.
+
+To disable slave mode simple run:
+
+```
+protocol git:slave:stop
+```
+
+Now `protocol status` will show you that slave mode is stopped.
 
 
 
