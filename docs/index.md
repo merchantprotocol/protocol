@@ -136,6 +136,44 @@ You can now check the status with `protocol status` or `docker container ls` to 
 protocol docker:compose:stop
 ```
 
+#### 6. Managing Your Configuration Files
+
+Configuration files are typically dropped into a web server and forgotten about... that is until the server crashes or you need to create a new app environment for a new developer or a new staging system.
+
+Protocol has a unique method for managing configuration files. You can read more about the philosophy of it in the configuration documentation, but the basic premise is that we manage the configuration files in a separate repository form the codebase. Each branch is a different environment and any number of configuration files can be stored in the branch. Protocol will load the proper environment, or branch, and then symbolicly link all of the configuration files into the local code repo prior to starting the docker container. Super cool huh!
+
+To setup a new configuration environment we first need to set the environment for this server.
+
+```
+protocol config:env localhost
+```
+
+You can really name the environment whatever you want, in this example I named it localhost. Our developers always append their github handle onto the end of the environment `localhost-jonathonbyrdziak`. This way we can see everybodies environment configurations, and easily help new developers get up to speed by allowing them to copy another developers environment.
+
+Now configure the configurations by running:
+
+```
+protocol config:init
+```
+
+This will ask you for the remote configuration repo link. Let's create a new repo called 'helloworld-config' and give protocol the git link. Protocol will create your new environment and ask if you want to save your changes by PUSHing them to the remote repo. Say Yes.
+
+You now have your configuration repo configured. 
+
+Let's assume that you have a configuration file called `.env.` in your repository. Tracked or untracked, doesn't matter. If you don't have this file go ahead and create it `echo "; test config file" > .env`
+
+We want to copy this file into the configuration repo and leave it in the current location.
+
+```
+protocol config:cp .env
+```
+
+You can now check your configurations folder to see if the file was moved.
+
+```
+ls -la ../helloworld-config
+```
+
 
 
 
