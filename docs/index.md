@@ -44,7 +44,18 @@ protocol -v
 
 If you already have an application in mind, then skip this step.
 
+```
+mkdir helloworld
+cd helloworld
+``
 
+Add an index.php script
+
+```
+cat "<?php phpinfo();" > index.php
+```
+
+#### 3. Configure Your Project With Protocol
 
 
 
