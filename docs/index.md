@@ -114,6 +114,28 @@ protocol git:slave:stop
 
 Now `protocol status` will show you that slave mode is stopped.
 
+#### 5. Managing and Starting A Docker Container
+
+If your repository DOES NOT contain a `docker-compose.yml` file then here's a sample one:
+
+```
+sudo curl -L "https://raw.githubusercontent.com/merchantprotocol/docker-nginx-php7.4-fpm/master/example/simple-docker-compose/docker-compose.yml" > docker-compose.yml
+```
+
+The `byrdziak/merchantprotocol-webserver-nginx-php7.4:initial` docker container called in this compose file is a fully functional php web server running nginx and php-fpm7.4. We use this on all of our PHP projects, you can customize this container for the specifics of each repo [Docker Nginx Server](https://github.com/merchantprotocol/docker-nginx-php7.4-fpm).
+
+To boot up docker, all you need to do is run the following command and your docker container will be booted:
+
+```
+protocol docker:compose
+```
+
+You can now check the status with `protocol status` or `docker container ls` to see that it's running. When you're ready to stop it you can run:
+
+```
+protocol docker:compose:stop
+```
+
 
 
 
