@@ -1,37 +1,56 @@
-## Welcome to GitHub Pages
+## Protocol the Command Line Tool
 
-You can use the [editor on GitHub](https://github.com/merchantprotocol/protocol/edit/master/docs/index.md) to maintain and preview the content for your website in Markdown files.
+It just takes too long to repetitvely setup a new web server and then setup continuous deployment. Setting up a new server is easy, sure, but I don't want to waste my precious day setting up a new server and app if I don't have to. 
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+Then if I want continuous deployment.. there are lots of tools, but all are super complex for my needs, therefore taking way too long to setup. I want something simple, fast and reliable.
 
-### Markdown
+Oh and then don't forget having a VPS go down and losing your configuration files! Then you've got to set it all up again, not to forget trying to remember what the configurations were...
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+I'm done with those days!
 
-```markdown
-Syntax highlighted code block
+Introducing Protocol, the Command Line Tool for PHP web apps.
 
-# Header 1
-## Header 2
-### Header 3
+With this tool you can quickly configure any php repository to deploy with ease on your server. Enable slave mode and all updates to your repository branch will get pushed out to production. It also manages the configuration files for multiple environments in a separate repository, making it easy to push configuration changes to hundreds of nodes.
 
-- Bulleted
-- List
+This tool is becomming a valuable asset in my DevOps arsenal.
 
-1. Numbered
-2. List
+- It's perfect for setting up continuous deployment or continuous integration pipelines.
+- Makes it easy to keep hundreds of nodes up to date in a cluster, even surviving a reboot!
+- Manage production, staging and local development configuration files with ease.
+- Makes it easy for new developers to the project to get up and running with little effort.
+- Save time launching new web servers and applications
 
-**Bold** and _Italic_ and `Code` text
+### Getting Started Quick Start Guide
 
-[Link](url) and ![Image](src)
+In this quick start tutorial I'm going to show you how to deploy simple HelloWorld.php file to a production web app on your local machine.
+
+#### 1. Installation
+
+Open terminal and run the installation command:
+
+```
+sudo curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | bash
 ```
 
-For more details see [Basic writing and formatting syntax](https://docs.github.com/en/github/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax).
+This will install all dependencies and the protocol command line tool on MacOS or Ubuntu.
 
-### Jekyll Themes
+You should now be able to run the following command to confirm that it's been installed
 
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/merchantprotocol/protocol/settings/pages). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
+```
+protocol -v
+```
+
+#### 2. Create A New Project Folder
+
+If you already have an application in mind, then skip this step.
+
+
+
+
+
+
+
 
 ### Support or Contact
 
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+Having trouble with Protocol? Contact us as [MerchantProtocol.com](https://merchantprotocol.com/) and we’ll help you sort it out.
