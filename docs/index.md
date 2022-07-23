@@ -174,9 +174,81 @@ You can now check your configurations folder to see if the file was moved.
 ls -la ../helloworld-config
 ```
 
+Once you've confirmed that the file has moved, you can now delete it from your local repo and it will only exist in the config repo.
 
+```
+rm .env
+```
 
+Ok, so this is how your configuration files will live. They will live in a separate configuration folder from your code repository. This allows us to switch between configuration environments easily, and even deploy multiple localhost configuration environments, one for each developer.
 
+#### 7. Enabling a Configuration Environment
+
+Ok, so we're on the localhost dev environment, still sitting inside of our primary code repo (not the config repo) and we're wondering how we're actually going to use the configuration files.
+
+We're going to run this next command that symbolicly links the configuration files from the config directory into our codebase directory:
+
+```
+protocol config:link
+```
+
+And now if you run `ls -la` you'll see the .env file in the codebase repo begin symlinked to the config repo.
+
+Your next problem/question is that the symbolic linking is probably not working inside of your docker container if you've tried to run docker to test this all out. What you'll need to do is add another mounted volume to the docker-compose.yml file that looks like this:
+
+```
+    volumes:
+      - '.:/var/www/html:rw'
+      - '../helloworld-config/:/var/www/helloworld-config:rw'
+```
+
+Notice the helloworld-config reference that mounts the config volume as a sibling to the html folder. This will allow the symlinks to be honored inside of your docker container. Protocol makes sure to create the links as relative and not absolute in order for this all to work seamlessly.
+
+And to unlink we'd just run:
+
+```
+protocol config:unlink
+```
+
+You also have various other protocol methods for managing your configurations:
+
+```
+Protocol 0.3.0
+
+config
+  config:cp               Copy a file into the configurations repo.
+  config:env              Set the global environment for the server
+  config:init             Initialize the configuration repository
+  config:link             Create symlinks for the configurations into the application dir
+  config:mv               Move a file into the config repo, delete it from the app repo and create a symlink back.
+  config:new              Create a new environment
+  config:refresh          Clears all links and rebuilds them
+  config:save             Saves the current environment to the remote
+  config:slave            Keep the config repo updated with the remote changes
+  config:slave:stop       Stops the config repo slave mode when its running
+  config:switch           Switch to a different environment
+  config:unlink           Remove symlinks for the configurations in the application dir
+```
+
+#### 8. Start everything at the same time
+
+Now of course we don't want to have to run all these commands at the same time. We'd much rather just run a single command to start the web application and one command to stop the web application. For that purpose we're just going to run:
+
+```
+protocol start
+```
+
+That's it. Here's what happens:
+
+1. The latest changes are pulled down for the codebase repo
+2. `Composer Install` is run to update any vendor dependencies
+3. The codebase repo becomes a slave to its remote branch equivilant
+4. The latest configuration env is pulled down.
+5. The config repo becomes a slave to its remote branch equiv
+6. The config repo is symbolicly linked into the codebase repo for the preconfigured environment
+7. The latest changes are pulled down for the docker container
+8. The docker container is booted up and rebuilt if necessary
+9. `protocol status` is run to show the final outcome
 
 ### Support or Contact
 
