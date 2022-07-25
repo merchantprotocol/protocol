@@ -135,11 +135,13 @@ Class ProtocolStatus extends Command {
         }
 
         // let's check on docker
-        $containers = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
-        foreach ($containers as $container) {
-            $tableRows[] = ["Docker Service ($container)", (
-                Docker::isDockerContainerRunning( $container )?"<info>RUNNING</info>":"<comment>STOPPED</comment>"
-            )];
+        if (Docker::isDockerInitialized( $repo_dir )) {
+            $containers = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            foreach ($containers as $container) {
+                $tableRows[] = ["Docker Service ($container)", (
+                    Docker::isDockerContainerRunning( $container )?"<info>RUNNING</info>":"<comment>STOPPED</comment>"
+                )];
+            }
         }
 
         // check to see that the crontab is installed

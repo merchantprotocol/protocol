@@ -40,6 +40,21 @@ use Gitcd\Utils\Yaml;
 Class Docker
 {
     /**
+     * Tells us if there's a docker-compose file in the repo
+     *
+     * @param boolean $repo_dir
+     * @return boolean
+     */
+    public static function isDockerInitialized( $repo_dir = false )
+    {
+        if (!$repo_dir) {
+            $repo_dir = '..'.DIRECTORY_SEPARATOR;
+        }
+        $yaml = $repo_dir.'docker-compose.yml';
+        return is_file($yaml);
+    }
+
+    /**
      * Boolean response as to whether or not a docker service is running
      *
      * @param [type] $service
