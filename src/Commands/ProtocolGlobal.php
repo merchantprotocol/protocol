@@ -103,8 +103,8 @@ Class ProtocolGlobal extends Command {
 
         // Is there a conflicing datamelt command already in the namespace
         $which = Shell::run("which {$this->commandName}", $notfound);
-        if (!$notfound) {
-            $output->writeln('<error>Conflicting datamelt command already exists globally</error>');
+        if (!$notfound || strpos($notfound, 'no '.$this->commandName.' in')!==false) {
+            $output->writeln('<error>Conflicting '.$this->commandName.' command already exists globally</error>');
             return Command::SUCCESS;
         }
 
