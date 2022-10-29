@@ -106,6 +106,7 @@ Class ProtocolStart extends Command {
         }
 
         $devEnvs = ['localhost', 'local', 'dev', 'development'];
+        $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost'));
 
         $arrInput = (new ArrayInput([
                 '--dir' => $repo_dir
@@ -116,7 +117,7 @@ Class ProtocolStart extends Command {
             ]));
 
         // if not a local dev env
-        if (!in_array($environment, $devEnvs)) {
+        if (!$isDev) {
             // run update
             $command = $this->getApplication()->find('git:pull');
             $returnCode = $command->run($arrInput, $output);
@@ -130,7 +131,7 @@ Class ProtocolStart extends Command {
             $command = $this->getApplication()->find('config:init');
             $returnCode = $command->run($arrInput1, $output);
 
-            if (!in_array($environment, $devEnvs)) {
+            if (!$isDev) {
                 $command = $this->getApplication()->find('config:slave');
                 $returnCode = $command->run($arrInput, $output);
             }
