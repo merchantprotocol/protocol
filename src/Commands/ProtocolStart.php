@@ -106,7 +106,7 @@ Class ProtocolStart extends Command {
         }
 
         $devEnvs = ['localhost', 'local', 'dev', 'development'];
-        $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost'));
+        $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost') !== false);
 
         $arrInput = (new ArrayInput([
                 '--dir' => $repo_dir
