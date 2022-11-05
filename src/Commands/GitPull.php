@@ -109,7 +109,7 @@ Class GitPull extends Command {
         $remote = Git::remoteName( $repo_dir );
 
         // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("git -C '$repo_dir' fetch --all", $return_var);
+        $response = Shell::run("git -C '$repo_dir' fetch $remote", $return_var);
         if ($response) $output->writeln($response);
 
         // if the fetch failed, then stop
