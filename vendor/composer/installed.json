@@ -1462,17 +1462,17 @@
         },
         {
             "name": "symfony/console",
-            "version": "v5.4.5",
-            "version_normalized": "5.4.5.0",
+            "version": "v5.4.19",
+            "version_normalized": "5.4.19.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/console.git",
-                "reference": "d8111acc99876953f52fe16d4c50eb60940d49ad"
+                "reference": "dccb8d251a9017d5994c988b034d3e18aaabf740"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/console/zipball/d8111acc99876953f52fe16d4c50eb60940d49ad",
-                "reference": "d8111acc99876953f52fe16d4c50eb60940d49ad",
+                "url": "https://api.github.com/repos/symfony/console/zipball/dccb8d251a9017d5994c988b034d3e18aaabf740",
+                "reference": "dccb8d251a9017d5994c988b034d3e18aaabf740",
                 "shasum": ""
             },
             "require": {
@@ -1510,7 +1510,7 @@
                 "symfony/lock": "",
                 "symfony/process": ""
             },
-            "time": "2022-02-24T12:45:35+00:00",
+            "time": "2023-01-01T08:32:19+00:00",
             "type": "library",
             "installation-source": "dist",
             "autoload": {
@@ -1544,7 +1544,7 @@
                 "terminal"
             ],
             "support": {
-                "source": "https://github.com/symfony/console/tree/v5.4.5"
+                "source": "https://github.com/symfony/console/tree/v5.4.19"
             },
             "funding": [
                 {

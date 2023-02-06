@@ -5,3 +5,4 @@ tmp/pid/*
 config/config.php
 protocol.json
 protocol.lock
+.idea
