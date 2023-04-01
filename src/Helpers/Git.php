@@ -32,6 +32,9 @@
  */
 namespace Gitcd\Helpers;
 
+use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
+
 Class Git 
 {
     /**

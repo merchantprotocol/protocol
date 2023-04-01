@@ -34,6 +34,7 @@ namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Config as UtilConfig;
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\Dir;
 
 Class Config {
 

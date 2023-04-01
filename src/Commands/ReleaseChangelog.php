@@ -43,6 +43,7 @@ use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Str;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 
