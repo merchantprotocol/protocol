@@ -108,6 +108,7 @@ echo "Installing Protocol"
 
 git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
 sudo chmod +x $HOME/protocol/protocol
-sudo ln -s $HOME/protocol/protocol /usr/bin/protocol
+cd $HOME/protocol
+protocol self:global
 
-protocol --version
+protocol
