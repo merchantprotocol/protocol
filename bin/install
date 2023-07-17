@@ -35,11 +35,11 @@ case "$PLATFORM" in
         docker-compose -v
 
 
-        echo "Installing php7.4"
+        echo "Installing php8.1"
         sudo amazon-linux-extras disable php7.1
         sudo yum remove php-common -y
         
-        sudo amazon-linux-extras enable php7.4
+        sudo amazon-linux-extras enable php8.1
         sudo yum install php-cli php-pdo php-fpm php-json php-mysqlnd -y
 
         php -v
