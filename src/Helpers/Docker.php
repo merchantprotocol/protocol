@@ -104,4 +104,20 @@ Class Docker
         $processes = Shell::run($cmd);
         return Shell::shellTableToArray($processes);
     }
+
+    /**
+     * Determine the appropriate Docker command to use: "docker compose" or "docker-compose".
+     *
+     * @return string
+     */
+    public static function getDockerCommand()
+    {
+        // Check if "docker compose" is available
+        $commandCheck = Shell::exec('docker compose version');
+        if (strpos($commandCheck, 'Docker Compose') !== false) {
+            return "docker compose";
+        } else {
+            return "docker-compose";
+        }
+    }
 }

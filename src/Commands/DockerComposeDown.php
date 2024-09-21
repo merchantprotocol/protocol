@@ -32,6 +32,7 @@
  */
 namespace Gitcd\Commands;
 
+use Gitcd\Helpers\Docker;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\InputInterface;
@@ -87,7 +88,9 @@ Class DockerComposeDown extends Command {
             return Command::SUCCESS;
         }
 
-        $command = "cd '$repo_dir' && docker-compose down";
+        $dockerCommand = Docker::getDockerCommand();
+
+        $command = "cd '$repo_dir' && $dockerCommand down";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

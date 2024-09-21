@@ -32,6 +32,7 @@
  */
 namespace Gitcd\Commands;
 
+use Gitcd\Helpers\Docker;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -102,12 +103,14 @@ Class DockerComposeRebuild extends Command {
             return Command::FAILURE;
         }
 
+        $dockerCommand = Docker::getDockerCommand();
+
         $command = $this->getApplication()->find('env:default');
         $returnCode = $command->run((new ArrayInput([
                 '--dir' => $repo_dir
             ])), $output);
 
-        $command = "cd '$repo_dir' && docker-compose up --build -d";
+        $command = "cd '$repo_dir' && $dockerCommand up --build -d";
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;
