@@ -113,7 +113,7 @@ Class Docker
     public static function getDockerCommand()
     {
         // Check if "docker compose" is available
-        $commandCheck = Shell::exec('docker compose version');
+        $commandCheck = Shell::run('docker compose version');
         if (strpos($commandCheck, 'Docker Compose') !== false) {
             return "docker compose";
         } else {
