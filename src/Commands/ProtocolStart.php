@@ -151,6 +151,14 @@ Class ProtocolStart extends Command {
         $command = $this->getApplication()->find('docker:compose:rebuild');
         $returnCode = $command->run($arrInput, $output);
 
+        // run composer install inside docker container
+        $command = $this->getApplication()->find('exec');
+        $arrInputComposer = new ArrayInput([
+            '--dir' => $repo_dir,
+            'cmd' => 'composer install'
+        ]);
+        $returnCode = $command->run($arrInputComposer, $output);
+
         // end with status
         $command = $this->getApplication()->find('status');
         $returnCode = $command->run($arrInput, $output);
