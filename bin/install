@@ -2,9 +2,207 @@
 
 set +x
 
+# macOS detection
+if [[ "$(uname)" == "Darwin" ]]; then
+    echo "Detected macOS (Darwin)"
+    # Check for Homebrew
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "Homebrew is not installed. Please install Homebrew from https://brew.sh/ before proceeding."
+        exit 1
+    fi
+    
+    # Function to prompt and install via brew
+    prompt_install() {
+        local pkg="$1"
+        local brew_pkg="${2:-$1}"
+        if command -v $pkg >/dev/null 2>&1; then
+            echo "$pkg is already installed: $($pkg --version | head -n1)"
+        else
+            read -p "Do you want to install $pkg using Homebrew? (y/N): " yn
+            case $yn in
+                [Yy]*)
+                    brew install $brew_pkg
+                    if command -v $pkg >/dev/null 2>&1; then
+                        echo "$pkg installed: $($pkg --version | head -n1)"
+                    else
+                        echo "Failed to install $pkg. Please check for errors."
+                    fi
+                    ;;
+                *)
+                    echo "Skipping $pkg installation."
+                    ;;
+            esac
+        fi
+    }
+    
+    # Docker or OrbStack
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker is available: $(docker --version | head -n1)"
+    elif command -v orbstack >/dev/null 2>&1; then
+        echo "OrbStack is installed. OrbStack provides Docker compatibility."
+        echo "You can use 'docker' commands via OrbStack."
+    else
+        read -p "Neither Docker nor OrbStack is installed. Do you want to install Docker Desktop using Homebrew? (y/N): " yn
+        case $yn in
+            [Yy]*)
+                brew install --cask docker
+                echo "Please launch Docker Desktop manually after installation."
+                ;;
+            *)
+                echo "Skipping Docker installation."
+                ;;
+        esac
+    fi
+
+    # Docker Compose (prefer 'docker compose' if OrbStack or modern Docker is present)
+    if command -v docker >/dev/null 2>&1; then
+        if docker compose version >/dev/null 2>&1; then
+            echo "'docker compose' is available: $(docker compose version | head -n1)"
+        elif command -v docker-compose >/dev/null 2>&1; then
+            echo "docker-compose is available: $(docker-compose --version | head -n1)"
+        else
+            read -p "'docker compose' is not available. Do you want to install Docker Compose as a standalone package? (y/N): " yn
+            case $yn in
+                [Yy]*)
+                    brew install docker-compose
+                    if command -v docker-compose >/dev/null 2>&1; then
+                        echo "docker-compose installed: $(docker-compose --version | head -n1)"
+                    else
+                        echo "Failed to install docker-compose."
+                    fi
+                    ;;
+                *)
+                    echo "Skipping docker-compose installation."
+                    ;;
+            esac
+        fi
+    elif command -v orbstack >/dev/null 2>&1; then
+        echo "OrbStack provides 'docker compose' support."
+    else
+        echo "Docker is not available, so Docker Compose is not needed."
+    fi
+    # PHP
+    prompt_install php
+    # Git
+    prompt_install git
+    # Composer
+    if command -v composer >/dev/null 2>&1; then
+        echo "composer is already installed: $(composer --version | head -n1)"
+    else
+        read -p "Do you want to install Composer (PHP dependency manager) using Homebrew? (y/N): " yn
+        case $yn in
+            [Yy]*)
+                brew install composer
+                if command -v composer >/dev/null 2>&1; then
+                    echo "composer installed: $(composer --version | head -n1)"
+                else
+                    echo "Failed to install composer."
+                fi
+                ;;
+            *)
+                echo "Skipping composer installation."
+                ;;
+        esac
+    fi
+    # --- Installing Protocol on macOS ---
+    echo "\nInstalling Protocol"
+    BINARY_NAME="protocol"
+    USER_BIN="$HOME/bin"
+    USR_LOCAL_BIN="/usr/local/bin"
+
+    # Step 1: Attempt to auto-detect protocol directory as parent of script
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    PARENT_DIR="$(dirname "$SCRIPT_DIR")"
+    PROTOCOL_DIR="$PARENT_DIR"
+    # Check if protocol binary exists in detected dir
+    if [ -f "$PROTOCOL_DIR/$BINARY_NAME" ]; then
+        echo "Auto-detected protocol directory: $PROTOCOL_DIR"
+    else
+        echo "Could not auto-detect protocol directory or binary not found at $PROTOCOL_DIR/$BINARY_NAME."
+        # Fallback: search common locations
+        CANDIDATES=("$PWD/protocol" "$HOME/protocol")
+        PROTOCOL_DIR=""
+        for dir in "${CANDIDATES[@]}"; do
+            if [ -d "$dir" ]; then
+                read -p "Found protocol directory at $dir. Use this directory? (y/N): " yn
+                case $yn in
+                    [Yy]*)
+                        PROTOCOL_DIR="$dir"
+                        break
+                        ;;
+                    *)
+                        ;;
+                esac
+            fi
+        done
+        # If not found, prompt user to specify or clone
+        if [ -z "$PROTOCOL_DIR" ]; then
+            read -p "No protocol directory found. Would you like to clone the repo? (y/N): " yn
+            if [[ "$yn" =~ ^[Yy]$ ]]; then
+                read -p "Where should protocol be cloned? (default: $HOME/protocol): " input_dir
+                if [ -z "$input_dir" ]; then
+                    input_dir="$HOME/protocol"
+                fi
+                git clone https://github.com/merchantprotocol/protocol.git "$input_dir"
+                PROTOCOL_DIR="$input_dir"
+            else
+                read -p "Please specify the path to your protocol directory: " input_dir
+                if [ -d "$input_dir" ]; then
+                    PROTOCOL_DIR="$input_dir"
+                else
+                    echo "Directory $input_dir does not exist. Aborting."
+                    exit 1
+                fi
+            fi
+        fi
+    fi
+    # Step 2: Make binary executable
+    if [ -f "$PROTOCOL_DIR/$BINARY_NAME" ]; then
+        chmod +x "$PROTOCOL_DIR/$BINARY_NAME"
+    fi
+
+    # Step 3: Check if $PROTOCOL_DIR is already in PATH config files before prompting
+    EXPORT_LINE="export PATH=\"$PROTOCOL_DIR:\$PATH\""
+    FOUND=0
+    for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+        if [ -f "$file" ] && grep -Fxq "$EXPORT_LINE" "$file"; then
+            echo "$PROTOCOL_DIR already present in PATH in $(basename $file)"
+            FOUND=1
+        fi
+    done
+    if [[ ":$PATH:" == *":$PROTOCOL_DIR:"* ]] || [ $FOUND -eq 1 ]; then
+        echo "$PROTOCOL_DIR is already in your PATH."
+    else
+        read -p "Would you like to add $PROTOCOL_DIR to your PATH? (y/N): " yn
+        case $yn in
+            [Yy]*)
+                for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+                    if [ ! -f "$file" ]; then
+                        touch "$file"
+                    fi
+                    if ! grep -Fxq "$EXPORT_LINE" "$file"; then
+                        echo "$EXPORT_LINE" >> "$file"
+                        echo "Added $PROTOCOL_DIR to PATH in $(basename $file)"
+                    fi
+                done
+                # Update current session
+                export PATH="$PROTOCOL_DIR:$PATH"
+                ;;
+            *)
+                echo "You can add $PROTOCOL_DIR to your PATH manually if you wish to run 'protocol' from anywhere."
+                ;;
+        esac
+    fi
+    TARGET_BIN="$PROTOCOL_DIR/$BINARY_NAME"
+
+    # Step 4: (macOS) Skip self:global for local safety
+    # Not running self:global on macOS to avoid global install issues.
+    # If you want a global install, run: $TARGET_BIN self:global manually (may require sudo).
+    exit 0
+fi
+
 PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 echo "Platform is $PLATFORM"
-
 
 case "$PLATFORM" in
 

@@ -32,6 +32,10 @@
  * @license    MIT License
  */
 
+// Suppress deprecated, notice, and warning messages for CLI usage
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED & ~E_NOTICE & ~E_WARNING);
+ini_set('display_errors', 'Off');
+
 require __DIR__ . '/vendor/autoload.php';
 
 DEFINE('WORKING_DIR', getcwd().DIRECTORY_SEPARATOR);
