@@ -159,21 +159,6 @@ Class ProtocolStart extends Command {
         ]);
         $returnCode = $command->run($arrInputComposer, $output);
 
-        // run PHP Artisan tests automatically
-        $output->writeln('<info>Running PHP Artisan tests...</info>');
-        $command = $this->getApplication()->find('exec');
-        $arrInputTests = new ArrayInput([
-            '--dir' => $repo_dir,
-            'cmd' => 'php artisan test'
-        ]);
-        $returnCode = $command->run($arrInputTests, $output);
-        
-        if ($returnCode !== Command::SUCCESS) {
-            $output->writeln('<error>Tests failed! Please check the test results above.</error>');
-        } else {
-            $output->writeln('<info>All tests passed successfully!</info>');
-        }
-
         // end with status
         $command = $this->getApplication()->find('status');
         $returnCode = $command->run($arrInput, $output);
