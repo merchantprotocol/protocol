@@ -33,6 +33,7 @@
 namespace Gitcd\Commands\Init;
 
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Input\InputInterface;
 
 interface ProjectInitializerInterface
 {
@@ -54,10 +55,12 @@ interface ProjectInitializerInterface
      * Initialize the project structure
      *
      * @param string $repo_dir
+     * @param InputInterface $input
      * @param OutputInterface $output
+     * @param mixed $helper
      * @return bool
      */
-    public function initialize(string $repo_dir, OutputInterface $output): bool;
+    public function initialize(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): bool;
 
     /**
      * Get the template directory path for this initializer
