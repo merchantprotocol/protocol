@@ -1,0 +1,19 @@
+services:
+  app:
+    container_name: inbound
+    image: byrdziak/merchantprotocol-webserver-nginx-php8.1:initial
+    restart: unless-stopped
+    hostname: ${DOCKER_HOSTNAME}
+    ports:
+        - "80:80"
+        - "443:443"
+        - "5173:5173"
+    extra_hosts:
+        - "host.docker.internal:host-gateway"
+    volumes:
+      - ".:/var/www/html:rw"
+      - "../inbound-config/:/var/www/inbound-config:rw"
+    ulimits:
+        core:
+            hard: 0
+            soft: 0

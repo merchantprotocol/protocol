@@ -40,11 +40,14 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\ChoiceQuestion;
+use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
+use Gitcd\Commands\Init\Php81;
 
 Class ProtocolInit extends Command {
 
@@ -66,9 +69,26 @@ Class ProtocolInit extends Command {
         ;
         $this
             // configure an argument
+            ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addOption('with-config', 'c', InputOption::VALUE_NONE, 'Also initialize configuration repository')
             // ...
         ;
+    }
+
+    /**
+     * Get available project initializers
+     *
+     * @return array
+     */
+    protected function getAvailableInitializers(): array
+    {
+        return [
+            'php81' => new Php81(),
+            // Add more project types here as they become available
+            // 'php82' => new Php82(),
+            // 'node18' => new Node18(),
+        ];
     }
 
     /**
@@ -83,26 +103,63 @@ Class ProtocolInit extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        Json::write('name', basename($repo_dir), $repo_dir);
+        $helper = $this->getHelper('question');
+        $output->writeln('');
+        $output->writeln('<info>Protocol Project Initialization</info>');
+        $output->writeln('');
 
-        if (file_exists("{$repo_dir}/docker-compose.yml")) {
-            Json::write('docker.container_name', Yaml::read('services.app.container_name', null, $repo_dir), $repo_dir);
-            Json::write('docker.image', Yaml::read('services.app.image', null, $repo_dir), $repo_dir);
+        // Get available project types
+        $initializers = $this->getAvailableInitializers();
+        $choices = [];
+        foreach ($initializers as $key => $initializer) {
+            $choices[$key] = $initializer->getName() . ' - ' . $initializer->getDescription();
         }
 
-        $remoteurl = Git::RemoteUrl( $repo_dir );
-        Json::write('git.remote', $remoteurl, $repo_dir);
+        // Ask user to select project type
+        $question = new ChoiceQuestion(
+            'What kind of project are you setting up?',
+            $choices,
+            'php81' // default
+        );
+        $question->setErrorMessage('Project type %s is invalid.');
 
-        $remoteName = Git::remoteName( $repo_dir );
-        Json::write('git.remotename', $remoteName, $repo_dir);
+        $selectedAnswer = $helper->ask($input, $output, $question);
+        
+        // Find the key from the selected answer
+        $selectedKey = array_search($selectedAnswer, $choices);
+        if ($selectedKey === false) {
+            // If not found by value, the answer might be the key itself
+            $selectedKey = $selectedAnswer;
+        }
+        
+        $selectedInitializer = $initializers[$selectedKey];
 
-        $branch = Git::branch( $repo_dir );
-        Json::write('git.branch', $branch, $repo_dir);
+        $output->writeln('');
+        $output->writeln("<comment>Selected: {$selectedInitializer->getName()}</comment>");
+        $output->writeln('');
 
-        Json::save($repo_dir);
+        // Run the project-specific initialization
+        $selectedInitializer->initialize($repo_dir, $output);
 
-        // add the protocol.lock file to gitignore
-        Git::addIgnore( 'protocol.lock', $repo_dir );
+        $output->writeln('');
+
+        // Create protocol.json using the base initializer
+        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
+
+        // Optionally initialize configuration repository
+        if ($input->getOption('with-config')) {
+            $selectedInitializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+        } else {
+            $output->writeln('');
+            $question = new ConfirmationQuestion('Do you want to initialize a configuration repository? [y/n] ', false);
+            if ($helper->ask($input, $output, $question)) {
+                $selectedInitializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+            }
+        }
+
+        $output->writeln('');
+        $output->writeln('<info>✓ Protocol initialization complete!</info>');
+        $output->writeln('');
 
         return Command::SUCCESS;
     }
