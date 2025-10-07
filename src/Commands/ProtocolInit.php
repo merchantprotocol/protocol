@@ -139,7 +139,7 @@ Class ProtocolInit extends Command {
         $output->writeln('');
 
         // Run the project-specific initialization
-        $selectedInitializer->initialize($repo_dir, $output);
+        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
 
         $output->writeln('');
 

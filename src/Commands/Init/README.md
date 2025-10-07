@@ -33,6 +33,7 @@ The base class includes `initializeConfigRepo()` which handles:
 - Cloning existing config repos or creating new ones
 - Template file setup for new config repos
 - Remote repository configuration
+- **Automatically adds config volume to docker-compose.yml** when initialized
 
 ### Available Project Types
 
@@ -50,6 +51,24 @@ The base class includes `initializeConfigRepo()` which handles:
 - `docker-compose.yml` - Docker Compose configuration
 
 **Docker Image:** `byrdziak/merchantprotocol-webserver-nginx-php8.1:initial`
+
+**Web Root Configuration:**
+- During initialization, you'll be prompted to select your web root directory
+- Options include:
+  - Common directories: `public`, `public_html`, `web`, `www`, `html`
+  - Existing directories in your project
+  - Current directory (`/`)
+  - Manual entry for custom paths
+- The nginx-ssl.conf file is automatically updated with your selection
+
+**Docker Compose Behavior:**
+- Initial `docker-compose.yml` includes only the main app volume
+- When config repo is initialized, the config volume is automatically added:
+  ```yaml
+  volumes:
+    - ".:/var/www/html:rw"
+    - "../{project-name}-config/:/var/www/{project-name}-config:rw"
+  ```
 
 ## Adding New Project Types
 

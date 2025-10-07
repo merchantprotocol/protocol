@@ -49,15 +49,17 @@ abstract class BaseInitializer implements ProjectInitializerInterface
      * This is the main entry point that orchestrates the initialization
      *
      * @param string $repo_dir
+     * @param InputInterface $input
      * @param OutputInterface $output
+     * @param mixed $helper
      * @return bool
      */
-    public function initialize(string $repo_dir, OutputInterface $output): bool
+    public function initialize(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): bool
     {
         $output->writeln("<comment>Initializing {$this->getName()} project structure...</comment>");
 
         // Run project-specific initialization
-        $this->initializeProject($repo_dir, $output);
+        $this->initializeProject($repo_dir, $input, $output, $helper);
 
         $output->writeln("<info>✓ {$this->getName()} project initialized successfully</info>");
 
@@ -69,10 +71,12 @@ abstract class BaseInitializer implements ProjectInitializerInterface
      * Each initializer must implement this method
      *
      * @param string $repo_dir
+     * @param InputInterface $input
      * @param OutputInterface $output
+     * @param mixed $helper
      * @return void
      */
-    abstract protected function initializeProject(string $repo_dir, OutputInterface $output): void;
+    abstract protected function initializeProject(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): void;
 
     /**
      * Create protocol.json with base configuration
@@ -290,6 +294,46 @@ abstract class BaseInitializer implements ProjectInitializerInterface
         }
 
         Json::save($repo_dir);
+        
+        // Add config volume to docker-compose.yml
+        $this->addConfigVolumeToDockerCompose($repo_dir, $foldername, $output);
+        
         $output->writeln('<info>✓ Configuration repository initialized</info>');
+    }
+
+    /**
+     * Add configuration volume to docker-compose.yml
+     *
+     * @param string $repo_dir
+     * @param string $configFolderName
+     * @param OutputInterface $output
+     * @return void
+     */
+    protected function addConfigVolumeToDockerCompose(string $repo_dir, string $configFolderName, OutputInterface $output): void
+    {
+        $dockerComposePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        
+        if (!file_exists($dockerComposePath)) {
+            return;
+        }
+
+        $content = file_get_contents($dockerComposePath);
+        
+        // Check if config volume already exists
+        if (strpos($content, $configFolderName) !== false) {
+            return;
+        }
+
+        // Find the volumes section and add the config volume
+        $configVolumeLine = "      - \"../{$configFolderName}/:/var/www/{$configFolderName}:rw\"";
+        
+        // Look for the volumes section with the main app volume
+        if (preg_match('/(    volumes:\s*\n\s*- "\.:.+?:rw")/s', $content, $matches)) {
+            $replacement = $matches[1] . "\n" . $configVolumeLine;
+            $content = str_replace($matches[1], $replacement, $content);
+            
+            file_put_contents($dockerComposePath, $content);
+            $output->writeln("  <info>✓</info> Added config volume to docker-compose.yml");
+        }
     }
 }

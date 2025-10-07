@@ -12,7 +12,6 @@ services:
         - "host.docker.internal:host-gateway"
     volumes:
       - ".:/var/www/html:rw"
-      - "../inbound-config/:/var/www/inbound-config:rw"
     ulimits:
         core:
             hard: 0
