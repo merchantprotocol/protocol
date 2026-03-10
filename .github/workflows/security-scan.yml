@@ -1,0 +1,77 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Run weekly on Monday at 9am UTC for SOC2 continuous monitoring
+    - cron: '0 9 * * 1'
+
+jobs:
+  credential-scan:
+    name: Credential & Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for hardcoded secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Scan for dangerous functions
+        run: |
+          echo "Checking for debug statements..."
+          if grep -rn 'var_dump\|print_r.*die\|dd(' src/ --include="*.php"; then
+            echo "::warning::Debug statements found in source code"
+          fi
+
+          echo "Checking for unsafe shell execution..."
+          if grep -rn 'exec(\$\|system(\$\|passthru(\$\|shell_exec(\$' src/ --include="*.php" | grep -v 'escapeshellarg\|escapeshellcmd'; then
+            echo "::warning::Potentially unsafe shell execution found"
+          fi
+
+          echo "Checking for error suppression..."
+          if grep -rn '@unlink\|@mkdir\|@touch\|@chmod' src/ --include="*.php"; then
+            echo "::warning::Error suppression operators found"
+          fi
+
+  file-permissions:
+    name: File Permission Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for overly permissive files
+        run: |
+          echo "Checking for files that should not be world-readable..."
+          if [ -f config/config.php ]; then
+            echo "::warning::config/config.php is committed - ensure no credentials are present"
+          fi
+
+          echo "Checking for potential credential files..."
+          SENSITIVE_FILES=$(find . -name ".env" -o -name "*.key" -o -name "*.pem" -o -name "credentials*" -o -name "*secret*" 2>/dev/null | grep -v vendor/ | grep -v node_modules/ || true)
+          if [ -n "$SENSITIVE_FILES" ]; then
+            echo "::error::Potential credential files found:"
+            echo "$SENSITIVE_FILES"
+            exit 1
+          fi
