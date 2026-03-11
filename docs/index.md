@@ -7,6 +7,7 @@ Protocol is a CLI tool for continuous deployment and configuration management of
 | Document | Description |
 |---|---|
 | [Getting Started](getting-started.md) | Start here — install, init, config, deploy, all explained step by step |
+| [Deployment Strategies](deployment-types.md) | Branch, release, and shadow mode — how they work and when to use each |
 | [Architecture Overview](architecture.md) | System design, components, data flow, namespace structure, and known architectural issues |
 | [Installation Guide](installation.md) | System requirements, quick install, manual install, platform notes, production node setup |
 | [Command Reference](commands.md) | Complete reference for all CLI commands with arguments, options, and behavior |

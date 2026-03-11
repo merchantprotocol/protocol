@@ -5,6 +5,8 @@
     <br />
     <a href="docs/getting-started.md"><strong>Getting Started</strong></a>
     &middot;
+    <a href="docs/deployment-types.md"><strong>Deployment Strategies</strong></a>
+    &middot;
     <a href="docs/secrets.md"><strong>Secrets</strong></a>
     &middot;
     <a href="docs/commands.md"><strong>Commands</strong></a>
@@ -349,6 +351,7 @@ Composer is bundled — no separate install needed.
 | Guide | What it covers |
 |---|---|
 | [Getting Started](docs/getting-started.md) | Full walkthrough from install to production |
+| [Deployment Strategies](docs/deployment-types.md) | Branch, release, and shadow mode compared |
 | [Secrets Management](docs/secrets.md) | Encryption, key distribution, GitHub Actions |
 | [Commands](docs/commands.md) | Every command with options and examples |
 | [Configuration](docs/configuration.md) | protocol.json, config repos, environments |

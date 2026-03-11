@@ -73,6 +73,8 @@ Protocol looks at your project and figures out what you need. You'll see a menu 
 - **Release-based** (recommended) — You create tagged releases. Each server checks out a specific version. You can roll back instantly.
 - **Branch-based** — Servers follow the tip of a branch. Simpler, but no rollback safety net.
 
+For the full breakdown of each strategy (including shadow/zero-downtime deploys), see [Deployment Strategies](deployment-types.md).
+
 **Step 3 — Secrets.** Optionally generate an encryption key for your `.env` files. You can do this now or later.
 
 **Step 4 — Config Repository.** Optionally create a config repo to store your environment files. Again, now or later.
