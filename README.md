@@ -39,6 +39,7 @@ No Jenkins. No GitHub Actions workflows. No webhook endpoints. No deploy scripts
 - **One-command deploy** to any number of servers
 - **Encrypted secrets** that version-control your `.env` files safely in git
 - **Instant rollback** to any previous release
+- **Blue-green shadow deploys** — build in the background, swap in one second
 - **Auto-restart** after server reboots
 - **Zero coordination** between nodes — they all figure it out independently
 - **SOC2 Type II ready** with audit logging and encrypted credentials
@@ -154,6 +155,19 @@ protocol deploy:push 1.2.0     ───▶  "1.2.0? Deploying now."
 
 Rollback is instant — `protocol deploy:rollback` sets the pointer back to the previous version. Every node follows.
 
+### Shadow Deploys (Zero Downtime)
+
+For applications with long build times, enable shadow deployment. Each version gets its own self-contained directory (`slots/v1.3.0/`) with a full git clone, config, and Docker containers named with the release tag. Build in the background, swap ports in under a second.
+
+```bash
+protocol shadow:init              # Configure shadow deployment (wizard)
+protocol shadow:build v1.3.0     # Build in slots/v1.3.0/ on shadow ports
+protocol shadow:start             # Swap to production (~1 second)
+protocol shadow:rollback          # Instant rollback if needed
+```
+
+Full guide: [docs/blue-green.md](docs/blue-green.md)
+
 ### Branch-Based (Simple)
 
 Nodes watch a git branch and pull changes automatically. Good for local development and simple setups. No versioning, no rollback history.
@@ -234,6 +248,16 @@ protocol config:switch staging
 | `config:unlink` | Remove all config symlinks |
 | `config:switch <env>` | Switch environment branch |
 | `config:save` | Commit and push config changes |
+
+**Shadow Deployment**
+
+| Command | Description |
+|---|---|
+| `shadow:init` | Configure shadow deployment (wizard) |
+| `shadow:build <version>` | Build a release in a version-named slot |
+| `shadow:start` | Promote shadow to production (~1s) |
+| `shadow:rollback` | Revert to previous version (~1s) |
+| `shadow:status` | Show version slots and states |
 
 **Docker**
 
@@ -330,6 +354,7 @@ Composer is bundled — no separate install needed.
 | [Configuration](docs/configuration.md) | protocol.json, config repos, environments |
 | [Architecture](docs/architecture.md) | System design and data flow |
 | [Security & SOC2](docs/security.md) | Compliance mapping and hardening |
+| [Blue-Green Deploys](docs/blue-green.md) | Shadow deployments with instant rollback |
 | [Migration](docs/migration.md) | Upgrade from branch-based to release-based |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 

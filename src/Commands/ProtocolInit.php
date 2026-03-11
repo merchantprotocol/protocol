@@ -53,6 +53,7 @@ use Gitcd\Utils\Yaml;
 use Gitcd\Commands\Init\Php81;
 use Gitcd\Commands\Init\Php82;
 use Gitcd\Commands\Init\Php82Ffmpeg;
+use Gitcd\Helpers\BlueGreen;
 use Gitcd\Commands\Init\DotMenuTrait;
 
 Class ProtocolInit extends Command {
@@ -198,6 +199,7 @@ Class ProtocolInit extends Command {
         $selectedKey = $this->askWithDots($input, $output, $helper, [
             'new'      => 'Start a new project',
             'existing' => 'Connect an existing repository',
+            'shadow'   => 'Configure as a shadow deployment node',
             'protocol' => 'Update an existing Protocol project',
         ], $scenario);
 
@@ -208,6 +210,9 @@ Class ProtocolInit extends Command {
 
             case 'existing':
                 return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+
+            case 'shadow':
+                return $this->flowShadowNode($repo_dir, $input, $output, $helper, $io);
 
             case 'protocol':
                 return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
@@ -367,6 +372,151 @@ Class ProtocolInit extends Command {
                 $output->writeln('');
                 return Command::SUCCESS;
         }
+
+        return Command::SUCCESS;
+    }
+
+    // ─── Flow: Shadow Deployment Node ──────────────────────────
+
+    protected function flowShadowNode(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        SymfonyStyle $io
+    ): int {
+        $totalSteps = 4;
+
+        // Initialize git if not already
+        if (!Git::isInitializedRepo($repo_dir)) {
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
+        }
+
+        // Step 1: GitHub repo URL
+        $this->writeStep($output, 1, $totalSteps, 'Repository');
+
+        $output->writeln("    <fg=gray>Shadow deployment clones each release version into its own</>");
+        $output->writeln("    <fg=gray>directory. No need to clone the full repo here — just tell</>");
+        $output->writeln("    <fg=gray>us where to pull releases from.</>");
+        $output->writeln('');
+
+        $existingRemote = Git::RemoteUrl($repo_dir);
+        $defaultRemote = $existingRemote ?: '';
+
+        $question = new Question(
+            '    GitHub repo URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
+            $defaultRemote
+        );
+        $gitRemote = $helper->ask($input, $output, $question);
+
+        if (!$gitRemote) {
+            $output->writeln('');
+            $output->writeln('    <error>A git remote URL is required.</error>');
+            return Command::FAILURE;
+        }
+
+        // Create minimal protocol.json
+        Json::write('name', basename($repo_dir), $repo_dir);
+        Json::write('deployment.strategy', 'release', $repo_dir);
+        Json::write('deployment.pointer', 'github_variable', $repo_dir);
+        Json::write('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
+        Json::write('git.remote', $gitRemote, $repo_dir);
+        Json::write('bluegreen.enabled', true, $repo_dir);
+        Json::write('bluegreen.git_remote', $gitRemote, $repo_dir);
+        Json::save($repo_dir);
+
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
+
+        // Step 2: Releases directory
+        $this->writeStep($output, 2, $totalSteps, 'Releases Directory');
+
+        $defaultReleasesDir = basename(rtrim($repo_dir, '/')) . '-releases';
+        $defaultReleasesPath = dirname(rtrim($repo_dir, '/')) . '/' . $defaultReleasesDir . '/';
+
+        $output->writeln("    <fg=gray>Each version gets its own directory with a full git clone,</>");
+        $output->writeln("    <fg=gray>config, and Docker containers named with the release tag.</>");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Default:</> <fg=white>{$defaultReleasesPath}</>");
+        $output->writeln('');
+
+        $question = new Question(
+            "    Releases directory [<fg=green>{$defaultReleasesDir}</>/]: ",
+            $defaultReleasesDir
+        );
+        $releasesDir = $helper->ask($input, $output, $question);
+
+        Json::write('bluegreen.releases_dir', $releasesDir, $repo_dir);
+        Json::save($repo_dir);
+
+        $resolvedPath = BlueGreen::getReleasesDir($repo_dir);
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Releases: <fg=white>{$resolvedPath}</>");
+
+        // Step 3: Auto-promote
+        $this->writeStep($output, 3, $totalSteps, 'Auto-Promote');
+
+        $output->writeln("    <fg=gray>When the release watcher detects a new version, it will</>");
+        $output->writeln("    <fg=gray>build a shadow release. After health checks pass:</>");
+        $output->writeln('');
+
+        $choiceKey = $this->askWithDots($input, $output, $helper, [
+            'manual' => 'Manual — wait for you to run shadow:start',
+            'auto'   => 'Automatic — promote to production immediately',
+        ], 'manual');
+
+        $autoPromote = ($choiceKey === 'auto');
+        Json::write('bluegreen.auto_promote', $autoPromote, $repo_dir);
+        Json::save($repo_dir);
+
+        // Step 4: Health checks
+        $this->writeStep($output, 4, $totalSteps, 'Health Checks');
+
+        $output->writeln("    <fg=gray>Health checks verify the shadow build before promotion.</>");
+        $output->writeln('');
+
+        $question = new ConfirmationQuestion(
+            '    Add a default HTTP health check (GET /health → 200)? [<fg=green>Y</>/n] ', true
+        );
+        if ($helper->ask($input, $output, $question)) {
+            Json::write('bluegreen.health_checks', [
+                ['type' => 'http', 'path' => '/health', 'expect_status' => 200],
+            ], $repo_dir);
+        } else {
+            Json::write('bluegreen.health_checks', [], $repo_dir);
+        }
+        Json::save($repo_dir);
+
+        // Add protocol.lock to .gitignore
+        Git::addIgnore('protocol.lock', $repo_dir);
+
+        // Commit
+        $this->commitProtocolFiles($output, $repo_dir);
+
+        // Completion
+        $this->clearAndBanner($output);
+
+        $autoLabel = $autoPromote ? '<fg=green>automatic</>' : '<fg=yellow>manual</>';
+        $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
+        $healthLabel = count($healthChecks) > 0 ? '<fg=green>' . count($healthChecks) . ' configured</>' : '<fg=yellow>none</>';
+
+        $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Shadow Deployment Node Ready!</>                    <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>Next steps:</>                                            <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>1.</> <fg=white>protocol shadow:build v1.0.0</>  <fg=gray>Build first release</>  <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>2.</> <fg=white>protocol shadow:start</>         <fg=gray>Go live (~1 second)</>   <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>3.</> <fg=white>protocol start</>                <fg=gray>Start watcher daemon</> <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Remote:</>       <fg=white>{$gitRemote}</>");
+        $output->writeln("    <fg=gray>Releases dir:</> <fg=white>{$resolvedPath}</>");
+        $output->writeln("    <fg=gray>Auto-promote:</> {$autoLabel}");
+        $output->writeln("    <fg=gray>Health checks:</> {$healthLabel}");
+        $output->writeln('');
 
         return Command::SUCCESS;
     }

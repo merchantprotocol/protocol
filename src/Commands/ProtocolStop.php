@@ -45,6 +45,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
+use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
@@ -119,6 +120,18 @@ Class ProtocolStop extends Command {
 
         // ── Stage 3: Stopping containers ────────────────────────
         $runner->run('Stopping containers', function() use ($repo_dir) {
+            // Shadow mode: stop containers in all release directories
+            if (BlueGreen::isEnabled($repo_dir)) {
+                foreach (BlueGreen::listReleases($repo_dir) as $release) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
+                    if (is_dir($releaseDir)) {
+                        BlueGreen::stopContainers($releaseDir);
+                    }
+                }
+                return;
+            }
+
+            // Standard mode
             $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
             if (!file_exists($composePath)) return;
 

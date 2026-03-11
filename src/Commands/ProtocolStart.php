@@ -51,6 +51,7 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
+use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -169,8 +170,22 @@ Class ProtocolStart extends Command {
             Crontab::addCrontabRestart($repo_dir);
         });
 
-        // ── Stage 3: Container build & push ─────────────────────
-        $runner->run('Container build & push', function() use ($repo_dir) {
+        // ── Stage 3: Container build & start ────────────────────
+        $runner->run('Container build & start', function() use ($repo_dir) {
+            // Shadow mode: start the active version's containers
+            if (BlueGreen::isEnabled($repo_dir)) {
+                $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                if ($activeVersion) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
+                    if (is_dir($releaseDir)) {
+                        BlueGreen::startContainers($releaseDir);
+                        return;
+                    }
+                }
+                // No active version yet — fall through to standard build
+            }
+
+            // Standard single-container mode
             $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
 
             if (!file_exists($composePath)) {

@@ -85,6 +85,20 @@ class AuditLog
     }
 
     /**
+     * Log a shadow deployment event (build, promote, rollback).
+     */
+    public static function logShadow(string $repo_dir, string $action, string $slot, string $version, string $status = 'success'): void
+    {
+        self::write('SHADOW', $repo_dir, [
+            'action' => $action,
+            'slot' => $slot,
+            'version' => $version,
+            'status' => $status,
+            'user' => get_current_user(),
+        ]);
+    }
+
+    /**
      * Read log entries (returns array of lines).
      */
     public static function read(int $limit = 50): array

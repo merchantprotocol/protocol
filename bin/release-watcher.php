@@ -17,6 +17,7 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -51,43 +52,121 @@ while (true) {
                 continue;
             }
 
-            // Checkout the tag (detached HEAD)
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($activeRelease) . " 2>&1");
-            echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
+            // ── Blue-green mode ──────────────────────────────────
+            $bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
 
-            // Update lock file
-            JsonLock::write('release.previous', $currentRelease, $repo_dir);
-            JsonLock::write('release.current', $activeRelease, $repo_dir);
-            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-            JsonLock::save($repo_dir);
+            if ($bluegreenEnabled) {
+                echo "[" . date('Y-m-d H:i:s') . "] Shadow mode: building slots/{$activeRelease}/\n";
 
-            // Handle encrypted secrets
-            $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
-            $configRepo = Config::repo($repo_dir);
+                $slotDir = BlueGreen::getSlotDir($repo_dir, $activeRelease);
 
-            if ($secretsMode === 'encrypted' && $configRepo) {
-                $encFile = $configRepo . '.env.enc';
-                if (is_file($encFile) && Secrets::hasKey()) {
-                    $tmpEnv = Secrets::decryptToTempFile($encFile);
-                    if ($tmpEnv) {
-                        Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
-                        unlink($tmpEnv);
-                        echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt with decrypted secrets\n";
+                // Initialize slot directory with git clone
+                $gitRemote = Git::RemoteUrl($repo_dir);
+                BlueGreen::initSlotDir($repo_dir, $activeRelease, $gitRemote);
+
+                // Checkout version tag
+                if (!BlueGreen::checkoutVersion($slotDir, $activeRelease)) {
+                    echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to checkout {$activeRelease}\n";
+                    sleep($interval);
+                    continue;
+                }
+                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease} in slots/{$activeRelease}/\n";
+
+                // Patch compose file for parameterized ports
+                BlueGreen::patchComposeFile($slotDir);
+
+                // Write shadow port config
+                BlueGreen::writeSlotEnv($slotDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
+
+                // Build containers on shadow ports (slow step)
+                echo "[" . date('Y-m-d H:i:s') . "] Building containers on shadow ports...\n";
+                if (!BlueGreen::buildContainers($slotDir)) {
+                    echo "[" . date('Y-m-d H:i:s') . "] ERROR: Docker build failed for {$activeRelease}\n";
+                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
+                    sleep($interval);
+                    continue;
+                }
+                echo "[" . date('Y-m-d H:i:s') . "] Shadow containers built on port " . BlueGreen::SHADOW_HTTP . "\n";
+
+                // Run health checks
+                $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
+                $healthy = BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $activeRelease);
+
+                if ($healthy) {
+                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
+                    BlueGreen::setShadowVersion($repo_dir, $activeRelease);
+                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
+                    echo "[" . date('Y-m-d H:i:s') . "] Shadow {$activeRelease} ready\n";
+
+                    // Auto-promote if configured
+                    $autoPromote = Json::read('bluegreen.auto_promote', false, $repo_dir);
+                    if ($autoPromote) {
+                        echo "[" . date('Y-m-d H:i:s') . "] Auto-promoting {$activeRelease} to production...\n";
+                        $promoted = BlueGreen::promote($repo_dir, $activeRelease);
+                        if ($promoted) {
+                            AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
+                            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
+                            echo "[" . date('Y-m-d H:i:s') . "] Auto-promoted {$activeRelease} to production\n";
+                        } else {
+                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Auto-promote failed\n";
+                        }
                     } else {
-                        echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to decrypt secrets\n";
+                        echo "[" . date('Y-m-d H:i:s') . "] Shadow ready. Run 'protocol shadow:start' to promote.\n";
+                    }
+                } else {
+                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
+                    echo "[" . date('Y-m-d H:i:s') . "] Health check FAILED for {$activeRelease}\n";
+                }
+
+                // Update release tracking
+                JsonLock::write('release.previous', $currentRelease, $repo_dir);
+                JsonLock::write('release.current', $activeRelease, $repo_dir);
+                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+                JsonLock::save($repo_dir);
+
+            } else {
+                // ── Standard in-place deployment ─────────────────
+
+                // Checkout the tag (detached HEAD)
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($activeRelease) . " 2>&1");
+                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
+
+                // Update lock file
+                JsonLock::write('release.previous', $currentRelease, $repo_dir);
+                JsonLock::write('release.current', $activeRelease, $repo_dir);
+                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+                JsonLock::save($repo_dir);
+
+                // Handle encrypted secrets
+                $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+                $configRepo = Config::repo($repo_dir);
+
+                if ($secretsMode === 'encrypted' && $configRepo) {
+                    $encFile = $configRepo . '.env.enc';
+                    if (is_file($encFile) && Secrets::hasKey()) {
+                        $tmpEnv = Secrets::decryptToTempFile($encFile);
+                        if ($tmpEnv) {
+                            Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+                            unlink($tmpEnv);
+                            echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt with decrypted secrets\n";
+                        } else {
+                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to decrypt secrets\n";
+                        }
+                    } else {
+                        Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
+                        echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
                     }
                 } else {
                     Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
                     echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
                 }
-            } else {
-                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
-                echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
-            }
 
-            // Audit log
-            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
-            echo "[" . date('Y-m-d H:i:s') . "] Deploy complete: {$activeRelease}\n";
+                // Audit log
+                AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
+                echo "[" . date('Y-m-d H:i:s') . "] Deploy complete: {$activeRelease}\n";
+            }
         }
     } catch (\Exception $e) {
         echo "[" . date('Y-m-d H:i:s') . "] ERROR: " . $e->getMessage() . "\n";
