@@ -37,6 +37,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\GitHub;
 
 Class SecretsSetup extends Command {
 
@@ -55,6 +56,9 @@ Class SecretsSetup extends Command {
             With an argument, stores the provided key on this node.
             Example: protocol secrets:setup "your-hex-key-here"
 
+            The key is also read automatically from the PROTOCOL_ENCRYPTION_KEY
+            environment variable, so CI/CD workflows can pass it from GitHub secrets.
+
             The key is stored at ~/.protocol/key with 0600 permissions.
 
             HELP)
@@ -72,6 +76,15 @@ Class SecretsSetup extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $providedKey = $input->getArgument('key');
+
+        // Fall back to environment variable (for CI/CD with GitHub secrets)
+        if (!$providedKey) {
+            $envKey = getenv('PROTOCOL_ENCRYPTION_KEY') ?: ($_ENV['PROTOCOL_ENCRYPTION_KEY'] ?? null);
+            if ($envKey) {
+                $providedKey = $envKey;
+                $output->writeln('<info>Reading key from PROTOCOL_ENCRYPTION_KEY environment variable</info>');
+            }
+        }
 
         if (Secrets::hasKey() && !$providedKey) {
             $output->writeln('<comment>Encryption key already exists at: ' . Secrets::keyPath() . '</comment>');

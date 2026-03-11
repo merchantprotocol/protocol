@@ -1,52 +1,63 @@
 <p align="center">
   <h1 align="center">Protocol</h1>
   <p align="center">
-    Release-based deployment & infrastructure management for Docker applications.
+    Deploy your Docker app with one command. Encrypted secrets, automatic rollback, zero build servers.
     <br />
-    <a href="docs/architecture.md"><strong>Architecture</strong></a>
+    <a href="docs/getting-started.md"><strong>Getting Started</strong></a>
+    &middot;
+    <a href="docs/secrets.md"><strong>Secrets</strong></a>
     &middot;
     <a href="docs/commands.md"><strong>Commands</strong></a>
     &middot;
     <a href="docs/configuration.md"><strong>Configuration</strong></a>
-    &middot;
-    <a href="docs/security.md"><strong>Security</strong></a>
-    &middot;
-    <a href="docs/migration.md"><strong>Migration Guide</strong></a>
   </p>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href="https://github.com/merchantprotocol/protocol/actions"><img src="https://github.com/merchantprotocol/protocol/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/merchantprotocol/protocol/actions"><img src="https://github.com/merchantprotocol/protocol/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"></a>
   <img src="https://img.shields.io/badge/php-8.1%2B-8892BF.svg" alt="PHP 8.1+">
   <img src="https://img.shields.io/badge/SOC2-Type%20II%20Ready-green.svg" alt="SOC2 Type II Ready">
 </p>
 
 ---
 
-## Why Protocol?
+## Stupid Simple CI/CD. Deployed in Seconds. More Reliable Than Anything Else You've Tried.
 
-Most CI/CD pipelines are overkill. You configure webhooks, build runners, deploy scripts, artifact storage, rollback strategies — all before a single line of code reaches production. And when you scale to multiple nodes behind a load balancer, complexity explodes.
-
-Protocol takes a different approach. Every node is a **follower** that watches for release changes and deploys automatically. No build server. No webhook endpoints. No deploy scripts. Just git tags and a single pointer variable.
+Two commands. That's your entire deployment pipeline.
 
 ```bash
-# On any node, anywhere:
-protocol start
+protocol init     # Set up your project (once)
+protocol start    # Stay in sync with millisecond rollouts
 ```
 
-That single command links your environment config, starts your Docker containers, and begins watching for release changes. Tag a release and push it to all nodes with one command.
+Your Docker containers come up. Your `.env` files decrypt themselves. Your nginx and cron configs link into place. A watcher starts polling for new releases. Push a git tag, and every server in your fleet deploys it automatically. Roll back with one command if anything goes wrong.
 
-## What It Does
+No Jenkins. No GitHub Actions workflows. No webhook endpoints. No deploy scripts. No build servers. Just git, Docker, and Protocol.
 
-**Release-Based Deployment** — Tag releases with semver, deploy to all nodes by setting a single GitHub variable. Instant rollback, full audit trail, SOC2-ready logging.
+### What you get out of the box
 
-**Configuration Management** — Environment configs (`.env`, nginx, cron, etc.) live in a separate git repo. Each branch is an environment. Protocol symlinks the right config into your app at runtime. Production secrets are encrypted with AES-256-GCM.
+- **One-command deploy** to any number of servers
+- **Encrypted secrets** that version-control your `.env` files safely in git
+- **Instant rollback** to any previous release
+- **Auto-restart** after server reboots
+- **Zero coordination** between nodes — they all figure it out independently
+- **SOC2 Type II ready** with audit logging and encrypted credentials
 
-**Docker Orchestration** — Manages the full container lifecycle through docker-compose. Build, pull, start, stop, rebuild — all through Protocol. Secrets are decrypted and injected at deploy time.
+---
 
-**Reboot Survival** — A single crontab entry ensures nodes come back online automatically after a reboot, fully configured and running.
+## The Old Way vs. Protocol
+
+Most teams go through the same painful evolution:
+
+**Stage 1:** SSH into the server and `git pull`. It works until you forget which server you updated.
+
+**Stage 2:** Set up a CI/CD pipeline. Now you're maintaining build runners, webhook endpoints, deploy scripts, artifact storage, and environment variables scattered across three different dashboards.
+
+**Stage 3:** Add a second production node. Now your deploy scripts need to handle multiple targets, health checks, rolling deploys, and rollback logic. Your CI/CD config file is 200 lines long.
+
+**Stage 4:** Your `.env` file on production gets overwritten during a deploy. The database password is gone. It was in a Slack DM from six months ago. Maybe.
+
+Protocol skips all of that. Every node runs `protocol start` and manages itself. You tag a release, set a pointer, and every node picks it up. Your secrets are encrypted in git and decrypt themselves on arrival.
 
 ## Quick Start
 
@@ -56,369 +67,272 @@ That single command links your environment config, starts your Docker containers
 curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | sudo bash
 ```
 
-Supports macOS (Homebrew), Ubuntu/Debian (apt), and Amazon Linux (yum). See [Installation Guide](docs/installation.md) for manual install and platform notes.
-
-### Initialize a Project
+### Set Up Your Project
 
 ```bash
-cd /path/to/your/repo
-
-# Interactive setup wizard
+cd /path/to/your/project
 protocol init
-
-# Or step by step:
-protocol config:env production
-protocol config:init
 ```
 
-### Create & Deploy Releases
+A wizard walks you through it — pick your Docker image, choose a deploy strategy, optionally encrypt your secrets. Arrow keys to navigate, Enter to confirm.
+
+### Start Everything
 
 ```bash
-# Create your first release
-protocol release:create 1.0.0
-
-# Start a node
 protocol start
-
-# Deploy a release to all nodes
-protocol deploy:push 1.0.0
-
-# Check status
-protocol status
-
-# Something wrong? Instant rollback
-protocol deploy:rollback
 ```
 
-### Manage Configuration
+Docker containers come up. Config files get linked. Secrets get decrypted. You're running.
+
+### Deploy to Production
+
+On your production server:
 
 ```bash
-# Move a config file into the config repo (creates symlink back)
+git clone git@github.com:yourorg/yourapp.git /opt/yourapp
+cd /opt/yourapp
+protocol config:env production
+protocol secrets:setup "your-encryption-key"
+protocol start
+```
+
+From then on, deploying is:
+
+```bash
+# On your dev machine
+protocol release:create
+protocol deploy:push 1.0.0
+```
+
+Every node picks up the new release automatically. Something wrong? `protocol deploy:rollback` — instant.
+
+## How Secrets Work
+
+Your `.env` files are too important to pass around in Slack messages and too dangerous to commit in plain text. Protocol encrypts them with AES-256-GCM before they touch git.
+
+```
+Your Machine                    Git                     Production
+─────────────                   ───                     ──────────
+.env (plaintext)  ──encrypt──▶  .env.enc (encrypted)  ──▶  .env (plaintext)
+```
+
+The encryption key stays on your machines. Only encrypted data travels through git.
+
+```bash
+# Set up encryption (interactive wizard)
+protocol config:init
+
+# View your key and transfer options
+protocol secrets:key
+
+# Copy key to production server
+protocol secrets:key --scp=deploy@production
+
+# Or push to GitHub for CI/CD
+protocol secrets:key --push
+```
+
+When `protocol start` runs on any node with the key, encrypted files are decrypted automatically. Your app just reads `.env` like it always has.
+
+Full guide: [docs/secrets.md](docs/secrets.md)
+
+## How Deployment Works
+
+### Release-Based (Recommended)
+
+You create versioned releases. A GitHub variable tells all nodes which version to run. Change the variable, every node deploys.
+
+```
+You run:                              Every node:
+─────────                             ───────────
+protocol release:create 1.2.0        (watching...)
+protocol deploy:push 1.2.0     ───▶  "1.2.0? Deploying now."
+                                      ✓ Node 1: v1.2.0
+                                      ✓ Node 2: v1.2.0
+                                      ✓ Node 3: v1.2.0
+```
+
+Rollback is instant — `protocol deploy:rollback` sets the pointer back to the previous version. Every node follows.
+
+### Branch-Based (Simple)
+
+Nodes watch a git branch and pull changes automatically. Good for local development and simple setups. No versioning, no rollback history.
+
+## How Config Works
+
+Your project has a sibling directory that holds environment-specific files:
+
+```
+your-project/           ← your code
+your-project-config/    ← .env, nginx.conf, cron jobs (separate git repo)
+```
+
+Each environment is a branch: `localhost`, `staging`, `production`. When Protocol starts, it symlinks the right files into your project. When the config repo changes, the watcher picks it up automatically.
+
+```bash
+# Set up the config repo (interactive wizard)
+protocol config:init
+
+# Move a file into the config repo
 protocol config:mv .env
 
 # Switch environments
 protocol config:switch staging
-
-# Create a new environment
-protocol config:new
-
-# Save and push config changes
-protocol config:save
 ```
 
-### Encrypted Secrets
+## Common Commands
 
-```bash
-# Set up encryption (once per cluster)
-protocol secrets:setup
+| What you want to do | Command |
+|---|---|
+| Set up a new project | `protocol init` |
+| Start everything | `protocol start` |
+| Stop everything | `protocol stop` |
+| Check what's running | `protocol status` |
+| Set up configs & secrets | `protocol config:init` |
+| Create a release | `protocol release:create` |
+| Deploy to all nodes | `protocol deploy:push 1.2.0` |
+| Roll back | `protocol deploy:rollback` |
+| Run a command in Docker | `protocol docker:exec "php artisan migrate"` |
+| View your encryption key | `protocol secrets:key` |
+| Update Protocol itself | `protocol self:update` |
 
-# Encrypt .env to .env.enc
-protocol secrets:encrypt
+<details>
+<summary><strong>All Commands</strong></summary>
 
-# Secrets are automatically decrypted and injected at deploy time
-```
-
-## How It Works
-
-### Release-Based Deployment (Recommended)
-
-```
-┌──────────────────┐     ┌──────────────────────┐
-│   GitHub Repo    │     │  GitHub Variable      │
-│                  │     │                        │
-│  Tags:           │     │  PROTOCOL_ACTIVE_      │
-│    v1.0.0        │     │  RELEASE = "1.2.0"     │
-│    v1.1.0        │     │                        │
-│    v1.2.0        │     └──────────┬─────────────┘
-└──────────────────┘                │
-                                    │ polls every 60s
-                         ┌──────────▼─────────────┐
-                         │    Production Nodes     │
-                         │                         │
-                         │  deploy:slave watches   │
-                         │  the variable and auto- │
-                         │  deploys when it changes │
-                         │                         │
-                         │  Node 1: v1.2.0 ✓       │
-                         │  Node 2: v1.2.0 ✓       │
-                         │  Node N: v1.2.0 ✓       │
-                         └─────────────────────────┘
-```
-
-**Deploy flow:**
-1. `protocol release:create` — Tag, push, create GitHub Release
-2. `protocol deploy:push 1.2.0` — Set the pointer variable
-3. All nodes detect the change and deploy automatically
-4. `protocol deploy:rollback` — Instant rollback if needed
-
-### Branch-Based Deployment (Legacy)
-
-```
-┌──────────────────┐          ┌──────────────────┐
-│   GitHub/GitLab  │          │  Config Repo      │
-│                  │          │  (private)         │
-│  app repo        │          │  branch: prod      │
-│  branch: master  │          │  branch: staging   │
-└────────┬─────────┘          └────────┬───────────┘
-         │ polls every 10s              │ polls every 10s
-         ▼                              ▼
-┌─────────────────────────────────────────────────────┐
-│                  Production Node                     │
-│                                                      │
-│  protocol start                                      │
-│  ├── git:slave ─── watches app repo, auto-pulls      │
-│  ├── config:slave ─ watches config repo, auto-pulls  │
-│  ├── config:link ── symlinks .env, nginx.conf, etc.  │
-│  └── docker:compose ── runs containers               │
-└──────────────────────────────────────────────────────┘
-```
-
-Still supported for local development and simpler setups. See [migration guide](docs/migration.md) to upgrade.
-
-## Commands
+**Releases & Deployment**
 
 | Command | Description |
 |---|---|
-| `protocol init` | Interactive project setup wizard |
-| `protocol start` | Start all services on this node |
-| `protocol stop` | Stop all services and watchers |
-| `protocol restart` | Stop and re-start (designed for `@reboot` crontab) |
-| `protocol status` | Show system health: strategy, release, watchers, Docker |
-| `protocol docker:exec [cmd]` | Run command inside Docker container (default: bash) |
-| `protocol migrate` | Migrate from branch-based to release-based deployment |
+| `release:create [version]` | Tag a new release |
+| `release:list` | List all releases |
+| `deploy:push <version>` | Deploy a release to all nodes |
+| `deploy:rollback` | Roll back all nodes |
+| `deploy:status` | Show active vs local version |
+| `deploy:log` | View deployment history |
+| `node:deploy <version>` | Deploy on this node only |
+| `node:rollback` | Roll back this node only |
 
-<details>
-<summary><strong>Release Commands</strong></summary>
-
-| Command | Description |
-|---|---|
-| `release:create [version]` | Tag a new release (auto-bumps patch if no version) |
-| `release:list` | List all available releases |
-| `release:changelog` | Generate CHANGELOG.md |
-
-</details>
-
-<details>
-<summary><strong>Deployment Commands</strong></summary>
-
-| Command | Description |
-|---|---|
-| `deploy:push <version>` | Deploy a release to ALL nodes (sets GitHub variable) |
-| `deploy:rollback` | Roll back ALL nodes to previous release |
-| `deploy:status` | Show active release pointer vs local version |
-| `deploy:log` | View deployment audit log |
-| `deploy:slave` | Start release watcher daemon |
-| `deploy:slave:stop` | Stop release watcher daemon |
-| `node:deploy <version>` | Deploy on THIS node only (staging/testing) |
-| `node:rollback` | Roll back THIS node only |
-
-</details>
-
-<details>
-<summary><strong>Secrets Commands</strong></summary>
+**Secrets**
 
 | Command | Description |
 |---|---|
 | `secrets:setup [key]` | Generate or store encryption key |
-| `secrets:encrypt [file]` | Encrypt `.env` to `.env.enc` |
-| `secrets:decrypt [file]` | Decrypt and display `.env.enc` |
+| `secrets:key` | View key and transfer options |
+| `secrets:key --push` | Push key to GitHub as a secret |
+| `secrets:key --scp=user@host` | Copy key to remote server |
+| `secrets:encrypt [file]` | Encrypt a file |
+| `secrets:decrypt [file]` | Decrypt a file |
 
-</details>
-
-<details>
-<summary><strong>Configuration Commands</strong></summary>
+**Configuration**
 
 | Command | Description |
 |---|---|
-| `config:env <name>` | Set the global environment for this machine |
-| `config:init` | Initialize the configuration repository |
-| `config:cp <file>` | Copy a file into the config repo |
-| `config:mv <file>` | Move a file to config repo + symlink back |
-| `config:link` | Create symlinks for all config files |
+| `config:init` | Config repo wizard (create, encrypt, decrypt) |
+| `config:env <name>` | Set this machine's environment name |
+| `config:mv <file>` | Move file to config repo + symlink |
+| `config:link` | Create all config symlinks |
 | `config:unlink` | Remove all config symlinks |
-| `config:switch <env>` | Switch to a different environment branch |
-| `config:new` | Create a new environment |
+| `config:switch <env>` | Switch environment branch |
 | `config:save` | Commit and push config changes |
-| `config:refresh` | Rebuild all symlinks |
-| `config:slave` | Watch config repo for remote changes |
-| `config:slave:stop` | Stop config repo watcher |
 
-</details>
-
-<details>
-<summary><strong>Docker Commands</strong></summary>
+**Docker**
 
 | Command | Description |
 |---|---|
-| `docker:compose` | Start containers (`docker-compose up -d`) |
-| `docker:compose:down` | Stop and remove containers |
-| `docker:compose:rebuild` | Rebuild and restart containers |
-| `docker:build` | Build image from Dockerfile |
-| `docker:pull` | Pull image from registry |
-| `docker:push` | Push image to registry |
-| `docker:exec [cmd]` | Run command in container (default: bash) |
+| `docker:compose` | Start containers |
+| `docker:compose:down` | Stop containers |
+| `docker:compose:rebuild` | Rebuild and restart |
+| `docker:exec [cmd]` | Run command in container |
 | `docker:logs` | Follow container logs |
 
-</details>
-
-<details>
-<summary><strong>Git Commands</strong></summary>
+**System**
 
 | Command | Description |
 |---|---|
-| `git:pull` | Force-pull from remote (resets local) |
-| `git:slave` | Start continuous deployment watcher (branch mode) |
-| `git:slave:stop` | Stop the watcher |
-| `git:clean` | Clean `.git` folder bloat |
-
-</details>
-
-<details>
-<summary><strong>System Commands</strong></summary>
-
-| Command | Description |
-|---|---|
-| `self:update` | Update Protocol to latest version |
-| `self:global` | Install Protocol as global command (`--force` to replace) |
+| `self:update` | Update to latest release |
+| `self:update --nightly` | Update to latest commit |
+| `cron:add` | Auto-restart on reboot |
 | `key:generate` | Generate SSH deploy key |
-| `cron:add` | Add `@reboot` restart to crontab |
-| `cron:remove` | Remove crontab entry |
 
 </details>
 
 Full reference: [docs/commands.md](docs/commands.md)
 
-## Configuration
+## Production Setup
 
-Protocol uses a `protocol.json` file in each project root:
-
-```json
-{
-    "name": "myapp",
-    "project_type": "php81",
-    "git": {
-        "remote": "git@github.com:org/myapp.git",
-        "branch": "master"
-    },
-    "docker": {
-        "image": "registry/myapp:latest",
-        "container_name": "myapp-web"
-    },
-    "configuration": {
-        "local": "../myapp-config",
-        "remote": "git@github.com:org/myapp-config.git"
-    },
-    "deployment": {
-        "strategy": "release",
-        "pointer": "github_variable",
-        "pointer_name": "PROTOCOL_ACTIVE_RELEASE",
-        "secrets": "encrypted"
-    }
-}
-```
-
-Full schema and configuration patterns: [docs/configuration.md](docs/configuration.md)
-
-## Production Deployment
-
-### Single Node
+Every production node follows the same recipe:
 
 ```bash
-# 1. Clone your app
-git clone git@github.com:org/myapp.git /opt/myapp && cd /opt/myapp
+# 1. Install Protocol
+curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | sudo bash
 
-# 2. Copy the encryption key from another node
-protocol secrets:setup "your-hex-key-here"
+# 2. Clone your app
+git clone git@github.com:yourorg/yourapp.git /opt/yourapp
+cd /opt/yourapp
 
-# 3. Set environment and start
+# 3. Set environment and encryption key
 protocol config:env production
+protocol secrets:setup "your-64-char-hex-key"
+
+# 4. Start
 protocol start
+
+# 5. Survive reboots
+protocol cron:add
 ```
 
-### Multi-Node Cluster
+Repeat on every node. They're all identical. Scale up by adding nodes, scale down by stopping them.
 
-Repeat the same steps on every node. Each node independently watches the GitHub release variable and deploys when it changes. No coordination required — deploy once, update everywhere.
+## The Big Picture
 
-```bash
-# Node 1, Node 2, Node 3, ... Node N — all identical:
-git clone git@github.com:org/myapp.git /opt/myapp && cd /opt/myapp
-protocol secrets:setup "your-hex-key-here"
-protocol config:env production
-protocol start
+```
+                          GitHub
+                    ┌──────────────────┐
+                    │  App Repo        │
+                    │  Config Repo     │
+                    │  Encrypted .env  │
+                    │  Release Tags    │
+                    └────────┬─────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+         Dev Machine    Staging Node   Prod Nodes
+         (localhost)    (staging)      (production)
+
+         protocol       protocol       protocol
+         start          start          start
+
+         Own branch     Own branch     Own branch
+         in config      in config      in config
+         repo           repo           repo
 ```
 
-Scale up by launching new nodes with the same setup. Scale down by running `protocol stop`. Auto-scaling groups can use the `@reboot` crontab entry to self-configure on launch.
+Each machine runs `protocol start`. Each gets its own config branch. They all share the same encryption key. Push code, tag a release, set the pointer — done.
 
-### Deploying a Release
-
-```bash
-# On your development machine:
-
-# 1. Create a release
-protocol release:create        # Auto-bumps patch version
-protocol release:create 2.0.0  # Or specify version
-
-# 2. Deploy to all nodes
-protocol deploy:push 2.0.0
-
-# 3. Something wrong?
-protocol deploy:rollback
-```
-
-## Migrating from v1
-
-If you're using branch-based deployment (Protocol v1), run the interactive migration wizard:
-
-```bash
-protocol migrate
-```
-
-Or see the full [Migration Guide](docs/migration.md) for manual steps.
-
-## Security & Compliance
-
-Protocol is designed with SOC2 Type II compliance in mind:
-
-- **Encrypted secrets** — AES-256-GCM encryption for `.env` files. Keys stored with 0600 permissions, decrypted to RAM (`/dev/shm/`) and deleted immediately after injection
-- **Deployment audit log** — Every deploy, rollback, and config change logged to `~/.protocol/deployments.log`
-- **Git-based audit trail** — Every code and config change tracked in git history
-- **Secrets isolation** — Configuration files live in a separate, access-controlled repository
-- **Environment separation** — Branch-based isolation between production, staging, and development
-- **Automated security scanning** — CI pipeline includes dependency audits, secret scanning, and static analysis
-
-See [docs/security.md](docs/security.md) for the full SOC2 mapping, hardening checklist, and audit logging guidance.
-
-## System Requirements
+## Requirements
 
 | Requirement | Version |
 |---|---|
 | PHP | 8.1+ |
 | Git | 2.x+ |
-| Docker | 20.x+ |
-| Docker Compose | v2+ |
-| GitHub CLI (`gh`) | Required for release-based deployment |
+| Docker + Compose | 20.x+ / v2+ |
+| GitHub CLI (`gh`) | For release-based deployment |
 
-Composer is bundled with Protocol — no separate installation needed.
+Composer is bundled — no separate install needed.
 
 ## Documentation
 
-| Document | Description |
+| Guide | What it covers |
 |---|---|
-| [Architecture](docs/architecture.md) | System design, components, data flow, known issues |
-| [Installation](docs/installation.md) | Install guide, platform notes, production setup |
-| [Commands](docs/commands.md) | Complete CLI reference |
-| [Configuration](docs/configuration.md) | `protocol.json` schema, config repos, environments |
-| [Migration](docs/migration.md) | Migrate from branch-based to release-based deployment |
-| [Security & SOC2](docs/security.md) | Compliance mapping, hardening, audit logging |
+| [Getting Started](docs/getting-started.md) | Full walkthrough from install to production |
+| [Secrets Management](docs/secrets.md) | Encryption, key distribution, GitHub Actions |
+| [Commands](docs/commands.md) | Every command with options and examples |
+| [Configuration](docs/configuration.md) | protocol.json, config repos, environments |
+| [Architecture](docs/architecture.md) | System design and data flow |
+| [Security & SOC2](docs/security.md) | Compliance mapping and hardening |
+| [Migration](docs/migration.md) | Upgrade from branch-based to release-based |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [Contributing](CONTRIBUTING.md) | Development setup, coding standards, PR process |
-
-## Contributing
-
-We welcome contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request. For security issues, follow the disclosure process in [SECURITY.md](SECURITY.md).
 
 ## License
 
-Protocol is open-source software licensed under the [MIT License](LICENSE).
-
-Copyright (c) 2019 [Merchant Protocol, LLC](https://merchantprotocol.com/)
+MIT License. Copyright (c) 2019 [Merchant Protocol, LLC](https://merchantprotocol.com/)

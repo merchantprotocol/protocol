@@ -6,10 +6,12 @@ Protocol is a CLI tool for continuous deployment and configuration management of
 
 | Document | Description |
 |---|---|
+| [Getting Started](getting-started.md) | Start here — install, init, config, deploy, all explained step by step |
 | [Architecture Overview](architecture.md) | System design, components, data flow, namespace structure, and known architectural issues |
 | [Installation Guide](installation.md) | System requirements, quick install, manual install, platform notes, production node setup |
 | [Command Reference](commands.md) | Complete reference for all CLI commands with arguments, options, and behavior |
 | [Configuration Reference](configuration.md) | `protocol.json` schema, config repo pattern, environment branching, symlink mechanics |
+| [Secrets Management](secrets.md) | Encrypting secrets, transferring keys, auto-decryption on deploy, GitHub Actions integration |
 | [Security & SOC2 Compliance](security.md) | SOC2 Type II mapping, vulnerability inventory, hardening checklist, audit logging guidance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes for config, slave mode, Docker, git, and permissions |
 

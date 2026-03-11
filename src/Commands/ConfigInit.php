@@ -45,6 +45,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\GitHub;
 use Gitcd\Utils\Json;
 use Gitcd\Commands\Init\DotMenuTrait;
 
@@ -253,11 +254,11 @@ Class ConfigInit extends Command {
             $output->writeln('');
             $output->writeln("    <fg=green>✓</> Key generated");
             $output->writeln('');
-            $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key to every node that needs to decrypt:");
-            $output->writeln('');
-            $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
-            $output->writeln('');
-            $output->writeln("    <fg=gray>On each node, run:</>");
+
+            // Offer to push to GitHub as a secret
+            $this->offerGitHubSecretPush($input, $output, $helper, $hexKey, $repo_dir);
+
+            $output->writeln("    <fg=gray>On other nodes without GitHub CI, run:</>");
             $output->writeln("    <fg=cyan>protocol secrets:setup {$hexKey}</>");
             $output->writeln('');
 
@@ -670,11 +671,10 @@ Class ConfigInit extends Command {
                 $output->writeln('');
                 $output->writeln("    <fg=green>✓</> Key generated and saved to <fg=white>" . Secrets::keyPath() . "</>");
                 $output->writeln('');
-                $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key to every node that needs to decrypt:");
-                $output->writeln('');
-                $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
-                $output->writeln('');
-                $output->writeln("    <fg=gray>On each node, run:</>");
+
+                $this->offerGitHubSecretPush($input, $output, $helper, $hexKey, $repo_dir);
+
+                $output->writeln("    <fg=gray>On other nodes without GitHub CI, run:</>");
                 $output->writeln("    <fg=cyan>protocol secrets:setup {$hexKey}</>");
                 $output->writeln('');
 
@@ -730,6 +730,63 @@ Class ConfigInit extends Command {
 
             Json::write('deployment.secrets', 'encrypted', $repo_dir);
             Json::save($repo_dir);
+        }
+    }
+
+    // ─── GitHub secret push ────────────────────────────────────────
+
+    protected function offerGitHubSecretPush(
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        string $hexKey,
+        string $repo_dir
+    ): void {
+        $slug = GitHub::getRepoSlug($repo_dir);
+
+        if (!$slug) {
+            $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key to every node that needs to decrypt:");
+            $output->writeln('');
+            $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
+            $output->writeln('');
+            return;
+        }
+
+        if (!GitHub::isAvailable()) {
+            $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key to every node that needs to decrypt:");
+            $output->writeln('');
+            $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
+            $output->writeln('');
+            $output->writeln("    <fg=gray>Tip: install</> <fg=cyan>gh</> <fg=gray>CLI to push this as a GitHub secret automatically.</>");
+            $output->writeln('');
+            return;
+        }
+
+        $output->writeln("    <fg=gray>GitHub repo detected:</> <fg=white>{$slug}</>");
+        $output->writeln('');
+        $question = new ConfirmationQuestion(
+            '    Push encryption key as a GitHub secret? [<fg=green>Y</>/n] ', true
+        );
+        if ($helper->ask($input, $output, $question)) {
+            if (GitHub::setSecret('PROTOCOL_ENCRYPTION_KEY', $hexKey, $repo_dir)) {
+                $output->writeln("    <fg=green>✓</> Saved as <fg=white>PROTOCOL_ENCRYPTION_KEY</> on <fg=white>{$slug}</>");
+                $output->writeln('');
+                $output->writeln("    <fg=gray>In your deploy workflow, pass it to protocol:</>");
+                $output->writeln("    <fg=cyan>PROTOCOL_ENCRYPTION_KEY=\${{ secrets.PROTOCOL_ENCRYPTION_KEY }} protocol secrets:setup</>");
+                $output->writeln('');
+            } else {
+                $output->writeln("    <error>  Failed to push secret. You may not have write access.</error>");
+                $output->writeln('');
+                $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key manually:");
+                $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
+                $output->writeln('');
+            }
+        } else {
+            $output->writeln('');
+            $output->writeln("    <fg=yellow;options=bold>IMPORTANT:</> Copy this key to every node that needs to decrypt:");
+            $output->writeln('');
+            $output->writeln("    <fg=white;options=bold>{$hexKey}</>");
+            $output->writeln('');
         }
     }
 

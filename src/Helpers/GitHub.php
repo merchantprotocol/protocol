@@ -9,7 +9,7 @@ class GitHub
     /**
      * Get the owner/repo slug from the git remote URL.
      */
-    public static function getRepoSlug(string $repo_dir = null): ?string
+    public static function getRepoSlug(?string $repo_dir = null): ?string
     {
         $remote = Git::RemoteUrl($repo_dir);
         if (!$remote) return null;
@@ -24,7 +24,7 @@ class GitHub
     /**
      * Get a GitHub Actions variable value.
      */
-    public static function getVariable(string $name, string $repo_dir = null): ?string
+    public static function getVariable(string $name, ?string $repo_dir = null): ?string
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return null;
@@ -38,7 +38,7 @@ class GitHub
     /**
      * Set a GitHub Actions variable.
      */
-    public static function setVariable(string $name, string $value, string $repo_dir = null): bool
+    public static function setVariable(string $name, string $value, ?string $repo_dir = null): bool
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return false;
@@ -51,9 +51,33 @@ class GitHub
     }
 
     /**
+     * Set a GitHub Actions secret (write-only).
+     */
+    public static function setSecret(string $name, string $value, ?string $repo_dir = null): bool
+    {
+        $slug = self::getRepoSlug($repo_dir);
+        if (!$slug) return false;
+
+        $result = Shell::run(
+            "echo " . escapeshellarg($value) . " | gh secret set " . escapeshellarg($name) . " --repo " . escapeshellarg($slug) . " 2>&1",
+            $error
+        );
+        return !$error;
+    }
+
+    /**
+     * Check if gh CLI is available and authenticated.
+     */
+    public static function isAvailable(): bool
+    {
+        $result = Shell::run("gh auth status 2>&1", $error);
+        return !$error;
+    }
+
+    /**
      * List GitHub releases.
      */
-    public static function listReleases(string $repo_dir = null, int $limit = 20): array
+    public static function listReleases(?string $repo_dir = null, int $limit = 20): array
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return [];
@@ -70,7 +94,7 @@ class GitHub
     /**
      * Create a GitHub release.
      */
-    public static function createRelease(string $tag, string $title = '', bool $draft = false, string $repo_dir = null): bool
+    public static function createRelease(string $tag, string $title = '', bool $draft = false, ?string $repo_dir = null): bool
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return false;
@@ -92,7 +116,7 @@ class GitHub
     /**
      * Get the latest release tag.
      */
-    public static function getLatestRelease(string $repo_dir = null): ?string
+    public static function getLatestRelease(?string $repo_dir = null): ?string
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return null;
@@ -109,7 +133,7 @@ class GitHub
     /**
      * Get tags from the repository, sorted newest first.
      */
-    public static function getTags(string $repo_dir = null): array
+    public static function getTags(?string $repo_dir = null): array
     {
         $dir = $repo_dir ?: WORKING_DIR;
         $result = Shell::run("git -C " . escapeshellarg($dir) . " tag --sort=-v:refname 2>/dev/null");
@@ -121,7 +145,7 @@ class GitHub
     /**
      * Check if a tag exists locally or remotely.
      */
-    public static function tagExists(string $tag, string $repo_dir = null): bool
+    public static function tagExists(string $tag, ?string $repo_dir = null): bool
     {
         $dir = $repo_dir ?: WORKING_DIR;
         $result = Shell::run(
