@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -80,18 +81,39 @@ Class ConfigSlaveStop extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        // Check to see if the PID is still running, fail if it is
+        $configrepo = Config::repo($repo_dir);
+        $killed = false;
+
+        // Try the tracked PID first
         $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
         $running = Shell::isRunning( $pid );
-        if (!$pid || !$running) {
-            $output->writeln("Slave mode is not running on the config repo ($pid)");
-            return Command::SUCCESS;
+        if ($pid && $running) {
+            Shell::run("kill " . intval($pid));
+            JsonLock::write('configuration.slave.pid', null, $repo_dir);
+            JsonLock::save($repo_dir);
+            $output->writeln("Slave mode stopped on the config repo (PID: $pid)");
+            $killed = true;
         }
 
-        $command = "kill $pid";
-        Shell::passthru($command);
+        // Sweep for orphaned watchers matching this project's config repo
+        if ($configrepo) {
+            $processes = Shell::hasProcess("git-repo-watcher -d $configrepo");
+            if (!empty($processes)) {
+                $pids = array_column($processes, "PID");
+                foreach ($pids as $orphanPid) {
+                    $orphanPid = intval($orphanPid);
+                    if ($orphanPid > 0) {
+                        Shell::run("kill $orphanPid");
+                        $output->writeln("Killed orphaned config watcher (PID: $orphanPid)");
+                        $killed = true;
+                    }
+                }
+            }
+        }
 
-        $output->writeln("Slave mode stopped on the config repo");
+        if (!$killed) {
+            $output->writeln("No config watchers running");
+        }
 
         return Command::SUCCESS;
     }

@@ -78,12 +78,15 @@ Class DeployReleaseSlaveStop extends Command {
             $output->writeln('<comment>Release watcher is not running</comment>');
         }
 
-        // Clean up dangling processes
-        $processes = Shell::hasProcess("release-watcher.php --dir=");
+        // Clean up dangling processes scoped to this project
+        $processes = Shell::hasProcess("release-watcher.php --dir=" . escapeshellarg($repo_dir));
+        if (empty($processes)) {
+            $processes = Shell::hasProcess("release-watcher.php --dir=$repo_dir");
+        }
         if (!empty($processes)) {
             foreach ($processes as $proc) {
-                $danglingPid = $proc['PID'] ?? null;
-                if ($danglingPid) {
+                $danglingPid = intval($proc['PID'] ?? 0);
+                if ($danglingPid > 0) {
                     Shell::run("kill {$danglingPid} 2>/dev/null");
                     $output->writeln("<comment>Killed dangling watcher (PID: {$danglingPid})</comment>");
                 }

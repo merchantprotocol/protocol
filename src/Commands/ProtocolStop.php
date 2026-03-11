@@ -111,10 +111,12 @@ Class ProtocolStop extends Command {
             $returnCode = $command->run($arrInput, $output);
         }
 
-        if (Json::read('configuration.remote', false, $repo_dir)) {
-            $command = $this->getApplication()->find('config:slave:stop');
-            $returnCode = $command->run($arrInput, $output);
+        // Always try to stop config watcher — it may be running even without
+        // configuration.remote set (e.g. started by a previous session)
+        $command = $this->getApplication()->find('config:slave:stop');
+        $returnCode = $command->run($arrInput, $output);
 
+        if (Json::read('configuration.remote', false, $repo_dir)) {
             $command = $this->getApplication()->find('config:unlink');
             $returnCode = $command->run($arrInput, $output);
         }
