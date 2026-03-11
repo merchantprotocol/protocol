@@ -46,6 +46,7 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Crontab;
+use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
 
 Class ProtocolStart extends Command {
@@ -186,6 +187,23 @@ Class ProtocolStart extends Command {
                 'cmd' => 'composer install'
             ]);
             $returnCode = $command->run($arrInputComposer, $output);
+        }
+
+        // Warn if secrets are not encrypted
+        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+        if ($secretsMode !== 'encrypted' || !Secrets::hasKey()) {
+            $output->writeln('');
+            $output->writeln('<error>  ⚠  NOT PRODUCTION READY — secrets are plaintext  </error>');
+            $output->writeln('');
+            $output->writeln('  Your configuration files (.env, credentials) are not encrypted.');
+            $output->writeln('  Plaintext secrets in git are a security risk.');
+            $output->writeln('');
+            $output->writeln('  To fix this, run:');
+            $output->writeln('');
+            $output->writeln('    <fg=cyan>protocol config:init</>    Set up the configuration repository');
+            $output->writeln('    <fg=cyan>protocol secrets:setup</>  Generate an encryption key');
+            $output->writeln('    <fg=cyan>protocol secrets:encrypt</> Encrypt your .env files');
+            $output->writeln('');
         }
 
         // end with status
