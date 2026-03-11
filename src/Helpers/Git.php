@@ -97,7 +97,7 @@ Class Git
             $repo_dir = " -C '$repo_dir' ";
         }
         Shell::run("git $repo_dir add -A");
-        Shell::run("git $repo_dir commit -m '$message'");
+        Shell::run("git $repo_dir commit -m " . escapeshellarg($message));
     }
 
     /**

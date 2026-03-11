@@ -1,0 +1,31 @@
+# CODEOWNERS — requires review from designated owners before merge.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: all changes require review from the core team
+* @merchantprotocol/core
+
+# Security-critical files — require security team review
+src/Helpers/Secrets.php        @merchantprotocol/security
+src/Helpers/SecurityAudit.php  @merchantprotocol/security
+src/Helpers/Soc2Check.php      @merchantprotocol/security
+src/Helpers/AuditLog.php       @merchantprotocol/security
+
+# Encryption and secrets commands
+src/Commands/SecretsEncrypt.php  @merchantprotocol/security
+src/Commands/SecretsDecrypt.php  @merchantprotocol/security
+src/Commands/SecretsSetup.php    @merchantprotocol/security
+src/Commands/SecretsKey.php      @merchantprotocol/security
+
+# CI/CD and workflow changes
+.github/                       @merchantprotocol/core @merchantprotocol/security
+
+# Deployment and infrastructure
+docker-compose.yml             @merchantprotocol/core
+src/Commands/Deploy.php        @merchantprotocol/core
+src/Commands/DeployRollback.php @merchantprotocol/core
+src/Helpers/BlueGreen.php      @merchantprotocol/core
+
+# Documentation changes to security docs
+docs/security.md               @merchantprotocol/security
+docs/secrets.md                @merchantprotocol/security
+SECURITY.md                    @merchantprotocol/security

@@ -132,8 +132,7 @@ Class Shell
                 unset($processes[$key]);
             }
         }
-        var_dump($processes);
-
+        return $processes;
     }
 
     /**

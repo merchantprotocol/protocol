@@ -149,9 +149,11 @@ Before running Protocol in a SOC2-audited environment, go through this list:
 
 - [ ] Set up deployment notifications (Slack webhook, email) when releases are pushed
 - [ ] Set up external health monitoring for each production node
-- [ ] Document your deployment process in a runbook
-- [ ] Document your key rotation procedure
-- [ ] Forward audit logs (`~/.protocol/deployments.log`) to a centralized logging system (CloudWatch, Datadog, Splunk)
+- [ ] Follow the [Deployment SOPs](deployment-sops.md) for consistent operations
+- [ ] Follow the [Key Rotation Procedure](key-rotation.md) on a quarterly schedule
+- [ ] Review the [Incident Response Runbook](incident-response.md) with your team
+- [ ] Install Wazuh SIEM agent: `protocol siem:install --manager=your-wazuh-server`
+- [ ] Forward audit logs to a centralized SIEM (Wazuh, CloudWatch, Datadog, Splunk)
 - [ ] Run `protocol status` checks as part of your monitoring
 
 ### Nice to Have
@@ -160,7 +162,7 @@ Before running Protocol in a SOC2-audited environment, go through this list:
 - [ ] Run `protocol soc2:check` in CI to enforce compliance gates
 - [ ] Use `security:trojansearch` in your CI pipeline to scan for suspicious code patterns
 - [ ] Set up `security:changedfiles` alerts to review files modified in the last 15 days
-- [ ] Use GitHub's CODEOWNERS feature for sensitive files
+- [ ] Use GitHub's CODEOWNERS feature for sensitive files (already added at `.github/CODEOWNERS`)
 
 ---
 
