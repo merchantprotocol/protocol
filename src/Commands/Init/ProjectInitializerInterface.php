@@ -68,4 +68,18 @@ interface ProjectInitializerInterface
      * @return string
      */
     public function getTemplateDir(): string;
+
+    /**
+     * Get the Docker Hub image for this project type
+     *
+     * @return string
+     */
+    public function getDockerImage(): string;
+
+    /**
+     * Get the GitHub repository URL for the Docker image source
+     *
+     * @return string
+     */
+    public function getGitHubRepo(): string;
 }

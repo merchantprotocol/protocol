@@ -51,6 +51,7 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
 use Gitcd\Commands\Init\Php81;
+use Gitcd\Commands\Init\Php82Ffmpeg;
 
 Class ProtocolInit extends Command {
 
@@ -90,8 +91,188 @@ Class ProtocolInit extends Command {
     protected function getAvailableInitializers(): array
     {
         return [
-            'php81' => new Php81(),
+            'php82ffmpeg' => new Php82Ffmpeg(),
+            'php81'       => new Php81(),
         ];
+    }
+
+    // ─── Display helpers ─────────────────────────────────────────
+
+    protected function writeBanner(OutputInterface $output): void
+    {
+        $output->writeln('');
+        $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>PROTOCOL</> <fg=gray>·</> <fg=yellow>Project Setup Wizard</>                       <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=gray>Release-based deployment for Docker applications</>   <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
+        $output->writeln('');
+    }
+
+    protected function writeStep(OutputInterface $output, int $step, int $total, string $title): void
+    {
+        $output->writeln('');
+        $output->writeln("<fg=cyan>  ── </><fg=white;options=bold>[{$step}/{$total}] {$title}</><fg=cyan> ──────────────────────────────────────</>");
+        $output->writeln('');
+    }
+
+    protected function writeInfo(OutputInterface $output, string $message): void
+    {
+        $output->writeln("    <fg=gray>›</> {$message}");
+    }
+
+    /**
+     * Interactive dot-menu with arrow key navigation
+     *
+     * Renders options as colored dots. The selected option is green (●),
+     * unselected are dim (○). Arrow keys move the selection, Enter confirms.
+     * Falls back to numbered input in non-interactive mode.
+     */
+    protected function askWithDots(
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        array $options,
+        string $recommended
+    ): string {
+        $keys = array_keys($options);
+        $labels = array_values($options);
+        $count = count($keys);
+        $selectedIndex = array_search($recommended, $keys);
+        if ($selectedIndex === false) {
+            $selectedIndex = 0;
+        }
+
+        // Non-interactive: fall back to default
+        if (!$input->isInteractive()) {
+            $this->renderDotMenu($output, $keys, $labels, $selectedIndex, $recommended);
+            $output->writeln('');
+            return $keys[$selectedIndex];
+        }
+
+        // Interactive: arrow key navigation
+        // Save terminal state and switch to raw mode
+        $sttyState = trim(shell_exec('stty -g 2>/dev/null') ?: '');
+        system('stty -echo -icanon min 1 2>/dev/null');
+
+        // Use raw ANSI output to avoid Symfony formatter interference during redraws
+        $this->renderDotMenuRaw($keys, $labels, $selectedIndex, $recommended);
+        fwrite(STDOUT, "\n");
+        fwrite(STDOUT, "    \033[90m↑↓ navigate · enter to select\033[0m");
+
+        $stdin = fopen('php://stdin', 'r');
+
+        while (true) {
+            $char = fread($stdin, 1);
+
+            if ($char === "\n" || $char === "\r") {
+                break;
+            }
+
+            if ($char === "\033") {
+                $seq = fread($stdin, 2);
+                if ($seq === '[A') { // Up arrow
+                    $selectedIndex = ($selectedIndex - 1 + $count) % $count;
+                } elseif ($seq === '[B') { // Down arrow
+                    $selectedIndex = ($selectedIndex + 1) % $count;
+                }
+
+                // Move cursor up to redraw menu (count lines + 1 for hint)
+                fwrite(STDOUT, "\033[" . ($count + 1) . "A\r");
+                // Clear from cursor down
+                fwrite(STDOUT, "\033[J");
+
+                $this->renderDotMenuRaw($keys, $labels, $selectedIndex, $recommended);
+                fwrite(STDOUT, "\n");
+                fwrite(STDOUT, "    \033[90m↑↓ navigate · enter to select\033[0m");
+            }
+        }
+
+        // Clear the hint line and redraw final state using Symfony output for the final render
+        fwrite(STDOUT, "\033[" . ($count + 1) . "A\r");
+        fwrite(STDOUT, "\033[J");
+
+        // Restore terminal before final Symfony render
+        if ($sttyState) {
+            system("stty '{$sttyState}' 2>/dev/null");
+        } else {
+            system('stty echo icanon 2>/dev/null');
+        }
+
+        $this->renderDotMenu($output, $keys, $labels, $selectedIndex, $recommended);
+
+        $output->writeln('');
+        return $keys[$selectedIndex];
+    }
+
+    /**
+     * Render the dot menu using raw ANSI codes (for interactive redraws)
+     */
+    protected function renderDotMenuRaw(
+        array $keys,
+        array $labels,
+        int $selectedIndex,
+        string $recommended
+    ): void {
+        foreach ($keys as $i => $key) {
+            $label = $labels[$i];
+            $isSelected = ($i === $selectedIndex);
+            $isRecommended = ($key === $recommended);
+            $recTag = $isRecommended ? '  recommended' : '';
+
+            if ($isSelected) {
+                // Green dot + green label, white recTag
+                fwrite(STDOUT, "    \033[32m●  {$label}\033[0m{$recTag}\n");
+            } else {
+                // Yellow dot, gray label
+                fwrite(STDOUT, "    \033[33m○\033[0m  \033[90m{$label}{$recTag}\033[0m\n");
+            }
+        }
+    }
+
+    /**
+     * Render the dot menu display (Symfony formatter version for static renders)
+     */
+    protected function renderDotMenu(
+        OutputInterface $output,
+        array $keys,
+        array $labels,
+        int $selectedIndex,
+        string $recommended
+    ): void {
+        foreach ($keys as $i => $key) {
+            $label = $labels[$i];
+            $isSelected = ($i === $selectedIndex);
+            $isRecommended = ($key === $recommended);
+            $recTag = $isRecommended ? '  recommended' : '';
+
+            if ($isSelected) {
+                $output->writeln("    <fg=green>●  {$label}</>{$recTag}");
+            } else {
+                $output->writeln("    <fg=yellow>○</>  <fg=gray>{$label}{$recTag}</>");
+            }
+        }
+    }
+
+    /**
+     * Detect project scenario
+     *
+     * @return string 'new' | 'existing' | 'protocol'
+     */
+    protected function detectScenario(string $repo_dir): string
+    {
+        $hasProtocolJson = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'protocol.json');
+        if ($hasProtocolJson) {
+            return 'protocol';
+        }
+
+        $isGitRepo = Git::isInitializedRepo($repo_dir);
+        if ($isGitRepo) {
+            return 'existing';
+        }
+
+        return 'new';
     }
 
     /**
@@ -102,222 +283,241 @@ Class ProtocolInit extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
+        if (!$repo_dir) {
+            $repo_dir = getcwd();
+        }
         $helper = $this->getHelper('question');
         $io = new SymfonyStyle($input, $output);
 
-        $io->title('Protocol Project Setup');
+        $this->writeBanner($output);
 
-        // ── Step 1: Compatibility checks ──────────────────────────
-        $io->section('Step 1: Compatibility Check');
-
+        // ── Auto-detect scenario ─────────────────────────────────
         $isGitRepo = Git::isInitializedRepo($repo_dir);
         $hasProtocolJson = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'protocol.json');
-        $hasDockerCompose = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'docker-compose.yml');
-        $hasGhCli = !empty(trim(Shell::run('which gh 2>/dev/null') ?: ''));
 
-        $checks = [];
-        $checks[] = [$isGitRepo ? '<info>PASS</info>' : '<error>FAIL</error>', 'Git repository', $isGitRepo ? Git::RemoteUrl($repo_dir) ?: 'local only' : 'Not a git repo'];
-        $checks[] = [$hasProtocolJson ? '<comment>EXISTS</comment>' : '<info>NEW</info>', 'protocol.json', $hasProtocolJson ? 'Will update existing' : 'Will create new'];
-        $checks[] = [$hasDockerCompose ? '<info>FOUND</info>' : '<comment>NONE</comment>', 'docker-compose.yml', $hasDockerCompose ? 'Docker config detected' : 'Can be added later'];
-        $checks[] = [$hasGhCli ? '<info>FOUND</info>' : '<comment>NONE</comment>', 'GitHub CLI (gh)', $hasGhCli ? 'Release deployments available' : 'Install for release deployments'];
-
-        $io->table(['', 'Check', 'Details'], $checks);
-
-        if (!$isGitRepo) {
-            $question = new ConfirmationQuestion('This directory is not a git repository. Initialize one now? [Y/n] ', true);
-            if ($helper->ask($input, $output, $question)) {
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
-                $io->success('Git repository initialized');
-            } else {
-                $io->error('Protocol requires a git repository. Run: git init');
-                return Command::FAILURE;
-            }
-        }
-
-        // ── Step 2: Existing project vs new setup ─────────────────
         if ($hasProtocolJson) {
-            $io->section('Step 2: Existing Protocol Project Detected');
-
-            $currentStrategy = Json::read('deployment.strategy', 'branch', $repo_dir);
-            $projectName = Json::read('name', basename($repo_dir), $repo_dir);
-
-            $io->text([
-                "Project: <info>{$projectName}</info>",
-                "Current strategy: <info>{$currentStrategy}</info>",
-            ]);
-
-            $question = new ChoiceQuestion(
-                'What would you like to do?',
-                [
-                    'update'   => 'Update project settings',
-                    'strategy' => 'Change deployment strategy',
-                    'secrets'  => 'Set up encrypted secrets',
-                    'config'   => 'Initialize configuration repository',
-                    'skip'     => 'Exit without changes',
-                ],
-                'update'
-            );
-
-            $action = $helper->ask($input, $output, $question);
-            $actionKey = array_search($action, [
-                'update'   => 'Update project settings',
-                'strategy' => 'Change deployment strategy',
-                'secrets'  => 'Set up encrypted secrets',
-                'config'   => 'Initialize configuration repository',
-                'skip'     => 'Exit without changes',
-            ]);
-            if ($actionKey === false) {
-                $actionKey = $action;
-            }
-
-            switch ($actionKey) {
-                case 'strategy':
-                    $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper, $io);
-                    return Command::SUCCESS;
-
-                case 'secrets':
-                    $command = $this->getApplication()->find('secrets:setup');
-                    $command->run(new ArrayInput([]), $output);
-                    return Command::SUCCESS;
-
-                case 'config':
-                    $initializers = $this->getAvailableInitializers();
-                    $initializer = reset($initializers);
-                    $initializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
-                    return Command::SUCCESS;
-
-                case 'skip':
-                    $io->text('No changes made.');
-                    return Command::SUCCESS;
-
-                case 'update':
-                default:
-                    break;
-            }
-        }
-
-        // ── Step 3: Project type selection ─────────────────────────
-        $io->section($hasProtocolJson ? 'Step 2: Update Project Settings' : 'Step 2: Project Type');
-
-        $initializers = $this->getAvailableInitializers();
-        $choices = [];
-        foreach ($initializers as $key => $initializer) {
-            $choices[$key] = $initializer->getName() . ' - ' . $initializer->getDescription();
-        }
-
-        $question = new ChoiceQuestion(
-            'What kind of project are you setting up?',
-            $choices,
-            'php81'
-        );
-        $question->setErrorMessage('Project type %s is invalid.');
-
-        $selectedAnswer = $helper->ask($input, $output, $question);
-        $selectedKey = array_search($selectedAnswer, $choices);
-        if ($selectedKey === false) {
-            $selectedKey = $selectedAnswer;
-        }
-        $selectedInitializer = $initializers[$selectedKey];
-
-        $output->writeln('');
-        $output->writeln("<comment>Selected: {$selectedInitializer->getName()}</comment>");
-        $output->writeln('');
-
-        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
-        $output->writeln('');
-
-        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
-
-        // ── Step 4: Deployment strategy ────────────────────────────
-        $io->section('Step 3: Deployment Strategy');
-        $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper, $io);
-
-        // ── Step 5: Encrypted secrets ──────────────────────────────
-        $io->section('Step 4: Secrets Management');
-
-        if (Secrets::hasKey()) {
-            $io->text('Encryption key already present at ' . Secrets::keyPath());
+            $scenario = 'protocol';
+        } elseif ($isGitRepo) {
+            $scenario = 'existing';
         } else {
-            $question = new ConfirmationQuestion('Set up encrypted secrets? (recommended for production) [y/N] ', false);
-            if ($helper->ask($input, $output, $question)) {
-                $command = $this->getApplication()->find('secrets:setup');
-                $command->run(new ArrayInput([]), $output);
-                Json::write('deployment.secrets', 'encrypted', $repo_dir);
-                Json::save($repo_dir);
-            } else {
-                $io->text('Skipped. You can run <info>protocol secrets:setup</info> later.');
-            }
+            $scenario = 'new';
         }
 
-        // ── Step 6: Configuration repository ───────────────────────
-        if ($input->getOption('with-config')) {
-            $selectedInitializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
-        } else {
-            $io->section('Step 5: Configuration Repository');
-            $question = new ConfirmationQuestion('Initialize a configuration repository? [y/N] ', false);
-            if ($helper->ask($input, $output, $question)) {
-                $selectedInitializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
-            } else {
-                $io->text('Skipped. You can run <info>protocol config:init</info> later.');
-            }
+        $selectedKey = $this->askWithDots($input, $output, $helper, [
+            'new'      => 'Start a new project',
+            'existing' => 'Connect an existing repository',
+            'protocol' => 'Update an existing Protocol project',
+        ], $scenario);
+
+        // ── Route to the right flow ──────────────────────────────
+        switch ($selectedKey) {
+            case 'new':
+                return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
+
+            case 'existing':
+                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+
+            case 'protocol':
+                return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
         }
-
-        // ── Done ───────────────────────────────────────────────────
-        $io->newLine();
-        $io->success('Protocol initialization complete!');
-
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
-
-        $io->text('<fg=yellow>Next steps:</>');
-        $io->listing([
-            'Commit your changes: <info>git add protocol.json && git commit -m "Add Protocol config"</info>',
-            $strategy === 'release'
-                ? 'Create your first release: <info>protocol release:create</info>'
-                : 'Start this node: <info>protocol start</info>',
-            'Check node health: <info>protocol status</info>',
-        ]);
 
         return Command::SUCCESS;
     }
 
-    /**
-     * Configure deployment strategy (release vs branch)
-     */
-    protected function configureDeploymentStrategy(
+    // ─── Flow: New Project ───────────────────────────────────────
+
+    protected function flowNewProject(
         string $repo_dir,
         InputInterface $input,
         OutputInterface $output,
         $helper,
         SymfonyStyle $io
+    ): int {
+        $totalSteps = 5;
+
+        // Step 1: Initialize git
+        $this->writeStep($output, 1, $totalSteps, 'Initialize Git Repository');
+
+        if (!Git::isInitializedRepo($repo_dir)) {
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
+            $output->writeln("    <fg=green>✓</> Git repository initialized");
+        } else {
+            $output->writeln("    <fg=green>✓</> Git repository already initialized");
+        }
+
+        // Step 2: Project type + scaffold
+        $this->writeStep($output, 2, $totalSteps, 'Project Type');
+        $selectedInitializer = $this->selectProjectType($input, $output, $helper);
+
+        $output->writeln('');
+        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
+        $output->writeln('');
+
+        $selectedKey = $this->getInitializerKey($selectedInitializer);
+        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
+
+        // Step 3: Deployment strategy
+        $this->writeStep($output, 3, $totalSteps, 'Deployment Strategy');
+        $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
+
+        // Step 4: Secrets
+        $this->writeStep($output, 4, $totalSteps, 'Secrets Management');
+        $this->configureSecrets($repo_dir, $input, $output, $helper);
+
+        // Step 5: Config repo
+        $this->writeStep($output, 5, $totalSteps, 'Configuration Repository');
+        $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
+
+        // Done
+        $this->writeCompletion($output, $repo_dir);
+
+        return Command::SUCCESS;
+    }
+
+    // ─── Flow: Existing Project ──────────────────────────────────
+
+    protected function flowExistingProject(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        SymfonyStyle $io
+    ): int {
+        $totalSteps = 4;
+
+        // Step 1: Project type + scaffold
+        $this->writeStep($output, 1, $totalSteps, 'Project Type');
+
+        $remote = Git::RemoteUrl($repo_dir) ?: 'local only';
+        $output->writeln("    <fg=gray>Remote:</> <fg=white>{$remote}</>");
+        $output->writeln('');
+
+        $selectedInitializer = $this->selectProjectType($input, $output, $helper);
+
+        $output->writeln('');
+        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
+        $output->writeln('');
+
+        $selectedKey = $this->getInitializerKey($selectedInitializer);
+        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
+
+        // Step 2: Deployment strategy
+        $this->writeStep($output, 2, $totalSteps, 'Deployment Strategy');
+        $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
+
+        // Step 3: Secrets
+        $this->writeStep($output, 3, $totalSteps, 'Secrets Management');
+        $this->configureSecrets($repo_dir, $input, $output, $helper);
+
+        // Step 4: Config repo
+        $this->writeStep($output, 4, $totalSteps, 'Configuration Repository');
+        $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
+
+        // Done
+        $this->writeCompletion($output, $repo_dir);
+
+        return Command::SUCCESS;
+    }
+
+    // ─── Flow: Protocol Project ──────────────────────────────────
+
+    protected function flowProtocolProject(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        SymfonyStyle $io
+    ): int {
+        $currentStrategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $projectName = Json::read('name', basename($repo_dir), $repo_dir);
+
+        $output->writeln('');
+        $output->writeln("    <fg=white;options=bold>{$projectName}</>");
+        $output->writeln("    <fg=gray>Strategy:</> <fg=cyan>{$currentStrategy}</>  <fg=gray>·</>  <fg=gray>Dir:</> <fg=white>{$repo_dir}</>");
+        $output->writeln('');
+
+        $actionKey = $this->askWithDots($input, $output, $helper, [
+            'settings' => 'Re-run full project setup',
+            'strategy' => 'Change deployment strategy',
+            'secrets'  => 'Set up encrypted secrets',
+            'config'   => 'Initialize configuration repository',
+            'exit'     => 'Exit without changes',
+        ], 'settings');
+
+        switch ($actionKey) {
+            case 'settings':
+                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+
+            case 'strategy':
+                $output->writeln('');
+                $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
+                $output->writeln('');
+                return Command::SUCCESS;
+
+            case 'secrets':
+                $output->writeln('');
+                $command = $this->getApplication()->find('secrets:setup');
+                $command->run(new ArrayInput([]), $output);
+                return Command::SUCCESS;
+
+            case 'config':
+                $output->writeln('');
+                $initializers = $this->getAvailableInitializers();
+                $initializer = reset($initializers);
+                $initializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+                return Command::SUCCESS;
+
+            case 'exit':
+                $output->writeln('');
+                $output->writeln('    <fg=gray>No changes made.</>');
+                $output->writeln('');
+                return Command::SUCCESS;
+        }
+
+        return Command::SUCCESS;
+    }
+
+    // ─── Shared steps ────────────────────────────────────────────
+
+    protected function selectProjectType(InputInterface $input, OutputInterface $output, $helper)
+    {
+        $initializers = $this->getAvailableInitializers();
+        $choices = [];
+        foreach ($initializers as $key => $initializer) {
+            $choices[$key] = $initializer->getName() . ' — ' . $initializer->getDescription();
+        }
+
+        $selectedKey = $this->askWithDots($input, $output, $helper, $choices, 'php82ffmpeg');
+
+        $selectedInitializer = $initializers[$selectedKey];
+        $output->writeln("    <fg=green>✓</> Selected: <fg=white;options=bold>{$selectedInitializer->getName()}</>");
+
+        return $selectedInitializer;
+    }
+
+    protected function getInitializerKey($initializer): string
+    {
+        $initializers = $this->getAvailableInitializers();
+        foreach ($initializers as $key => $init) {
+            if (get_class($init) === get_class($initializer)) {
+                return $key;
+            }
+        }
+        return 'php82ffmpeg';
+    }
+
+    protected function configureDeploymentStrategy(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
     ): void {
         $currentStrategy = Json::read('deployment.strategy', null, $repo_dir);
 
-        $io->text([
-            '<fg=yellow>Release-based</> (recommended): Tag releases, deploy via GitHub variable.',
-            '  All nodes poll a single pointer. Instant rollback, full audit trail.',
-            '',
-            '<fg=yellow>Branch-based</> (legacy): Nodes track a git branch tip.',
-            '  Simpler but no versioning, no rollback, no audit log.',
-        ]);
-        $output->writeln('');
-
-        $question = new ChoiceQuestion(
-            'Select deployment strategy' . ($currentStrategy ? " (current: {$currentStrategy})" : ''),
-            [
-                'release' => 'Release-based (recommended)',
-                'branch'  => 'Branch-based (legacy)',
-            ],
-            $currentStrategy ?: 'release'
-        );
-
-        $answer = $helper->ask($input, $output, $question);
-        $strategyKey = array_search($answer, [
-            'release' => 'Release-based (recommended)',
-            'branch'  => 'Branch-based (legacy)',
-        ]);
-        if ($strategyKey === false) {
-            $strategyKey = $answer;
-        }
+        $strategyKey = $this->askWithDots($input, $output, $helper, [
+            'release' => 'Release-based — rollback, audit trail, multi-node',
+            'branch'  => 'Branch-based — simple, tracks branch tip (legacy)',
+        ], $currentStrategy ?: 'release');
 
         Json::write('deployment.strategy', $strategyKey, $repo_dir);
 
@@ -327,6 +527,124 @@ Class ProtocolInit extends Command {
         }
 
         Json::save($repo_dir);
-        $io->text("Deployment strategy set to: <info>{$strategyKey}</info>");
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Strategy: <fg=white;options=bold>{$strategyKey}</>");
+    }
+
+    protected function configureSecrets(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
+    ): void {
+        if (Secrets::hasKey()) {
+            $output->writeln("    <fg=green>✓</> Encryption key present <fg=gray>— " . Secrets::keyPath() . "</>");
+            return;
+        }
+
+        $output->writeln("    <fg=gray>Encrypt your .env files with AES-256-GCM.</>");
+        $output->writeln("    <fg=gray>Keys stay local, secrets travel encrypted in git.</>");
+        $output->writeln('');
+
+        $question = new ConfirmationQuestion(
+            '    Set up encrypted secrets? <fg=gray>(recommended for production)</> [y/<fg=green>N</>] ', false
+        );
+        if ($helper->ask($input, $output, $question)) {
+            $command = $this->getApplication()->find('secrets:setup');
+            $command->run(new ArrayInput([]), $output);
+            Json::write('deployment.secrets', 'encrypted', $repo_dir);
+            Json::save($repo_dir);
+        } else {
+            $this->writeInfo($output, '<fg=gray>Skipped. Run</> <fg=cyan>protocol secrets:setup</> <fg=gray>later.</>');
+        }
+    }
+
+    protected function configureConfigRepo(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        $initializer
+    ): void {
+        if ($input->getOption('with-config')) {
+            $initializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+            return;
+        }
+
+        $output->writeln("    <fg=gray>Store .env, nginx, and cron configs in a separate repo.</>");
+        $output->writeln("    <fg=gray>Each branch = one environment. Symlinked into your app.</>");
+        $output->writeln('');
+
+        $question = new ConfirmationQuestion(
+            '    Initialize a configuration repository? [y/<fg=green>N</>] ', false
+        );
+        if ($helper->ask($input, $output, $question)) {
+            $initializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+        } else {
+            $this->writeInfo($output, '<fg=gray>Skipped. Run</> <fg=cyan>protocol config:init</> <fg=gray>later.</>');
+        }
+    }
+
+    protected function writeCompletion(OutputInterface $output, string $repo_dir): void
+    {
+        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+
+        // Auto-commit protocol files
+        $this->commitProtocolFiles($output, $repo_dir);
+
+        $output->writeln('');
+        $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Setup Complete!</>                                    <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>Next steps:</>                                            <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>1.</> <fg=white>protocol start</>           <fg=gray>Start this node</>       <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>2.</> <fg=white>protocol status</>          <fg=gray>Check node health</>     <fg=cyan>│</>');
+
+        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
+        $output->writeln('');
+    }
+
+    protected function commitProtocolFiles(OutputInterface $output, string $repo_dir): void
+    {
+        if (!Git::isInitializedRepo($repo_dir)) {
+            return;
+        }
+
+        $filesToAdd = [
+            'protocol.json',
+            'docker-compose.yml',
+            '.gitignore',
+            'nginx.d',
+            'cron.d',
+            'supervisor.d',
+        ];
+
+        $added = [];
+        foreach ($filesToAdd as $file) {
+            $fullPath = rtrim($repo_dir, '/') . '/' . $file;
+            if (file_exists($fullPath) || is_dir($fullPath)) {
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " add " . escapeshellarg($file) . " 2>/dev/null");
+                $added[] = $file;
+            }
+        }
+
+        if (empty($added)) {
+            return;
+        }
+
+        // Check if there's anything staged
+        $status = Shell::run("git -C " . escapeshellarg($repo_dir) . " diff --cached --name-only 2>/dev/null");
+        if (empty(trim($status))) {
+            $output->writeln('');
+            $output->writeln("    <fg=gray>›</> No changes to commit");
+            return;
+        }
+
+        Shell::run("git -C " . escapeshellarg($repo_dir) . " commit -m 'protocol init' 2>/dev/null");
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Committed: <fg=white>" . implode(', ', $added) . "</>");
     }
 }

@@ -35,31 +35,31 @@ namespace Gitcd\Commands\Init;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputInterface;
 
-class Php81 extends BaseInitializer
+class Php82Ffmpeg extends BaseInitializer
 {
     public function getName(): string
     {
-        return 'PHP 8.1';
+        return 'PHP 8.2 + FFmpeg';
     }
 
     public function getDescription(): string
     {
-        return 'Nginx + PHP 8.1 FPM';
+        return 'Nginx + PHP 8.2 FPM + FFmpeg, Whisper, Node.js';
     }
 
     public function getDockerImage(): string
     {
-        return 'byrdziak/merchantprotocol-webserver-nginx-php8.1:initial';
+        return 'byrdziak/merchantprotocol-webserver-nginx-php8.2-ffmpeg:latest';
     }
 
     public function getGitHubRepo(): string
     {
-        return 'https://github.com/merchantprotocol/docker-nginx-php8.1-fpm';
+        return 'https://github.com/merchantprotocol/docker-nginx-php8.2-ffmpeg';
     }
 
     public function getTemplateDir(): string
     {
-        return __DIR__ . '/Php81';
+        return __DIR__ . '/Php82Ffmpeg';
     }
 
     protected function initializeProject(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): void

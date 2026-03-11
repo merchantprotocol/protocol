@@ -90,6 +90,11 @@ Class ProtocolGlobal extends Command {
             }
             $output->writeln("<comment>Removing existing command at: {$which}</comment>");
             Shell::run("rm -f " . escapeshellarg($which));
+            if (file_exists($which) || is_link($which)) {
+                $output->writeln("<error>Could not remove {$which} — permission denied.</error>");
+                $output->writeln("<comment>Run with sudo: sudo " . escapeshellarg($datameltpath) . " self:global --force</comment>");
+                return Command::FAILURE;
+            }
         }
 
         // Finding the first available preferred path
@@ -110,6 +115,11 @@ Class ProtocolGlobal extends Command {
                 }
                 $output->writeln("<comment>Removing existing file at: {$testpath}</comment>");
                 Shell::run("rm -f " . escapeshellarg($testpath));
+                if (file_exists($testpath) || is_link($testpath)) {
+                    $output->writeln("<error>Could not remove {$testpath} — permission denied.</error>");
+                    $output->writeln("<comment>Run with sudo: sudo " . escapeshellarg($datameltpath) . " self:global --force</comment>");
+                    return Command::FAILURE;
+                }
             }
 
             $datameltsymlink = $testpath;

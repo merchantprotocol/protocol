@@ -36,6 +36,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Question\Question;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
+use Symfony\Component\Console\Question\ChoiceQuestion;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
@@ -44,6 +45,16 @@ use Gitcd\Utils\Yaml;
 
 abstract class BaseInitializer implements ProjectInitializerInterface
 {
+    /**
+     * Get the Docker Hub image for this project type
+     */
+    abstract public function getDockerImage(): string;
+
+    /**
+     * Get the GitHub repository URL for the Docker image source
+     */
+    abstract public function getGitHubRepo(): string;
+
     /**
      * Initialize the project structure
      * This is the main entry point that orchestrates the initialization
@@ -77,6 +88,235 @@ abstract class BaseInitializer implements ProjectInitializerInterface
      * @return void
      */
     abstract protected function initializeProject(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): void;
+
+    /**
+     * Generate a docker-compose.yml that builds from the GitHub repo
+     */
+    protected function generateDockerCompose(string $repo_dir, InputInterface $input, OutputInterface $output, $helper): void
+    {
+        $dockerComposePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        $githubRepo = $this->getGitHubRepo();
+        $projectName = basename($repo_dir) ?: 'app';
+
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Build from:</> <fg=cyan>{$githubRepo}</>");
+        $output->writeln('');
+
+        // Ask for container name
+        $question = new Question("    Container name [{$projectName}]: ", $projectName);
+        $containerName = $helper->ask($input, $output, $question);
+
+        // Ask if they want to use a custom Docker Hub image instead
+        $question = new ConfirmationQuestion(
+            '    Use a custom Docker Hub image instead of building from GitHub? [y/<fg=green>N</>] ', false
+        );
+        $useCustomImage = $helper->ask($input, $output, $question);
+
+        $customImage = null;
+        if ($useCustomImage) {
+            $question = new Question('    Docker image (e.g. myorg/myimage:latest): ');
+            $customImage = $helper->ask($input, $output, $question);
+        }
+
+        if (file_exists($dockerComposePath)) {
+            $question = new ConfirmationQuestion(
+                '    docker-compose.yml already exists. Overwrite? [y/<fg=green>N</>] ', false
+            );
+            if (!$helper->ask($input, $output, $question)) {
+                $output->writeln("    <fg=green>✓</> Keeping existing docker-compose.yml");
+                $this->createOverrideDirectories($repo_dir, $output);
+                return;
+            }
+        }
+
+        if ($customImage) {
+            $imageOrBuild = "    image: {$customImage}";
+            $sourceLabel = $customImage;
+        } else {
+            $imageOrBuild = "    build:\n      context: {$githubRepo}";
+            $sourceLabel = $githubRepo;
+        }
+
+        $compose = <<<YAML
+services:
+  app:
+    container_name: {$containerName}
+{$imageOrBuild}
+    restart: unless-stopped
+    hostname: \${DOCKER_HOSTNAME}
+    ports:
+      - "80:80"
+      - "443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ".:/var/www/html:rw"
+      - "./supervisor.d:/etc/supervisor/conf.d/custom:ro"
+    ulimits:
+      core:
+        hard: 0
+        soft: 0
+YAML;
+
+        file_put_contents($dockerComposePath, $compose . "\n");
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Created docker-compose.yml");
+        $output->writeln("    <fg=green>✓</> Container: <fg=white>{$containerName}</>");
+        $output->writeln("    <fg=green>✓</> Source: <fg=white>{$sourceLabel}</>");
+
+        // Create override directories with README files
+        $this->createOverrideDirectories($repo_dir, $output);
+    }
+
+    /**
+     * Create override directories with README files explaining their purpose
+     */
+    protected function createOverrideDirectories(string $repo_dir, OutputInterface $output): void
+    {
+        $dirs = [
+            'nginx.d' => <<<'README'
+# nginx.d — Nginx Configuration Overrides
+
+Drop Nginx configuration files here to customize the web server
+inside the container.
+
+## How it works
+
+This directory is mounted at `/var/www/html/nginx.d/` inside the
+container. The base Nginx config is baked into the Docker image —
+files here override or extend it.
+
+## Common uses
+
+- **Custom virtual host**: Add a `.conf` file with a `server {}` block
+- **SSL certificates**: Place cert files here and reference them in config
+- **Rewrites / redirects**: Add rewrite rules in a `.conf` file
+
+## Example
+
+```nginx
+# nginx.d/custom-headers.conf
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+```
+
+Files are NOT auto-included. Include them from your main config
+or replace the default site config entirely.
+README
+            ,
+            'cron.d' => <<<'README'
+# cron.d — Cron Job Scripts
+
+Place shell scripts here to run as scheduled tasks inside the
+container.
+
+## How it works
+
+This directory is mounted at `/var/www/html/cron.d/` inside the
+container. The Docker image includes a crontab that runs
+`/opt/scripts/runcron.sh` which executes scripts from this
+directory.
+
+## Adding a cron job
+
+1. Create a `.sh` script in this directory
+2. Make it executable: `chmod +x cron.d/myscript.sh`
+3. The container's crontab will pick it up automatically
+
+## Example
+
+```bash
+#!/bin/bash
+# cron.d/clear-cache.sh
+cd /var/www/html && php artisan cache:clear
+```
+README
+            ,
+            'supervisor.d' => <<<'README'
+# supervisor.d — Supervisor Program Configs
+
+Add Supervisor configuration files here to run additional
+background processes inside the container.
+
+## How it works
+
+This directory is mounted at `/etc/supervisor/conf.d/custom/`
+inside the container. Supervisor automatically picks up `.conf`
+files and manages the processes.
+
+## Built-in programs
+
+The Docker image already runs these via Supervisor:
+- `php-fpm` — PHP FastCGI process manager
+- `nginx` — Web server
+- `cron` — Cron daemon
+
+## Adding a worker
+
+Create a `.conf` file following Supervisor's format:
+
+```ini
+; supervisor.d/queue-worker.conf
+[program:queue-worker]
+command=php /var/www/html/artisan queue:work --sleep=3 --tries=3
+autostart=true
+autorestart=true
+numprocs=1
+stdout_logfile=/var/log/queue-worker.log
+stderr_logfile=/var/log/queue-worker-error.log
+```
+
+## Common uses
+
+- Queue workers (Laravel, Symfony Messenger, etc.)
+- WebSocket servers
+- Long-running daemons
+- Log processors
+README
+        ];
+
+        $output->writeln('');
+        foreach ($dirs as $dir => $readme) {
+            $fullPath = rtrim($repo_dir, '/') . '/' . $dir;
+            $readmePath = $fullPath . '/README.md';
+
+            if (!is_dir($fullPath)) {
+                mkdir($fullPath, 0755, true);
+                $output->writeln("    <fg=green>✓</> Created <fg=white>{$dir}/</>");
+            } else {
+                $output->writeln("    <fg=gray>›</> <fg=gray>{$dir}/ already exists</>");
+            }
+
+            if (!file_exists($readmePath)) {
+                file_put_contents($readmePath, $readme . "\n");
+            }
+        }
+    }
+
+    /**
+     * Get list of directories in the repo
+     */
+    protected function getDirectories(string $repo_dir): array
+    {
+        $directories = [];
+        if ($repo_dir === '' || !is_dir($repo_dir)) {
+            return $directories;
+        }
+        $items = scandir($repo_dir);
+
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..' || $item === '.git') {
+                continue;
+            }
+
+            $fullPath = rtrim($repo_dir, '/') . '/' . $item;
+            if (is_dir($fullPath)) {
+                $directories[] = $item;
+            }
+        }
+
+        return $directories;
+    }
 
     /**
      * Create protocol.json with base configuration

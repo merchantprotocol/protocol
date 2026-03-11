@@ -50,7 +50,7 @@ Class DockerPull extends Command {
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'docker:pull';
-    protected static $defaultDescription = 'Docker pull and update an image';
+    protected static $defaultDescription = 'Pull or build the Docker image';
 
     protected function configure(): void
     {
@@ -82,18 +82,33 @@ Class DockerPull extends Command {
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
 
-        $output->writeln('<comment>Pulling remote docker image</comment>');
-
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
             return Command::SUCCESS;
         }
 
-        $image    = $input->getArgument('image') ?: Json::read('docker.image', false, $repo_dir);
+        // Check if docker-compose.yml uses build: or image:
+        $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        $usesBuild = false;
+        if (file_exists($composePath)) {
+            $content = file_get_contents($composePath);
+            $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
+        }
 
-        $command = "docker pull $image";
-        $response = Shell::passthru($command);
+        if ($usesBuild) {
+            $output->writeln('<comment>Building Docker image from source</comment>');
+            Shell::passthru("docker compose -f " . escapeshellarg($composePath) . " build");
+        } else {
+            $image = $input->getArgument('image') ?: Json::read('docker.image', false, $repo_dir);
+            if ($image) {
+                $output->writeln('<comment>Pulling remote docker image</comment>');
+                Shell::passthru("docker pull " . escapeshellarg($image));
+            } else {
+                $output->writeln('<error>No image or build context found</error>');
+                return Command::FAILURE;
+            }
+        }
 
         return Command::SUCCESS;
     }
