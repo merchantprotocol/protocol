@@ -92,9 +92,8 @@ Class ConfigSwitch extends Command {
         }
 
         // make sure we have a config repo to start with
-        $configrepo = Json::read('configuration.local', false, $repo_dir);
+        $configrepo = Config::requireRepo($repo_dir, $output);
         if (!$configrepo) {
-            $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
 

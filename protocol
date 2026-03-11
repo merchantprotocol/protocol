@@ -46,6 +46,8 @@ $files = glob(COMMANDS_DIR."*.{php}", GLOB_BRACE);
 foreach($files as $file) {
     $filename = str_replace('.php', '', basename($file));
     $class = "\Gitcd\Commands\\$filename";
+    $ref = new \ReflectionClass($class);
+    if ($ref->isAbstract()) continue;
     $command = new $class();
     $application->add( $command );
 }

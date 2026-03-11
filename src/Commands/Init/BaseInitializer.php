@@ -301,31 +301,6 @@ README
     }
 
     /**
-     * Get list of directories in the repo
-     */
-    protected function getDirectories(string $repo_dir): array
-    {
-        $directories = [];
-        if ($repo_dir === '' || !is_dir($repo_dir)) {
-            return $directories;
-        }
-        $items = scandir($repo_dir);
-
-        foreach ($items as $item) {
-            if ($item === '.' || $item === '..' || $item === '.git') {
-                continue;
-            }
-
-            $fullPath = rtrim($repo_dir, '/') . '/' . $item;
-            if (is_dir($fullPath)) {
-                $directories[] = $item;
-            }
-        }
-
-        return $directories;
-    }
-
-    /**
      * Create protocol.json with base configuration
      * This is called by ProtocolInit after project initialization
      *

@@ -35,8 +35,28 @@ namespace Gitcd\Helpers;
 use Gitcd\Utils\Config as UtilConfig;
 use Gitcd\Utils\Json;
 use Gitcd\Helpers\Dir;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Command\Command;
 
 Class Config {
+
+    /**
+     * Validate that the config repo exists and is initialized.
+     * Returns the config repo path, or null if validation fails (with error output).
+     *
+     * @param string $repo_dir
+     * @param OutputInterface $output
+     * @return string|null
+     */
+    public static function requireRepo(string $repo_dir, OutputInterface $output): ?string
+    {
+        $configrepo = self::repo($repo_dir);
+        if (!$configrepo) {
+            $output->writeln('<error>Please run `protocol config:init` before using this command.</error>');
+            return null;
+        }
+        return $configrepo;
+    }
 
     /**
      * Return the configuration repo folder

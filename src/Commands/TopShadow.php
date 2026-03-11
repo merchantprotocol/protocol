@@ -41,6 +41,8 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\AnsiColors as C;
+use Gitcd\Helpers\DashboardFormatter as Fmt;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -48,20 +50,6 @@ Class TopShadow extends Command {
 
     protected static $defaultName = 'top:shadow';
     protected static $defaultDescription = 'Visual dashboard of all Docker containers and shadow deployments';
-
-    // Brand colors (true color ANSI - matching merchantprotocol.com)
-    private const G   = "\033[38;2;63;185;80m";    // #3FB950 green-bright
-    private const GD  = "\033[38;2;46;160;67m";    // #2EA043 green-dim
-    private const T   = "\033[38;2;230;237;243m";   // #e6edf3 text
-    private const M   = "\033[38;2;139;148;158m";   // #8b949e muted
-    private const D   = "\033[38;2;110;118;129m";   // #6e7681 dim
-    private const B   = "\033[38;2;48;54;61m";      // #30363d border
-    private const R   = "\033[38;2;255;95;87m";     // #ff5f57 red
-    private const Y   = "\033[38;2;254;188;46m";    // #febc2e yellow
-    private const GN  = "\033[38;2;40;200;64m";     // #28c840 green-dot
-    private const BL  = "\033[38;2;121;192;255m";   // #79c0ff blue
-    private const X   = "\033[0m";                   // reset
-    private const BD  = "\033[1m";                   // bold
 
     private int $pw = 98;
     private int $boxW = 46; // width of each container box
@@ -116,33 +104,33 @@ Class TopShadow extends Command {
     private function render(string $baseDir, int $rows): void
     {
         $pw = $this->pw;
-        $x = self::X;
-        $o = self::B;
+        $x = C::X;
+        $o = C::B;
 
         // ── Chrome header
         $hostname = trim(Shell::run('hostname -s 2>/dev/null') ?: Shell::run('hostname 2>/dev/null')) ?: 'server';
         $now = date('Y-m-d H:i:s');
-        $hostTrunc = $this->trunc($hostname, 20);
+        $hostTrunc = Fmt::trunc($hostname, 20);
 
-        $this->w("{$o}╭" . str_repeat('─', $pw) . "╮{$x}");
+        Fmt::w("{$o}╭" . str_repeat('─', $pw) . "╮{$x}");
 
         $titleVis = "protocol top:shadow — {$hostTrunc}";
         $innerW = $pw - 2;
         $usedChars = 5 + 3 + strlen($titleVis) + strlen($now);
         $pad = max(1, $innerW - $usedChars);
 
-        $dots = self::R . "●" . $x . " " . self::Y . "●" . $x . " " . self::GN . "●" . $x;
-        $titlePart = self::BL . "protocol top:shadow" . $x . self::D . " — {$hostTrunc}" . $x;
-        $timePart = self::D . $now . $x;
-        $this->w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart} {$o}│{$x}");
+        $dots = C::R . "●" . $x . " " . C::Y . "●" . $x . " " . C::GN . "●" . $x;
+        $titlePart = C::BL . "protocol top:shadow" . $x . C::D . " — {$hostTrunc}" . $x;
+        $timePart = C::D . $now . $x;
+        Fmt::w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart} {$o}│{$x}");
 
         $brandVis = " MERCHANT PROTOCOL  container dashboard";
         $usedBrand = strlen($brandVis);
         $bPad = max(1, $innerW - $usedBrand);
-        $brand = self::G . self::BD . " MERCHANT PROTOCOL" . $x . "  " . self::D . "container dashboard" . $x;
-        $this->w("{$o}│{$x}{$brand}" . str_repeat(' ', $bPad) . " {$o}│{$x}");
+        $brand = C::G . C::BD . " MERCHANT PROTOCOL" . $x . "  " . C::D . "container dashboard" . $x;
+        Fmt::w("{$o}│{$x}{$brand}" . str_repeat(' ', $bPad) . " {$o}│{$x}");
 
-        $this->w("{$o}├" . str_repeat('─', $pw) . "┤{$x}");
+        Fmt::w("{$o}├" . str_repeat('─', $pw) . "┤{$x}");
         $linesUsed = 4;
 
         // ── Discover all projects with docker-compose.yml
@@ -161,30 +149,30 @@ Class TopShadow extends Command {
 
         // ── Shadow status summary (if enabled)
         if ($shadowEnabled) {
-            $this->sec('SHADOW DEPLOY');
+            Fmt::sec('SHADOW DEPLOY', $this->pw);
             $linesUsed++;
 
             $activeStr = $activeVersion
-                ? self::GN . "●" . $x . " " . self::G . self::BD . $activeVersion . $x . self::D . " active" . $x
-                : self::D . "no active version" . $x;
+                ? C::GN . "●" . $x . " " . C::G . C::BD . $activeVersion . $x . C::D . " active" . $x
+                : C::D . "no active version" . $x;
             $prevStr = $previousVersion
-                ? self::Y . "●" . $x . " " . self::M . $previousVersion . $x . self::D . " rollback" . $x
+                ? C::Y . "●" . $x . " " . C::M . $previousVersion . $x . C::D . " rollback" . $x
                 : '';
             $shadStr = $shadowVersion
-                ? self::BL . "●" . $x . " " . self::BL . $shadowVersion . $x . self::D . " shadow" . $x
+                ? C::BL . "●" . $x . " " . C::BL . $shadowVersion . $x . C::D . " shadow" . $x
                 : '';
 
             $parts = array_filter([$activeStr, $prevStr, $shadStr]);
-            $this->ln(implode("    ", $parts));
+            Fmt::ln(implode("    ", $parts));
             $linesUsed++;
         }
 
         // ── Container boxes
-        $this->sec('CONTAINERS');
+        Fmt::sec('CONTAINERS', $this->pw);
         $linesUsed++;
 
         if (empty($projects)) {
-            $this->ln(self::D . "No docker-compose projects found in " . $this->trunc($baseDir, 50) . $x);
+            Fmt::ln(C::D . "No docker-compose projects found in " . Fmt::trunc($baseDir, 50) . $x);
             $linesUsed++;
         } else {
             // Build container info for each project
@@ -207,15 +195,15 @@ Class TopShadow extends Command {
 
                 $maxH = max(count($leftLines), count($rightLines));
                 for ($i = 0; $i < $maxH; $i++) {
-                    $l = $leftLines[$i] ?? $this->pad('', $bw);
+                    $l = $leftLines[$i] ?? Fmt::pad('', $bw);
                     $r = $rightLines[$i] ?? '';
-                    $this->ln($l . " " . $r);
+                    Fmt::ln($l . " " . $r);
                     $linesUsed++;
                 }
 
                 // Gap between rows of boxes
                 if ($linesUsed < $rows - 3) {
-                    $this->ln('');
+                    Fmt::ln('');
                     $linesUsed++;
                 }
             }
@@ -223,7 +211,7 @@ Class TopShadow extends Command {
 
         // ── Release directories (if shadow enabled and releases exist)
         if ($shadowEnabled && !empty($releases) && $linesUsed + 4 < $rows - 2) {
-            $this->sec('RELEASES');
+            Fmt::sec('RELEASES', $this->pw);
             $linesUsed++;
 
             foreach ($releases as $release) {
@@ -235,20 +223,20 @@ Class TopShadow extends Command {
                 $status = $state['status'] ?? 'unknown';
                 $running = BlueGreen::isReleaseRunning($repoDir, $version);
 
-                $ico = $running ? self::GN . "●" . $x : self::R . "●" . $x;
+                $ico = $running ? C::GN . "●" . $x : C::R . "●" . $x;
                 $isActive = ($version === $activeVersion);
 
                 $tag = '';
-                if ($isActive) $tag = self::G . self::BD . " ACTIVE" . $x;
-                elseif ($version === $previousVersion) $tag = self::Y . " ROLLBACK" . $x;
-                elseif ($version === $shadowVersion) $tag = self::BL . " SHADOW" . $x;
+                if ($isActive) $tag = C::G . C::BD . " ACTIVE" . $x;
+                elseif ($version === $previousVersion) $tag = C::Y . " ROLLBACK" . $x;
+                elseif ($version === $shadowVersion) $tag = C::BL . " SHADOW" . $x;
 
-                $this->ln(
+                Fmt::ln(
                     "{$ico} "
-                    . self::T . sprintf("%-16s", $version) . $x
-                    . self::M . " :{$port}" . $x
-                    . self::D . " {$status}" . $x
-                    . ($running ? self::GN . " running" . $x : self::R . " stopped" . $x)
+                    . C::T . sprintf("%-16s", $version) . $x
+                    . C::M . " :{$port}" . $x
+                    . C::D . " {$status}" . $x
+                    . ($running ? C::GN . " running" . $x : C::R . " stopped" . $x)
                     . $tag
                 );
                 $linesUsed++;
@@ -256,10 +244,10 @@ Class TopShadow extends Command {
         }
 
         // ── Footer
-        $this->w("{$o}╰" . str_repeat('─', $pw) . "╯{$x}");
-        echo " " . self::D . "ctrl+c exit" . $x
-            . self::B . " · " . $x
-            . self::D . "merchantprotocol.com" . $x;
+        Fmt::w("{$o}╰" . str_repeat('─', $pw) . "╯{$x}");
+        echo " " . C::D . "ctrl+c exit" . $x
+            . C::B . " · " . $x
+            . C::D . "merchantprotocol.com" . $x;
     }
 
     // ── Project discovery ───────────────────────────────────────
@@ -404,15 +392,15 @@ Class TopShadow extends Command {
 
     private function renderBox(array $box, int $bw): array
     {
-        $x = self::X;
+        $x = C::X;
         $lines = [];
         $innerW = $bw - 2;
 
         // Border color based on status
-        $bc = $box['running'] ? self::GD : self::B;
+        $bc = $box['running'] ? C::GD : C::B;
 
         // Status indicator
-        $statusDot = $box['running'] ? self::GN . "●" : self::R . "●";
+        $statusDot = $box['running'] ? C::GN . "●" : C::R . "●";
 
         // ── Top border with name
         $nameDisplay = strtoupper($box['name']);
@@ -420,21 +408,21 @@ Class TopShadow extends Command {
             $nameDisplay = mb_strimwidth($nameDisplay, 0, $innerW - 4);
         }
         $topPad = max(0, $innerW - mb_strwidth($nameDisplay) - 2);
-        $lines[] = $bc . "╭─" . $x . " " . self::T . self::BD . $nameDisplay . $x . " " . $bc . str_repeat('─', $topPad) . "╮" . $x;
+        $lines[] = $bc . "╭─" . $x . " " . C::T . C::BD . $nameDisplay . $x . " " . $bc . str_repeat('─', $topPad) . "╮" . $x;
 
         // ── Status line
         $statusText = $box['running'] ? 'RUNNING' : 'STOPPED';
-        $statusClr = $box['running'] ? self::G : self::R;
+        $statusClr = $box['running'] ? C::G : C::R;
         $healthSuffix = '';
         $healthVis = '';
         if ($box['health'] === 'healthy') {
-            $healthSuffix = self::GN . " healthy" . $x;
+            $healthSuffix = C::GN . " healthy" . $x;
             $healthVis = ' healthy';
         } elseif ($box['health'] === 'unhealthy') {
-            $healthSuffix = self::R . " unhealthy" . $x;
+            $healthSuffix = C::R . " unhealthy" . $x;
             $healthVis = ' unhealthy';
         }
-        $activeTag = $box['active'] ? self::G . self::BD . " [ACTIVE]" . $x : '';
+        $activeTag = $box['active'] ? C::G . C::BD . " [ACTIVE]" . $x : '';
         $activeVis = $box['active'] ? ' [ACTIVE]' : '';
 
         $statusVisLen = 4 + mb_strwidth($statusText) + mb_strwidth($healthVis) + mb_strwidth($activeVis);
@@ -449,17 +437,17 @@ Class TopShadow extends Command {
         if ($vStr || $bStr) {
             $vbPad = max(1, $innerW - 2 - mb_strwidth($vStr) - mb_strwidth($bStr));
             $lines[] = $bc . "│" . $x
-                . "  " . self::BL . $vStr . $x . self::D . $bStr . $x
+                . "  " . C::BL . $vStr . $x . C::D . $bStr . $x
                 . str_repeat(' ', $vbPad)
                 . $bc . "│" . $x;
         }
 
         // ── Image
         if ($box['image']) {
-            $imgTrunc = $this->trunc($box['image'], $innerW - 4);
+            $imgTrunc = Fmt::trunc($box['image'], $innerW - 4);
             $imgPad = max(1, $innerW - 2 - mb_strwidth($imgTrunc));
             $lines[] = $bc . "│" . $x
-                . "  " . self::M . $imgTrunc . $x
+                . "  " . C::M . $imgTrunc . $x
                 . str_repeat(' ', $imgPad)
                 . $bc . "│" . $x;
         }
@@ -467,21 +455,21 @@ Class TopShadow extends Command {
         // ── Ports
         if (!empty($box['ports'])) {
             $portStr = implode(' ', array_slice($box['ports'], 0, 3));
-            $portTrunc = $this->trunc($portStr, $innerW - 4);
+            $portTrunc = Fmt::trunc($portStr, $innerW - 4);
             $portPad = max(1, $innerW - 2 - mb_strwidth($portTrunc));
             $lines[] = $bc . "│" . $x
-                . "  " . self::Y . $portTrunc . $x
+                . "  " . C::Y . $portTrunc . $x
                 . str_repeat(' ', $portPad)
                 . $bc . "│" . $x;
         }
 
         // ── Container names
         foreach ($box['containers'] as $cname) {
-            $cTrunc = $this->trunc($cname, $innerW - 6);
+            $cTrunc = Fmt::trunc($cname, $innerW - 6);
             $cPad = max(1, $innerW - 4 - mb_strwidth($cTrunc));
-            $cDot = $box['running'] ? self::GN : self::D;
+            $cDot = $box['running'] ? C::GN : C::D;
             $lines[] = $bc . "│" . $x
-                . "  " . $cDot . "▸" . $x . " " . self::T . $cTrunc . $x
+                . "  " . $cDot . "▸" . $x . " " . C::T . $cTrunc . $x
                 . str_repeat(' ', $cPad)
                 . $bc . "│" . $x;
         }
@@ -492,20 +480,20 @@ Class TopShadow extends Command {
             if ($volCount >= 2) break;
             $parts = explode(':', $vol);
             $hostPath = $parts[0] ?? '';
-            $volStr = $this->trunc($hostPath, $innerW - 6);
+            $volStr = Fmt::trunc($hostPath, $innerW - 6);
             $volPad = max(1, $innerW - 4 - mb_strwidth($volStr));
             $lines[] = $bc . "│" . $x
-                . "  " . self::D . "◦" . $x . " " . self::D . $volStr . $x
+                . "  " . C::D . "◦" . $x . " " . C::D . $volStr . $x
                 . str_repeat(' ', $volPad)
                 . $bc . "│" . $x;
             $volCount++;
         }
 
         // ── Directory
-        $dirStr = $this->trunc($box['dir'], $innerW - 4);
+        $dirStr = Fmt::trunc($box['dir'], $innerW - 4);
         $dirPad = max(1, $innerW - 2 - mb_strwidth($dirStr));
         $lines[] = $bc . "│" . $x
-            . "  " . self::D . $dirStr . $x
+            . "  " . C::D . $dirStr . $x
             . str_repeat(' ', $dirPad)
             . $bc . "│" . $x;
 
@@ -515,53 +503,4 @@ Class TopShadow extends Command {
         return $lines;
     }
 
-    // ── Output helpers ──────────────────────────────────────────
-
-    private function w(string $line): void
-    {
-        echo $line . PHP_EOL;
-    }
-
-    private function sec(string $label): void
-    {
-        $x = self::X;
-        $lineR = max(4, $this->pw - strlen($label) - 8);
-        $this->w(
-            self::B . "│" . $x . " "
-            . self::GD . "──── " . $x
-            . self::G . self::BD . $label . $x
-            . " " . self::GD . str_repeat('─', $lineR) . $x
-        );
-    }
-
-    private function ln(string $content): void
-    {
-        $this->w(self::B . "│" . self::X . "  {$content}");
-    }
-
-    private function pad(string $str, int $w): string
-    {
-        $need = max(0, $w - $this->visLen($str));
-        return $str . str_repeat(' ', $need);
-    }
-
-    private function visLen(string $str): int
-    {
-        // Strip ANSI escape codes
-        $clean = preg_replace('/\033\[[^m]*m/', '', $str);
-        // Use mb_strwidth which correctly handles multibyte chars like ●▸◦…─╭╮╰╯│
-        return mb_strwidth($clean);
-    }
-
-    private function trunc(string $path, int $max): string
-    {
-        if ($max < 10) $max = 10;
-        if (mb_strwidth($path) <= $max) return $path;
-        $parts = explode('/', $path);
-        if (count($parts) > 2) {
-            $tail = implode('/', array_slice($parts, -2));
-            if (mb_strwidth($tail) + 2 <= $max) return '…/' . $tail;
-        }
-        return '…' . mb_substr($path, -(($max) - 1));
-    }
 }

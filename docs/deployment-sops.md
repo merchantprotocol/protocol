@@ -27,7 +27,7 @@ protocol security:audit
 protocol soc2:check
 
 # 3. Deploy (release-based strategy)
-protocol deploy
+protocol deploy:push v1.2.0
 
 # 4. Verify the deployment
 protocol status
@@ -146,7 +146,7 @@ Zero-downtime deployment is required, or you want to validate before switching t
 protocol shadow:init
 
 # 2. Build the new version in the shadow slot
-protocol shadow:build
+protocol shadow:build v1.2.0
 
 # 3. Check shadow status
 protocol shadow:status
@@ -199,7 +199,7 @@ protocol config:save
 protocol config:refresh
 
 # 6. Restart containers to pick up new env vars
-protocol docker:compose rebuild
+protocol docker:compose:rebuild
 ```
 
 ### Important
@@ -227,7 +227,7 @@ protocol release:create
 # This creates v1.2.1
 
 # 4. Deploy immediately
-protocol deploy
+protocol deploy:push v1.2.1
 
 # 5. Verify
 protocol status
@@ -301,7 +301,7 @@ Pre-Deployment:
   [ ] Config changes encrypted and pushed (if applicable)
 
 Deployment:
-  [ ] protocol deploy executed
+  [ ] protocol deploy:push <version> executed
   [ ] protocol status shows all green
   [ ] protocol deploy:log shows success
   [ ] Application health check passes

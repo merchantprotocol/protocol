@@ -150,7 +150,23 @@ View it anytime with `protocol deploy:log`.
 | `protocol.lock` | Your project root (gitignored) | Runtime state — what version is deployed, which processes are running, which files are symlinked |
 | `~/.protocol/key` | Each machine (never in git) | Your encryption key for decrypting secrets |
 | `~/.protocol/deployments.log` | Each machine | Audit trail of every deployment |
+| `~/.protocol/nodes/<project>.json` | Each slave node (never in git) | Per-node deployment settings for slave/blue-green nodes |
 | `config/config.php` | Protocol install directory | This machine's environment name |
+
+## How Shadow (Blue-Green) Deployments Work
+
+Shadow deployment gives you zero-downtime releases with instant rollback. Instead of updating code in-place, each release gets its own directory with a full git clone, Docker containers, and config files.
+
+When you run `protocol shadow:build v1.2.0`, Protocol:
+
+1. Clones the repo into a new release directory (e.g., `/opt/myapp-releases/v1.2.0/`)
+2. Sets up Docker containers on alternate ports
+3. Links config files and decrypts secrets
+4. Runs health checks against the new version
+
+If health checks pass and `auto_promote` is enabled, the shadow version is swapped to the active ports. If anything fails, the previous version keeps running untouched. `protocol shadow:rollback` swaps back instantly — no rebuild needed.
+
+Node-level settings for shadow deployments are stored in `~/.protocol/nodes/<project>.json` so they persist even when the active release directory changes. See [Shadow Deployment](blue-green.md) for the full guide.
 
 ## The Big Picture
 

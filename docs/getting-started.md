@@ -61,6 +61,7 @@ Protocol looks at your project and figures out what you need. You'll see a menu 
 ```
   ● Start a new project                    recommended
   ○ Connect an existing repository
+  ○ Make this a slave node (production / staging deploy)
   ○ Update an existing Protocol project
 ```
 

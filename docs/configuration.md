@@ -4,13 +4,14 @@ Protocol uses a few files to know what to do with your project. This guide expla
 
 ## The Short Version
 
-There are three things that configure Protocol:
+There are four things that configure Protocol:
 
 1. **`protocol.json`** — Lives in your project. Tells Protocol what Docker image to use, how to deploy, and where your config repo is.
 2. **The config repo** — A separate git repo next to your project. Holds your `.env` files, nginx configs, cron schedules — anything that changes between environments.
 3. **`~/.protocol/key`** — Lives on each machine. The encryption key for your secrets.
+4. **`~/.protocol/nodes/`** — On slave nodes only. Stores per-node deployment settings that persist across blue-green directory swaps.
 
-That's it. Everything else is derived from these three.
+For most projects, you only need the first three. Node config is created automatically when you set up a slave node via `protocol init`.
 
 ---
 
@@ -23,13 +24,12 @@ Here's what a typical one looks like:
 ```json
 {
     "name": "myapp",
-    "project_type": "php81",
+    "project_type": "php82",
     "deployment": {
         "strategy": "release",
         "pointer": "github_variable",
         "pointer_name": "PROTOCOL_ACTIVE_RELEASE",
-        "secrets": "encrypted",
-        "auto_deploy": true
+        "secrets": "encrypted"
     },
     "docker": {
         "image": "registry/myapp:latest",
@@ -37,16 +37,29 @@ Here's what a typical one looks like:
     },
     "git": {
         "remote": "git@github.com:org/myapp.git",
+        "remotename": "origin",
         "branch": "master"
     },
     "configuration": {
         "local": "../myapp-config",
         "remote": "git@github.com:org/myapp-config.git"
+    },
+    "bluegreen": {
+        "enabled": false,
+        "auto_promote": false,
+        "health_checks": []
     }
 }
 ```
 
 **No credentials go in this file.** It's committed to git. Docker passwords, API tokens, and encryption keys are handled through environment variables or the encrypted config repo.
+
+### Project Settings
+
+| Setting | What it means |
+|---|---|
+| `name` | Project identifier, used for naming and lookups |
+| `project_type` | PHP version for the initializer: `php81`, `php82`, or `php82ffmpeg` |
 
 ### Deployment Settings
 
@@ -54,10 +67,10 @@ Here's what a typical one looks like:
 |---|---|
 | `strategy: "release"` | Use versioned git tags. Nodes watch a GitHub variable for the active version. **Recommended.** |
 | `strategy: "branch"` | Follow the tip of a git branch. Good for local dev. No rollback. |
+| `pointer: "github_variable"` | How the active release version is stored. Currently only `github_variable` is supported. |
+| `pointer_name` | The GitHub repository variable that stores the active release version. Default: `PROTOCOL_ACTIVE_RELEASE` |
 | `secrets: "encrypted"` | `.env` files are encrypted in git and decrypted on arrival. **Recommended for production.** |
 | `secrets: "file"` | `.env` files are used as-is. Fine for local dev. |
-| `pointer_name` | The GitHub repository variable that stores the active release version. Default: `PROTOCOL_ACTIVE_RELEASE` |
-| `auto_deploy: true` | Nodes deploy automatically when they detect a new release. |
 
 ### Docker Settings
 
@@ -72,6 +85,7 @@ Here's what a typical one looks like:
 | Setting | What it means |
 |---|---|
 | `remote` | Your project's git remote URL |
+| `remotename` | Name of the git remote (default: `origin`) |
 | `branch` | The branch to track (branch mode only) |
 
 ### Config Repo Settings
@@ -81,6 +95,31 @@ Here's what a typical one looks like:
 | `local` | Where the config repo lives relative to your project (default: `../myapp-config`) |
 | `remote` | Git remote URL for the config repo |
 | `environments` | List of environment names (branches) available |
+
+### Blue-Green (Shadow) Settings
+
+These settings control zero-downtime shadow deployments. See [Shadow Deployment](blue-green.md) for the full guide.
+
+| Setting | What it means |
+|---|---|
+| `bluegreen.enabled` | Enable shadow deployment mode (`true`/`false`) |
+| `bluegreen.git_remote` | Git remote URL for cloning releases (falls back to `git.remote`) |
+| `bluegreen.releases_dir` | Directory where release clones are stored (default: sibling `<project>-releases/`) |
+| `bluegreen.auto_promote` | Automatically promote the shadow to production after health checks pass |
+| `bluegreen.health_checks` | Array of health check definitions (see below) |
+
+Health check format:
+
+```json
+{
+    "bluegreen": {
+        "health_checks": [
+            {"type": "http", "path": "/health", "expect_status": 200},
+            {"type": "command", "command": "curl -s localhost:8080/ping", "expect_exit": 0}
+        ]
+    }
+}
+```
 
 ---
 
@@ -202,7 +241,7 @@ The `previous` version is how `protocol deploy:rollback` knows where to go back 
 
 ## Machine-Level Config
 
-Each machine has two things set at the Protocol level (not per-project):
+Each machine has several things set at the Protocol level (not per-project):
 
 ### Environment Name
 
@@ -229,6 +268,38 @@ protocol secrets:setup "your-64-char-hex-key"
 ```
 
 Stored at `~/.protocol/key` with `0600` permissions. This is the key that decrypts your `.env.enc` files. Same key on every machine.
+
+### Node Config (`~/.protocol/nodes/`)
+
+When a server is set up as a slave/deployment node via `protocol init`, its configuration is stored in `~/.protocol/nodes/<project>.json`. This is separate from the project's `protocol.json` so that blue-green deployments can swap directories without losing track of settings.
+
+```json
+{
+    "name": "myapp",
+    "node_type": "slave",
+    "environment": "production",
+    "repo_dir": "/opt/myapp",
+    "git": {
+        "remote": "git@github.com:org/myapp.git"
+    },
+    "deployment": {
+        "strategy": "release",
+        "pointer": "github_variable",
+        "pointer_name": "PROTOCOL_ACTIVE_RELEASE"
+    },
+    "bluegreen": {
+        "enabled": true,
+        "git_remote": "git@github.com:org/myapp.git",
+        "releases_dir": "/opt/myapp-releases",
+        "auto_promote": true,
+        "health_checks": [
+            {"type": "http", "path": "/health", "expect_status": 200}
+        ]
+    }
+}
+```
+
+Node config files are created with `0600` permissions and the directory with `0700`. They persist across deploys and directory swaps.
 
 ---
 

@@ -99,9 +99,8 @@ Class Crontab
      */
     public static function hasCrontabCommand( $repo_dir, $command )
     {
-        $body = self::restartcommand( $repo_dir ).PHP_EOL;
-        $crontabl = Shell::run("crontab -l");
-        return strpos($crontabl, $command) !== false;
+        $crontab = Shell::run("crontab -l");
+        return strpos($crontab, $command) !== false;
     }
 
     /**

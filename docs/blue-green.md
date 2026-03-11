@@ -59,7 +59,7 @@ Or, for a fresh production server without an existing clone:
 ```bash
 mkdir /opt/myapp && cd /opt/myapp
 protocol init
-# Select: "Configure as a shadow deployment node"
+# Select: "Make this a slave node (production / staging deploy)"
 # Enter your GitHub repo URL
 # Choose your releases directory
 ```
@@ -369,7 +369,7 @@ protocol shadow:start            # Promote to production
 
 ```bash
 mkdir /opt/myapp && cd /opt/myapp
-protocol init                    # Select "Configure as a shadow deployment node"
+protocol init                    # Select "Make this a slave node"
 protocol shadow:build v1.0.0    # Build initial version
 protocol shadow:start            # Promote to production
 protocol start                   # Start watcher daemon

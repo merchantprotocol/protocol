@@ -50,9 +50,7 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
-use Gitcd\Commands\Init\Php81;
-use Gitcd\Commands\Init\Php82;
-use Gitcd\Commands\Init\Php82Ffmpeg;
+use Gitcd\Commands\Init\ProjectType;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\NodeConfig;
 use Gitcd\Commands\Init\DotMenuTrait;
@@ -106,11 +104,7 @@ Class ProtocolInit extends Command {
      */
     protected function getAvailableInitializers(): array
     {
-        return [
-            'php82'       => new Php82(),
-            'php82ffmpeg' => new Php82Ffmpeg(),
-            'php81'       => new Php81(),
-        ];
+        return ProjectType::all();
     }
 
     // ─── Display helpers ─────────────────────────────────────────

@@ -16,6 +16,11 @@ Protocol is a CLI tool for continuous deployment and configuration management of
 | [SOC 2 Ready](soc2.md) | Trust Service Criteria mapping, automated checks, hardening checklist, auditor-ready documentation |
 | [SOC 2 Controls Matrix](soc2-controls-matrix.md) | Auditor-facing evidence matrix — every numbered SOC 2 criterion mapped to controls and evidence |
 | [Security & Hardening](security.md) | Security controls, encryption internals, audit log format, vulnerability scanning |
+| [Shadow Deployment](blue-green.md) | Zero-downtime blue-green deploys with instant rollback |
+| [Incident Response](incident-response.md) | Severity levels, detection, triage, containment, resolution, post-incident review |
+| [Key Rotation](key-rotation.md) | Step-by-step key rotation procedure, rollback plan, automation |
+| [Deployment SOPs](deployment-sops.md) | Standard operating procedures for deploys, rollbacks, hotfixes, and incidents |
+| [Migration Guide](migration.md) | Upgrade path from branch-based to release-based deployment |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes for config, slave mode, Docker, git, and permissions |
 
 ## Quick Start

@@ -37,25 +37,13 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\AnsiColors as C;
+use Gitcd\Helpers\DashboardFormatter as Fmt;
 
 Class Top extends Command {
 
     protected static $defaultName = 'top';
     protected static $defaultDescription = 'Real-time system command center for debugging and breach detection';
-
-    // Brand colors (true color ANSI - matching merchantprotocol.com)
-    private const G   = "\033[38;2;63;185;80m";    // #3FB950 green-bright
-    private const GD  = "\033[38;2;46;160;67m";    // #2EA043 green-dim
-    private const T   = "\033[38;2;230;237;243m";   // #e6edf3 text
-    private const M   = "\033[38;2;139;148;158m";   // #8b949e muted
-    private const D   = "\033[38;2;110;118;129m";   // #6e7681 dim
-    private const B   = "\033[38;2;48;54;61m";      // #30363d border
-    private const R   = "\033[38;2;255;95;87m";     // #ff5f57 red
-    private const Y   = "\033[38;2;254;188;46m";    // #febc2e yellow
-    private const GN  = "\033[38;2;40;200;64m";     // #28c840 green-dot
-    private const BL  = "\033[38;2;121;192;255m";   // #79c0ff blue
-    private const X   = "\033[0m";                   // reset
-    private const BD  = "\033[1m";                   // bold
 
     private int $maxPath = 60;
 
@@ -130,26 +118,26 @@ Class Top extends Command {
         // Truncate long uptime strings
         if (strlen($uptime) > 20) $uptime = substr($uptime, 0, 20);
 
-        $o = self::B;
-        $x = self::X;
+        $o = C::B;
+        $x = C::X;
 
         // Line 1: top border
-        $this->w("{$o}╭" . str_repeat('─', $pw) . "╮{$x}");
+        Fmt::w("{$o}╭" . str_repeat('─', $pw) . "╮{$x}");
 
         // Line 2: dots + title + time
         // Build the visible text first to calculate padding accurately
         // visible: "│ ● ● ●   protocol top — HOST          DATETIME  │"
         // visible chars: 1 + 1 + 5 + 3 + 12 + 3 + hostLen + pad + dateLen + 2 + 1
-        $hostTrunc = $this->trunc($hostname, 20);
+        $hostTrunc = Fmt::trunc($hostname, 20);
         $titleVis = "protocol top — {$hostTrunc}";
         $innerW = $pw - 2; // inside the │ ... │ (subtract 1 left space + 1 right space)
         $usedChars = 5 + 3 + strlen($titleVis) + strlen($now); // dots + gap + title + time
         $pad = max(1, $innerW - $usedChars);
 
-        $dots = self::R . "●" . $x . " " . self::Y . "●" . $x . " " . self::GN . "●" . $x;
-        $titlePart = self::M . "protocol top" . $x . self::D . " — {$hostTrunc}" . $x;
-        $timePart = self::D . $now . $x;
-        $this->w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart} {$o}│{$x}");
+        $dots = C::R . "●" . $x . " " . C::Y . "●" . $x . " " . C::GN . "●" . $x;
+        $titlePart = C::M . "protocol top" . $x . C::D . " — {$hostTrunc}" . $x;
+        $timePart = C::D . $now . $x;
+        Fmt::w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart} {$o}│{$x}");
 
         // Line 3: brand + uptime
         // visible: "│ MERCHANT PROTOCOL  command center        up UPTIME │"
@@ -158,16 +146,16 @@ Class Top extends Command {
         $usedBrand = strlen($brandVis) + strlen($uptimeVis);
         $bPad = max(1, $innerW - $usedBrand);
 
-        $brand = self::G . self::BD . " MERCHANT PROTOCOL" . $x . "  " . self::D . "command center" . $x;
-        $uptimeStr = self::M . "up " . $x . self::T . $uptime . $x;
-        $this->w("{$o}│{$x}{$brand}" . str_repeat(' ', $bPad) . "{$uptimeStr} {$o}│{$x}");
+        $brand = C::G . C::BD . " MERCHANT PROTOCOL" . $x . "  " . C::D . "command center" . $x;
+        $uptimeStr = C::M . "up " . $x . C::T . $uptime . $x;
+        Fmt::w("{$o}│{$x}{$brand}" . str_repeat(' ', $bPad) . "{$uptimeStr} {$o}│{$x}");
 
         // Line 4: separator
-        $this->w("{$o}├" . str_repeat('─', $pw) . "┤{$x}");
+        Fmt::w("{$o}├" . str_repeat('─', $pw) . "┤{$x}");
         $linesUsed += 4;
 
         // ── System Resources (3-4 lines)
-        $this->sec($output, 'SYSTEM', $pw); $linesUsed++;
+        Fmt::sec('SYSTEM', $pw); $linesUsed++;
 
         if ($isMac) {
             $cpuCores = (int)trim(Shell::run('sysctl -n hw.ncpu 2>/dev/null') ?: '1');
@@ -200,16 +188,16 @@ Class Top extends Command {
         $memPct = $memTotalGB > 0 ? round(($memUsedGB / $memTotalGB) * 100, 1) : 0;
         $cpuF = min((float)$cpuUsage, 100.0);
 
-        $this->ln($output,
-            self::M . "cpu " . $x . $this->bar($cpuF, 12) . $this->clr($cpuF) . sprintf(" %5.1f%%", $cpuF) . $x
-            . self::D . " {$cpuCores}c" . $x
-            . self::M . "  mem " . $x . $this->bar($memPct, 12) . $this->clr($memPct) . sprintf(" %5.1f%%", $memPct) . $x
-            . self::D . " {$memUsedGB}/{$memTotalGB}G" . $x
+        Fmt::ln(
+            C::M . "cpu " . $x . Fmt::bar($cpuF, 12) . Fmt::clr($cpuF) . sprintf(" %5.1f%%", $cpuF) . $x
+            . C::D . " {$cpuCores}c" . $x
+            . C::M . "  mem " . $x . Fmt::bar($memPct, 12) . Fmt::clr($memPct) . sprintf(" %5.1f%%", $memPct) . $x
+            . C::D . " {$memUsedGB}/{$memTotalGB}G" . $x
         );
         $linesUsed++;
 
         // ── Disk (header + rows, compact)
-        $this->sec($output, 'DISK', $pw); $linesUsed++;
+        Fmt::sec('DISK', $pw); $linesUsed++;
 
         if ($isMac) {
             $dfOut = Shell::run("df -h / 2>/dev/null | tail -n +2");
@@ -227,48 +215,48 @@ Class Top extends Command {
                 if (isset($seen[$fs])) continue;
                 $seen[$fs] = true;
                 $pctN = (int)str_replace('%', '', $p[4]);
-                $pc = $this->clr($pctN);
+                $pc = Fmt::clr($pctN);
                 if ($isMac) {
                     $mt = implode(' ', array_slice($p, 8));
                     if (empty($mt)) $mt = implode(' ', array_slice($p, 5));
                 } else {
                     $mt = implode(' ', array_slice($p, 5));
                 }
-                $this->ln($output,
-                    self::T . sprintf("%-18s", $this->trunc($fs, 18)) . $x
-                    . " " . $this->bar($pctN, 14)
+                Fmt::ln(
+                    C::T . sprintf("%-18s", Fmt::trunc($fs, 18)) . $x
+                    . " " . Fmt::bar($pctN, 14)
                     . $pc . sprintf(" %5s", $p[4]) . $x
-                    . self::M . sprintf(" %5s/%s", $p[2], $p[1]) . $x
-                    . self::D . "  {$mt}" . $x
+                    . C::M . sprintf(" %5s/%s", $p[2], $p[1]) . $x
+                    . C::D . "  {$mt}" . $x
                 );
                 $linesUsed++;
             }
         }
 
         // ── Users (inline)
-        $this->sec($output, 'USERS', $pw); $linesUsed++;
+        Fmt::sec('USERS', $pw); $linesUsed++;
         $users = Shell::run('who 2>/dev/null');
         if (!$users || trim($users) === '') {
-            $this->ln($output, self::D . "No active sessions" . $x);
+            Fmt::ln(C::D . "No active sessions" . $x);
             $linesUsed++;
         } else {
             $ulines = array_filter(array_map('trim', explode("\n", $users)));
             foreach (array_slice($ulines, 0, 3) as $ul) {
                 $isRoot = preg_match('/^root\s/', $ul);
-                $ico = $isRoot ? self::R . "!" . $x : self::GN . ">" . $x;
-                $c = $isRoot ? self::R : self::M;
-                $this->ln($output, "{$ico} {$c}{$ul}{$x}");
+                $ico = $isRoot ? C::R . "!" . $x : C::GN . ">" . $x;
+                $c = $isRoot ? C::R : C::M;
+                Fmt::ln("{$ico} {$c}{$ul}{$x}");
                 $linesUsed++;
             }
             if (count($ulines) > 3) {
-                $this->ln($output, self::D . "  +" . (count($ulines) - 3) . " more" . $x);
+                Fmt::ln(C::D . "  +" . (count($ulines) - 3) . " more" . $x);
                 $linesUsed++;
             }
         }
 
         // ── Top Processes (combined, 2 cpu + 2 mem)
-        $this->sec($output, 'PROCESSES', $pw); $linesUsed++;
-        $this->ln($output, self::D . sprintf("  %-6s %-6s %-7s %-10s %s", '%CPU', '%MEM', 'PID', 'USER', 'COMMAND') . $x);
+        Fmt::sec('PROCESSES', $pw); $linesUsed++;
+        Fmt::ln(C::D . sprintf("  %-6s %-6s %-7s %-10s %s", '%CPU', '%MEM', 'PID', 'USER', 'COMMAND') . $x);
         $linesUsed++;
 
         if ($isMac) {
@@ -289,11 +277,11 @@ Class Top extends Command {
                 if (isset($shown[$key])) continue;
                 $shown[$key] = true;
                 $user = strlen($pp[3]) > 10 ? substr($pp[3], 0, 10) : $pp[3];
-                $comm = $this->trunc(implode(' ', array_slice($pp, 4)), 30);
-                $this->ln($output,
-                    self::G . sprintf("  %-6s", $pp[0]) . $x
-                    . self::M . sprintf(" %-6s %-7s %-10s", $pp[1], $pp[2], $user) . $x
-                    . self::T . " {$comm}" . $x
+                $comm = Fmt::trunc(implode(' ', array_slice($pp, 4)), 30);
+                Fmt::ln(
+                    C::G . sprintf("  %-6s", $pp[0]) . $x
+                    . C::M . sprintf(" %-6s %-7s %-10s", $pp[1], $pp[2], $user) . $x
+                    . C::T . " {$comm}" . $x
                 );
                 $linesUsed++;
                 if (count($shown) >= 4) break 2;
@@ -306,28 +294,28 @@ Class Top extends Command {
         $fileCount = max(1, $fileLines - 1); // subtract header line
 
         // ── Largest Files
-        $this->sec($output, 'LARGEST FILES', $pw); $linesUsed++;
+        Fmt::sec('LARGEST FILES', $pw); $linesUsed++;
         $dir = escapeshellarg($scanDir);
         $exc = "-not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '/proc/*' -not -path '/sys/*' -not -path '/dev/*'";
         $fResult = Shell::run("find {$dir} -maxdepth 5 -type f {$exc} -exec ls -s {} + 2>/dev/null | sort -rn | sed -n '1,{$fileCount}p'");
         if ($fResult) {
             foreach (array_filter(array_map('trim', explode("\n", $fResult))) as $fl) {
                 if (preg_match('/^\s*(\d+)\s+(.+)$/', $fl, $fm)) {
-                    $sz = $this->humanSize((int)$fm[1] * 1024);
-                    $this->ln($output,
-                        self::G . sprintf("%8s", $sz) . $x
-                        . "  " . self::M . $this->trunc($fm[2], $this->maxPath) . $x
+                    $sz = Fmt::humanSize((int)$fm[1] * 1024);
+                    Fmt::ln(
+                        C::G . sprintf("%8s", $sz) . $x
+                        . "  " . C::M . Fmt::trunc($fm[2], $this->maxPath) . $x
                     );
                     $linesUsed++;
                 }
             }
         } else {
-            $this->ln($output, self::D . "Unable to scan: {$scanDir}" . $x);
+            Fmt::ln(C::D . "Unable to scan: {$scanDir}" . $x);
             $linesUsed++;
         }
 
         // ── Recent Files
-        $this->sec($output, 'RECENT (24H)', $pw); $linesUsed++;
+        Fmt::sec('RECENT (24H)', $pw); $linesUsed++;
         $isMac2 = Shell::getOS() === Shell::MAC;
         $exc2 = "-not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '/proc/*' -not -path '/sys/*' -not -path '/dev/*' -not -path '/run/*'";
         if ($isMac2) {
@@ -340,46 +328,46 @@ Class Top extends Command {
             foreach (array_filter(array_map('trim', explode("\n", $rResult))) as $rl) {
                 if (preg_match('/^([\d.]+)\s+(.+)$/', $rl, $rm)) {
                     $ts = date('m-d H:i', (int)$rm[1]);
-                    $this->ln($output,
-                        self::D . sprintf("%-11s", $ts) . $x
-                        . " " . self::M . $this->trunc($rm[2], $this->maxPath) . $x
+                    Fmt::ln(
+                        C::D . sprintf("%-11s", $ts) . $x
+                        . " " . C::M . Fmt::trunc($rm[2], $this->maxPath) . $x
                     );
                     $linesUsed++;
                 }
             }
         } else {
-            $this->ln($output, self::D . "No files modified" . $x);
+            Fmt::ln(C::D . "No files modified" . $x);
             $linesUsed++;
         }
 
         // ── Security (compact)
-        $this->sec($output, 'SECURITY', $pw); $linesUsed++;
+        Fmt::sec('SECURITY', $pw); $linesUsed++;
         $alerts = $this->getAlerts($isMac);
         if (empty($alerts)) {
-            $this->ln($output, self::GN . "●" . $x . " " . self::G . "ALL CLEAR" . $x . self::D . " — no issues detected" . $x);
+            Fmt::ln(C::GN . "●" . $x . " " . C::G . "ALL CLEAR" . $x . C::D . " — no issues detected" . $x);
             $linesUsed++;
         } else {
             // Show max 3 alerts to keep it tight
             foreach (array_slice($alerts, 0, 3) as [$lvl, $msg]) {
-                $msg = $this->trunc($msg, $pw - 8);
+                $msg = Fmt::trunc($msg, $pw - 8);
                 switch ($lvl) {
-                    case 'C': $this->ln($output, self::R . "● " . self::BD . $msg . $x); break;
-                    case 'W': $this->ln($output, self::Y . "● " . $msg . $x); break;
-                    default:  $this->ln($output, self::BL . "● " . $x . self::D . $msg . $x); break;
+                    case 'C': Fmt::ln(C::R . "● " . C::BD . $msg . $x); break;
+                    case 'W': Fmt::ln(C::Y . "● " . $msg . $x); break;
+                    default:  Fmt::ln(C::BL . "● " . $x . C::D . $msg . $x); break;
                 }
                 $linesUsed++;
             }
             if (count($alerts) > 3) {
-                $this->ln($output, self::D . "  +" . (count($alerts) - 3) . " more alerts" . $x);
+                Fmt::ln(C::D . "  +" . (count($alerts) - 3) . " more alerts" . $x);
                 $linesUsed++;
             }
         }
 
         // ── Footer
-        $this->w(self::B . "╰" . str_repeat('─', $pw) . "╯" . $x);
-        echo " " . self::D . "ctrl+c exit" . $x
-            . self::B . " · " . $x
-            . self::D . "merchantprotocol.com" . $x;
+        Fmt::w(C::B . "╰" . str_repeat('─', $pw) . "╯" . $x);
+        echo " " . C::D . "ctrl+c exit" . $x
+            . C::B . " · " . $x
+            . C::D . "merchantprotocol.com" . $x;
     }
 
     // ── Security checks ─────────────────────────────────────────
@@ -433,64 +421,4 @@ Class Top extends Command {
         return $alerts;
     }
 
-    // ── Output helpers ──────────────────────────────────────────
-
-    private function w(string $line): void
-    {
-        echo $line . PHP_EOL;
-    }
-
-    private function sec(OutputInterface $output, string $label, int $pw): void
-    {
-        $x = self::X;
-        $lineR = max(4, $pw - strlen($label) - 8);
-        $this->w(
-            self::B . "│" . $x . " "
-            . self::GD . "──── " . $x
-            . self::G . self::BD . $label . $x
-            . " " . self::GD . str_repeat('─', $lineR) . $x
-        );
-    }
-
-    private function ln(OutputInterface $output, string $content): void
-    {
-        $this->w(self::B . "│" . self::X . "  {$content}");
-    }
-
-    private function bar(float $pct, int $w): string
-    {
-        $filled = (int)round($pct / 100 * $w);
-        return $this->clr($pct) . str_repeat('━', $filled) . self::B . str_repeat('━', $w - $filled) . self::X;
-    }
-
-    private function clr(float $pct): string
-    {
-        if ($pct >= 90) return self::R;
-        if ($pct >= 75) return self::Y;
-        return self::G;
-    }
-
-    private function trunc(string $path, int $max): string
-    {
-        if ($max < 10) $max = 10;
-        if (strlen($path) <= $max) return $path;
-        // Show …/last-two-segments
-        $parts = explode('/', $path);
-        if (count($parts) > 2) {
-            $tail = implode('/', array_slice($parts, -2));
-            if (strlen($tail) + 2 <= $max) {
-                return '…/' . $tail;
-            }
-        }
-        return '…' . substr($path, -(($max) - 1));
-    }
-
-    private function humanSize(int $bytes): string
-    {
-        $u = ['B', 'K', 'M', 'G', 'T'];
-        $i = 0;
-        $s = (float)$bytes;
-        while ($s >= 1024 && $i < 4) { $s /= 1024; $i++; }
-        return sprintf('%.1f%s', $s, $u[$i]);
-    }
 }

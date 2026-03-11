@@ -45,6 +45,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\FileEncryption;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Utils\Json;
 use Gitcd\Commands\Init\DotMenuTrait;
@@ -275,13 +276,7 @@ Class ConfigInit extends Command {
         // Step 2: Encrypt files
         $this->writeStep($output, 2, 2, 'Encrypt Files');
 
-        $envFiles = glob(rtrim($configrepo, '/') . '/.env*');
-        $unencrypted = [];
-        foreach ($envFiles as $f) {
-            if (!str_ends_with($f, '.enc') && is_file($f)) {
-                $unencrypted[] = basename($f);
-            }
-        }
+        $unencrypted = FileEncryption::findUnencryptedEnvFiles($configrepo);
 
         if (empty($unencrypted)) {
             $output->writeln("    <fg=gray>No unencrypted .env files found in the config repo.</>");
@@ -305,17 +300,7 @@ Class ConfigInit extends Command {
         );
         if ($helper->ask($input, $output, $question)) {
             $output->writeln('');
-            foreach ($unencrypted as $envName) {
-                $envPath = rtrim($configrepo, '/') . '/' . $envName;
-                $encPath = $envPath . '.enc';
-                if (Secrets::encryptFile($envPath, $encPath)) {
-                    unlink($envPath);
-                    Git::addIgnore($envName, $configrepo);
-                    $output->writeln("    <fg=green>✓</> <fg=white>{$envName}</> → <fg=white>{$envName}.enc</>");
-                } else {
-                    $output->writeln("    <error>  Failed to encrypt {$envName}</error>");
-                }
-            }
+            FileEncryption::encryptEnvFiles($configrepo, $unencrypted, $output);
             Shell::run("git -C '$configrepo' add -A");
             Shell::run("git -C '$configrepo' commit -m 'encrypt secrets' 2>/dev/null");
 
@@ -403,21 +388,9 @@ Class ConfigInit extends Command {
         );
         if ($helper->ask($input, $output, $question)) {
             $output->writeln('');
-            foreach ($encFiles as $encPath) {
-                $encName = basename($encPath);
-                $plainName = preg_replace('/\.enc$/', '', $encName);
-                $plainPath = dirname($encPath) . '/' . $plainName;
-
-                $plaintext = Secrets::decryptFile($encPath);
-                if ($plaintext === null) {
-                    $output->writeln("    <error>  Failed to decrypt {$encName} — wrong key?</error>");
-                    continue;
-                }
-
-                file_put_contents($plainPath, $plaintext);
-                chmod($plainPath, 0600);
-                Git::addIgnore($plainName, $configrepo);
-                $output->writeln("    <fg=green>✓</> <fg=white>{$encName}</> → <fg=white>{$plainName}</>");
+            $decryptedEntries = FileEncryption::decryptDirectory($configrepo, $output);
+            foreach ($decryptedEntries as $entry) {
+                Git::addIgnore($entry['decrypted'], $configrepo);
             }
         }
 
@@ -700,13 +673,7 @@ Class ConfigInit extends Command {
         string $repo_dir,
         string $configrepo
     ): void {
-        $envFiles = glob(rtrim($configrepo, '/') . '/.env*');
-        $unencrypted = [];
-        foreach ($envFiles as $f) {
-            if (!str_ends_with($f, '.enc') && is_file($f)) {
-                $unencrypted[] = basename($f);
-            }
-        }
+        $unencrypted = FileEncryption::findUnencryptedEnvFiles($configrepo);
 
         if (empty($unencrypted)) {
             $output->writeln("    <fg=gray>No unencrypted .env files found in config repo.</>");
@@ -718,15 +685,7 @@ Class ConfigInit extends Command {
             '    Encrypt them now? [<fg=green>Y</>/n] ', true
         );
         if ($helper->ask($input, $output, $question)) {
-            foreach ($unencrypted as $envName) {
-                $envPath = rtrim($configrepo, '/') . '/' . $envName;
-                $encPath = $envPath . '.enc';
-                if (Secrets::encryptFile($envPath, $encPath)) {
-                    unlink($envPath);
-                    Git::addIgnore($envName, $configrepo);
-                    $output->writeln("    <fg=green>✓</> <fg=white>{$envName}</> → <fg=white>{$envName}.enc</>");
-                }
-            }
+            FileEncryption::encryptEnvFiles($configrepo, $unencrypted, $output);
             Shell::run("git -C '$configrepo' add -A");
             Shell::run("git -C '$configrepo' commit -m 'encrypt secrets' 2>/dev/null");
 
