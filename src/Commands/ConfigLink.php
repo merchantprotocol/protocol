@@ -44,6 +44,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\FileEncryption;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -86,15 +87,28 @@ Class ConfigLink extends Command {
             return Command::SUCCESS;
         }
         // make sure the config repo is initialized
-        $configrepo = Config::repo($repo_dir);
+        $configrepo = Config::requireRepo($repo_dir, $output);
         if (!$configrepo) {
-            $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
         }
         $working_dir = WORKING_DIR;
         $ignored = ['.gitignore', 'README.md', '.git'];
-        $configfiles = Dir::dirToArray($configrepo, $ignored);
+
+        // Decrypt all .enc files first, before creating symlinks
         $decryptedFiles = [];
+        if (Secrets::hasKey()) {
+            $decryptedEntries = FileEncryption::decryptDirectory($configrepo, $output, $ignored);
+            $keyFingerprint = substr(md5(file_get_contents(Secrets::keyPath())), 0, 8);
+            foreach ($decryptedEntries as $entry) {
+                $decryptedFiles[] = [
+                    'source' => $entry['source'],
+                    'decrypted' => $entry['decrypted'],
+                    'key_fingerprint' => $keyFingerprint,
+                ];
+            }
+        }
+
+        $configfiles = Dir::dirToArray($configrepo, $ignored);
 
         foreach($configfiles as $sourcepath)
         {
@@ -102,37 +116,12 @@ Class ConfigLink extends Command {
 
             $filename = basename($sourcepath);
 
-            // Handle encrypted files: decrypt to plaintext in the config repo
+            // Skip .enc files — we link the decrypted versions instead
             if (str_ends_with($filename, '.enc')) {
                 if (!Secrets::hasKey()) {
                     $output->writeln("<comment>  Skipping encrypted file (no key): {$filename}</comment>");
-                    continue;
                 }
-
-                $decryptedName = preg_replace('/\.enc$/', '', $filename);
-                $decryptedPath = dirname($sourcepath) . DIRECTORY_SEPARATOR . $decryptedName;
-
-                $plaintext = Secrets::decryptFile($sourcepath);
-                if ($plaintext === null) {
-                    $output->writeln("<error>  Failed to decrypt: {$filename}</error>");
-                    continue;
-                }
-
-                file_put_contents($decryptedPath, $plaintext);
-                chmod($decryptedPath, 0600);
-                $output->writeln("  <info>✓</info> Decrypted: <comment>{$decryptedName}</comment>");
-
-                // Track the decrypted file with its source and key fingerprint
-                $keyFingerprint = substr(md5(file_get_contents(Secrets::keyPath())), 0, 8);
-                $decryptedFiles[] = [
-                    'source' => $filename,
-                    'decrypted' => $decryptedName,
-                    'key_fingerprint' => $keyFingerprint,
-                ];
-
-                // Link the decrypted file (not the .enc file)
-                $sourcepath = $decryptedPath;
-                $filename = $decryptedName;
+                continue;
             }
 
             $fulllink = str_replace($configrepo, $repo_dir, $sourcepath);

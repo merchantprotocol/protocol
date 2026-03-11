@@ -35,87 +35,87 @@ namespace Gitcd\Helpers;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 
-Class Git 
+Class Git
 {
+    /**
+     * Build the git -C flag for a given repo directory.
+     *
+     * @param string|false $repo_dir
+     * @return string  The -C flag string, or empty string if no repo_dir.
+     */
+    private static function repoFlag( $repo_dir = false ): string
+    {
+        if ($repo_dir) {
+            return " -C " . escapeshellarg(Dir::realpath($repo_dir)) . " ";
+        }
+        return '';
+    }
+
     /**
      * If you notice your .git folder bloating, this is the cleansing you need
      *
-     * @param boolean $repo_dir
+     * @param string|false $repo_dir
      * @return void
      */
     public static function clean( $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = Dir::realpath($repo_dir);
-            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
+        $flag = self::repoFlag($repo_dir);
         $origin = escapeshellarg(self::remoteName( $repo_dir ));
 
         Shell::passthru(<<<CMD
-        git $cRepoDir remote prune $origin \
-            && git $cRepoDir repack \
-            && git $cRepoDir prune-packed \
-            && git $cRepoDir reflog expire --expire=1.month.ago \
-            && git $cRepoDir gc --aggressive
+        git $flag remote prune $origin \
+            && git $flag repack \
+            && git $flag prune-packed \
+            && git $flag reflog expire --expire=1.month.ago \
+            && git $flag gc --aggressive
         CMD);
     }
 
     /**
      * push the changes
      *
-     * @param boolean $repo_dir
-     * @param boolean $origin
-     * @param boolean $branch
+     * @param string|false $repo_dir
+     * @param string|false $origin
+     * @param string|false $branch
      * @return void
      */
     public static function push( $repo_dir = false, $origin = false, $branch = false )
     {
-        if ($repo_dir) {
-            $repo_dir = Dir::realpath($repo_dir);
-            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
+        $flag = self::repoFlag($repo_dir);
         if (!$origin) {
             $origin = self::remoteName( $repo_dir );
         }
         if (!$branch) {
             $branch = self::branch( $repo_dir );
         }
-        Shell::passthru("git $cRepoDir push " . escapeshellarg($origin) . " " . escapeshellarg($branch));
+        Shell::passthru("git $flag push " . escapeshellarg($origin) . " " . escapeshellarg($branch));
     }
 
     /**
      * Adds and commits all untracked changes to a repo. Requires a message
      *
-     * @param [type] $message
-     * @param boolean $repo_dir
+     * @param string $message
+     * @param string|false $repo_dir
      * @return void
      */
     public static function commit( $message, $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        Shell::run("git $repo_dir add -A");
-        Shell::run("git $repo_dir commit -m " . escapeshellarg($message));
+        $flag = self::repoFlag($repo_dir);
+        Shell::run("git $flag add -A");
+        Shell::run("git $flag commit -m " . escapeshellarg($message));
     }
 
     /**
      * Untracked changes
      *
+     * @param string|false $repo_dir
      * @return boolean
      */
     public static function hasUntrackedFiles( $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        $response = Shell::run("git $repo_dir status");
-        if (strpos($response, 'Untracked files')===false) {
-            return false;
-        }
-        return true;
+        $flag = self::repoFlag($repo_dir);
+        $response = Shell::run("git $flag status");
+        return strpos($response, 'Untracked files') !== false;
     }
 
     /**
@@ -148,117 +148,96 @@ Class Git
      */
     public static function remoteName( $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        $remotes = Shell::run("git $repo_dir remote");
+        $flag = self::repoFlag($repo_dir);
+        $remotes = Shell::run("git $flag remote");
         $remotearray = explode(PHP_EOL, $remotes);
-        $remote = array_shift($remotearray);
-        return $remote;
+        return array_shift($remotearray);
     }
 
     /**
      * Return the remote url of the current working directory
      *
-     * @return void
+     * @param string|false $repo_dir
+     * @return string
      */
     public static function RemoteUrl( $repo_dir = false )
     {
-        $branch = Git::remoteName( $repo_dir );
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        $command = "git $repo_dir config --get remote." . escapeshellarg($branch) . ".url";
-        return Shell::run( $command );
+        $remote = self::remoteName( $repo_dir );
+        $flag = self::repoFlag($repo_dir);
+        return Shell::run("git $flag config --get remote." . escapeshellarg($remote) . ".url");
     }
 
     /**
      * Create a new branch and switch to it
      *
-     * @param [type] $branch
-     * @param boolean $repo_dir
+     * @param string $branch
+     * @param string|false $repo_dir
      * @return void
      */
     public static function createBranch( $branch, $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-
-        $command = "git $repo_dir checkout -b " . escapeshellarg($branch);
-        $branchstring = Shell::run( $command );
+        $flag = self::repoFlag($repo_dir);
+        Shell::run("git $flag checkout -b " . escapeshellarg($branch));
     }
 
     /**
      * Switch to branch
      *
-     * @param [type] $branch
-     * @param boolean $repo_dir
+     * @param string $branch
+     * @param string|false $repo_dir
      * @return void
      */
     public static function switchBranch( $branch, $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-
-        $command = "git $repo_dir checkout " . escapeshellarg($branch);
-        $branchstring = Shell::run( $command );
+        $flag = self::repoFlag($repo_dir);
+        Shell::run("git $flag checkout " . escapeshellarg($branch));
     }
 
     /**
      * return an array of branches
      *
-     * @param boolean $repo_dir
-     * @return void
+     * @param string|false $repo_dir
+     * @return array
      */
     public static function branches( $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        $command = "git $repo_dir branch";
-        $branchstring = Shell::run( $command );
+        $flag = self::repoFlag($repo_dir);
+        $branchstring = Shell::run("git $flag branch");
         $branchstring = str_replace('*','', $branchstring);
         $branches = explode(PHP_EOL, $branchstring);
-        $branches = array_map('trim', $branches);
-        return $branches;
+        return array_map('trim', $branches);
     }
 
     /**
      * Return the branch name
      *
-     * @param boolean $repo_dir
-     * @return void
+     * @param string|false $repo_dir
+     * @return string
      */
     public static function branch( $repo_dir = false )
     {
-        if ($repo_dir) {
-            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        $command = "git $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'";
-        return Shell::run( $command );
+        $flag = self::repoFlag($repo_dir);
+        return Shell::run("git $flag branch | sed -n -e 's/^\* \(.*\)/\\1/p'");
     }
 
     /**
-     * truncates the dir but leaves the .git and optionally leaves the specified array of files
+     * Truncates the dir but leaves .git and optionally leaves the specified array of files
      *
-     * @param boolean $repo_dir
-     * @return void
+     * @param string|false $repo_dir
+     * @param array $ignore
+     * @return bool
      */
     public static function truncateBranch( $repo_dir = false, $ignore = [] )
     {
-        if ($repo_dir) {
-            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
+        $realpath = Dir::realpath($repo_dir);
         $files = Dir::dirToArray( $repo_dir, $ignore );
         $files = array_reverse($files); // directories are handled last
         foreach ($files as $file) {
-            $absoluteFilePath = Dir::realpath($repo_dir).$file;
+            $absoluteFilePath = $realpath . $file;
             if (is_file($absoluteFilePath)) {
                 Shell::run("rm -f " . escapeshellarg($absoluteFilePath));
-            } elseif (is_dir($file)) {
-                rmdir($file); // safe dir removal requires dir to be empty
+            } elseif (is_dir($absoluteFilePath)) {
+                rmdir($absoluteFilePath);
             }
         }
         return true;
@@ -267,16 +246,13 @@ Class Git
     /**
      * Fetch all for the given repo
      *
-     * @param boolean $repo_dir
+     * @param string|false $repo_dir
      * @return void
      */
     public static function fetch( $repo_dir = false )
     {
-        $cRepoDir = '';
-        if ($repo_dir) {
-            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
-        }
-        Shell::run("git $cRepoDir fetch --all");
+        $flag = self::repoFlag($repo_dir);
+        Shell::run("git $flag fetch --all");
     }
 
     /**
@@ -353,14 +329,14 @@ Class Git
             if (!$repo_dir) {
                 return false;
             }
-            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         if (!is_dir($repo_dir)) {
             Shell::run("mkdir -p " . escapeshellarg($repo_dir));
         }
-        Shell::run("git $cRepoDir init");
-        Shell::run("git $cRepoDir config core.mergeoptions --no-edit");
-        Shell::run("git $cRepoDir config core.fileMode false");
+        $flag = self::repoFlag($repo_dir);
+        Shell::run("git $flag init");
+        Shell::run("git $flag config core.mergeoptions --no-edit");
+        Shell::run("git $flag config core.fileMode false");
         if (!is_dir($repo_dir.'.git')) {
             return false;
         }

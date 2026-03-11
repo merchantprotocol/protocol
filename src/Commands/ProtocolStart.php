@@ -52,6 +52,7 @@ use Gitcd\Helpers\StageRunner;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\Webhook;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -242,6 +243,7 @@ Class ProtocolStart extends Command {
         $runner->run('Running security audit', function() use ($repo_dir) {
             $audit = new SecurityAudit($repo_dir);
             $audit->runAll();
+            Webhook::notifyAudit('security_audit', $repo_dir, $audit->getResults(), $audit->passed());
             if (!$audit->passed()) {
                 $failures = array_filter($audit->getResults(), fn($r) => $r['status'] === 'fail');
                 $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
@@ -253,6 +255,7 @@ Class ProtocolStart extends Command {
         $runner->run('SOC 2 readiness check', function() use ($repo_dir) {
             $check = new Soc2Check($repo_dir);
             $check->runAll();
+            Webhook::notifyAudit('soc2_check', $repo_dir, $check->getResults(), $check->passed());
             if (!$check->passed()) {
                 $failures = array_filter($check->getResults(), fn($r) => $r['status'] === 'fail');
                 $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);

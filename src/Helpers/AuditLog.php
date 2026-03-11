@@ -19,10 +19,12 @@ class AuditLog
     }
 
     /**
-     * Write a structured log entry.
+     * Write a structured log entry. Automatically appends the current user.
      */
-    protected static function write(string $action, string $repo_dir, array $data = []): void
+    public static function write(string $action, string $repo_dir, array $data = []): void
     {
+        $data['user'] = $data['user'] ?? get_current_user();
+
         $entry = date('Y-m-d\TH:i:sP') . " {$action} repo=" . escapeshellarg($repo_dir);
         foreach ($data as $key => $value) {
             $entry .= " {$key}=" . escapeshellarg($value);
@@ -41,13 +43,7 @@ class AuditLog
      */
     public static function logDeploy(string $repo_dir, string $from, string $to, string $status = 'success', string $scope = 'global'): void
     {
-        self::write('DEPLOY', $repo_dir, [
-            'from' => $from,
-            'to' => $to,
-            'status' => $status,
-            'scope' => $scope,
-            'user' => get_current_user(),
-        ]);
+        self::write('DEPLOY', $repo_dir, compact('from', 'to', 'status', 'scope'));
     }
 
     /**
@@ -55,13 +51,7 @@ class AuditLog
      */
     public static function logRollback(string $repo_dir, string $from, string $to, string $status = 'success', string $scope = 'global'): void
     {
-        self::write('ROLLBACK', $repo_dir, [
-            'from' => $from,
-            'to' => $to,
-            'status' => $status,
-            'scope' => $scope,
-            'user' => get_current_user(),
-        ]);
+        self::write('ROLLBACK', $repo_dir, compact('from', 'to', 'status', 'scope'));
     }
 
     /**
@@ -69,11 +59,7 @@ class AuditLog
      */
     public static function logConfig(string $repo_dir, string $action, string $detail = ''): void
     {
-        self::write('CONFIG', $repo_dir, [
-            'action' => $action,
-            'detail' => $detail,
-            'user' => get_current_user(),
-        ]);
+        self::write('CONFIG', $repo_dir, compact('action', 'detail'));
     }
 
     /**
@@ -81,11 +67,7 @@ class AuditLog
      */
     public static function logDocker(string $repo_dir, string $action, string $detail = ''): void
     {
-        self::write('DOCKER', $repo_dir, [
-            'action' => $action,
-            'detail' => $detail,
-            'user' => get_current_user(),
-        ]);
+        self::write('DOCKER', $repo_dir, compact('action', 'detail'));
     }
 
     /**
@@ -93,13 +75,7 @@ class AuditLog
      */
     public static function logShadow(string $repo_dir, string $action, string $slot, string $version, string $status = 'success'): void
     {
-        self::write('SHADOW', $repo_dir, [
-            'action' => $action,
-            'slot' => $slot,
-            'version' => $version,
-            'status' => $status,
-            'user' => get_current_user(),
-        ]);
+        self::write('SHADOW', $repo_dir, compact('action', 'slot', 'version', 'status'));
     }
 
     /**
@@ -116,7 +92,6 @@ class AuditLog
             'pr_merged_by' => $prData['merged_by'] ?? '',
             'pr_merged_at' => $prData['merged_at'] ?? '',
             'pr_url' => $prData['url'] ?? '',
-            'user' => get_current_user(),
         ]);
     }
 

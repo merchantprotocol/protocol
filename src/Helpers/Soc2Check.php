@@ -6,16 +6,8 @@ namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
 
-class Soc2Check
+class Soc2Check extends BaseAuditChecker
 {
-    private string $repoDir;
-    private array $results = [];
-
-    public function __construct(string $repoDir)
-    {
-        $this->repoDir = $repoDir;
-    }
-
     /**
      * Run all SOC 2 readiness checks and return results.
      */
@@ -33,28 +25,9 @@ class Soc2Check
     }
 
     /**
-     * True if no checks returned 'fail' status.
-     */
-    public function passed(): bool
-    {
-        foreach ($this->results as $r) {
-            if ($r['status'] === 'fail') return false;
-        }
-        return true;
-    }
-
-    /**
-     * Get all check results.
-     */
-    public function getResults(): array
-    {
-        return $this->results;
-    }
-
-    /**
      * CC6/C1: Verify secrets are encrypted and key is present.
      */
-    private function checkSecretsEncrypted(): void
+    protected function checkSecretsEncrypted(): void
     {
         $mode = Json::read('deployment.secrets', 'file', $this->repoDir);
         $hasKey = Secrets::hasKey();
@@ -71,7 +44,7 @@ class Soc2Check
     /**
      * CC7: Verify audit logging is active.
      */
-    private function checkAuditLog(): void
+    protected function checkAuditLog(): void
     {
         $logPath = AuditLog::logPath();
 
@@ -94,7 +67,7 @@ class Soc2Check
     /**
      * CC7/CC8: Verify release-based deployment (immutable, auditable).
      */
-    private function checkDeployStrategy(): void
+    protected function checkDeployStrategy(): void
     {
         $strategy = Json::read('deployment.strategy', 'branch', $this->repoDir);
 
@@ -108,7 +81,7 @@ class Soc2Check
     /**
      * CC7: Verify git remote is configured and code origin is traceable.
      */
-    private function checkGitIntegrity(): void
+    protected function checkGitIntegrity(): void
     {
         $remote = Git::RemoteUrl($this->repoDir);
 
@@ -137,7 +110,7 @@ class Soc2Check
     /**
      * A1: Verify reboot recovery is configured.
      */
-    private function checkCrontabRecovery(): void
+    protected function checkCrontabRecovery(): void
     {
         if (Crontab::hasCrontabRestart($this->repoDir)) {
             $this->addResult('Reboot recovery', 'pass', 'Crontab @reboot entry configured');
@@ -149,7 +122,7 @@ class Soc2Check
     /**
      * CC6/C1: Verify encryption key file permissions.
      */
-    private function checkKeyPermissions(): void
+    protected function checkKeyPermissions(): void
     {
         $keyPath = Secrets::keyPath();
 
@@ -182,7 +155,7 @@ class Soc2Check
     /**
      * CC6: Verify encryption key is not older than 90 days.
      */
-    private function checkKeyRotation(): void
+    protected function checkKeyRotation(): void
     {
         $keyPath = Secrets::keyPath();
 
@@ -201,15 +174,4 @@ class Soc2Check
         }
     }
 
-    /**
-     * Add a check result.
-     */
-    private function addResult(string $name, string $status, string $message): void
-    {
-        $this->results[] = [
-            'name' => $name,
-            'status' => $status,
-            'message' => $message,
-        ];
-    }
 }

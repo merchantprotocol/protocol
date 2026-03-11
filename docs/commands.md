@@ -115,6 +115,22 @@ See all your releases. The currently deployed version gets a `*` next to it.
 protocol release:list
 ```
 
+### `protocol release:prepare`
+
+Prepare the codebase for the next release. Runs any pre-release tasks.
+
+```bash
+protocol release:prepare
+```
+
+### `protocol release:changelog`
+
+Generate a CHANGELOG.md file from your git history.
+
+```bash
+protocol release:changelog
+```
+
 ---
 
 ## Deployment
@@ -170,6 +186,72 @@ Roll back THIS node only.
 
 ```bash
 protocol node:rollback
+```
+
+### `protocol deploy:slave`
+
+Start the release watcher daemon. Polls the GitHub variable for active release changes and deploys automatically. Used internally by `protocol start` in release mode.
+
+```bash
+protocol deploy:slave
+protocol deploy:slave --interval=30   # poll every 30 seconds
+protocol deploy:slave --no-daemon     # run in foreground (debugging)
+```
+
+### `protocol deploy:slave:stop`
+
+Stop the release watcher daemon.
+
+```bash
+protocol deploy:slave:stop
+```
+
+---
+
+## Shadow (Blue-Green) Deployment
+
+Zero-downtime deployments using shadow directories. Each release gets its own directory with a full git clone, Docker containers, and config files. Traffic is swapped instantly when the new version is healthy.
+
+### `protocol shadow:init`
+
+Initialize shadow deployment configuration for your project.
+
+```bash
+protocol shadow:init
+```
+
+### `protocol shadow:build`
+
+Build a release version in a shadow directory. Clones the repo, checks out the version, sets up Docker, and runs health checks.
+
+```bash
+protocol shadow:build v1.2.0
+protocol shadow:build v1.2.0 --skip-health-check
+```
+
+### `protocol shadow:start`
+
+Promote the shadow version to production by swapping ports.
+
+```bash
+protocol shadow:start
+```
+
+### `protocol shadow:rollback`
+
+Roll back to the previous version instantly by swapping ports back.
+
+```bash
+protocol shadow:rollback
+```
+
+### `protocol shadow:status`
+
+Show shadow deployment status — which version is active, which is standby, health state.
+
+```bash
+protocol shadow:status
+protocol shadow:status --json         # raw JSON output
 ```
 
 ---
@@ -288,6 +370,50 @@ Commit and push changes in your config repo.
 protocol config:save
 ```
 
+### `protocol config:cp`
+
+Copy a file into the config repo without removing it from your project (unlike `config:mv` which moves it).
+
+```bash
+protocol config:cp nginx.conf
+```
+
+### `protocol config:new`
+
+Create a new configuration repository from scratch.
+
+```bash
+protocol config:new
+```
+
+### `protocol config:refresh`
+
+Clear all config symlinks and rebuild them. Useful if symlinks get out of sync.
+
+```bash
+protocol config:refresh
+```
+
+### `protocol config:slave`
+
+Keep the config repo in sync with its remote. Polls for changes and pulls automatically.
+
+```bash
+protocol config:slave
+protocol config:slave --increment=30     # poll every 30 seconds
+protocol config:slave --no-daemon        # run in foreground
+```
+
+Used internally by `protocol start`. You rarely need to run this directly.
+
+### `protocol config:slave:stop`
+
+Stop the config repo watcher.
+
+```bash
+protocol config:slave:stop
+```
+
 ---
 
 ## Docker
@@ -335,6 +461,38 @@ Follow your container's logs.
 protocol docker:logs
 ```
 
+### `protocol docker:build`
+
+Build the Docker image from a local Dockerfile source.
+
+```bash
+protocol docker:build
+```
+
+### `protocol docker:pull`
+
+Pull the Docker image from the registry, or build it if a local Dockerfile is configured.
+
+```bash
+protocol docker:pull
+```
+
+### `protocol docker:push`
+
+Push the Docker image to the remote registry.
+
+```bash
+protocol docker:push
+```
+
+### `protocol composer:install`
+
+Run `composer install` inside the Docker container.
+
+```bash
+protocol composer:install
+```
+
 ---
 
 ## Security & Readiness
@@ -378,6 +536,136 @@ protocol security:changedfiles
 protocol security:changedfiles --days=7    # look back 7 days
 ```
 
+### `protocol incident:status`
+
+Live incident dashboard. Shows all detected issues, container health, logged-in users, changed files, recently modified files, and recently added files. Refreshes every 5 seconds. Use this as your first command when Protocol alerts you to an incident.
+
+```bash
+protocol incident:status
+protocol incident:status --once          # run once and exit
+protocol incident:status --interval=10   # refresh every 10 seconds
+```
+
+When Protocol detects a P1 or P2 incident, every command will show an alert banner directing you to run `protocol incident:status`.
+
+### `protocol incident:report`
+
+Create a full incident report. Gathers all available system state — deployment logs, security audit results, SOC 2 check results, container status, process list, network connections — and compiles a structured report. Opens a GitHub issue and sends notifications to configured webhooks.
+
+```bash
+# Severity auto-detected from system state:
+protocol incident:report "Unauthorized deploy detected at 3am"
+
+# Override severity (1-4 or P1-P4):
+protocol incident:report 1 "SIEM alert: file integrity change"
+protocol incident:report P2 "Degraded service on node-3"
+protocol incident:report 3 "Dependency CVE discovered" --no-issue
+```
+
+Severity levels:
+- **P1** — Security audit failures or multiple containers down
+- **P2** — SOC 2 check failures or single container down
+- **P3** — Warnings from audits or checks
+- **P4** — Informational, no failures detected
+
+The report is saved to `~/.protocol/incidents/`, a forensic snapshot is automatically captured, a GitHub issue is created, everything is logged to the audit trail, and notifications are sent to all configured webhook URLs in `protocol.json`.
+
+### `protocol incident:snapshot`
+
+Capture a forensic snapshot of the entire system state. Run this **immediately** during triage — before any containment or remediation. It preserves everything needed for forensic analysis.
+
+```bash
+protocol incident:snapshot
+```
+
+Captures: audit logs, running processes, network connections, Docker container state and logs, git history and diffs, system info, crontab, SIEM status, auth logs, and recently modified files. All saved to `~/.protocol/incidents/snapshot-YYYY-MM-DD-HHMMSS/` with 0700 permissions.
+
+### `protocol siem:install`
+
+Install and configure the Wazuh SIEM agent for centralized security monitoring. Sets up file integrity monitoring for `~/.protocol/` and forwards audit logs to your SIEM.
+
+```bash
+protocol siem:install --manager=wazuh.example.com
+protocol siem:install --manager=10.0.0.5 --password=secret --agent-name=prod-1
+protocol siem:install --uninstall
+```
+
+### `protocol siem:status`
+
+Check the health of the Wazuh SIEM agent on this node.
+
+```bash
+protocol siem:status
+```
+
+---
+
+## Monitoring
+
+Real-time dashboards for debugging and breach detection.
+
+### `protocol top`
+
+Real-time system command center. Shows processes, network connections, Docker containers, and security status in a continuously updating display.
+
+```bash
+protocol top
+protocol top --interval=10            # refresh every 10 seconds
+protocol top --once                   # run once and exit
+```
+
+### `protocol top:shadow`
+
+Visual dashboard of all Docker containers and shadow deployments across release directories.
+
+```bash
+protocol top:shadow
+protocol top:shadow --interval=10
+protocol top:shadow --once
+```
+
+---
+
+## Git & Repository
+
+Low-level git operations that Protocol wraps for convenience.
+
+### `protocol git:pull`
+
+Pull from the remote and update the local repo.
+
+```bash
+protocol git:pull
+```
+
+### `protocol git:clean`
+
+If your `.git` folder is bloating, this runs garbage collection and pruning to reclaim space.
+
+```bash
+protocol git:clean
+```
+
+### `protocol git:slave`
+
+Start the branch-mode continuous deployment watcher. Polls the remote for changes and pulls automatically.
+
+```bash
+protocol git:slave
+protocol git:slave --increment=30     # poll every 30 seconds
+protocol git:slave --no-daemon        # run in foreground
+```
+
+Used internally by `protocol start` in branch mode. You rarely need to run this directly.
+
+### `protocol git:slave:stop`
+
+Stop the branch-mode watcher.
+
+```bash
+protocol git:slave:stop
+```
+
 ---
 
 ## System
@@ -388,6 +676,7 @@ Housekeeping and setup commands.
 |---|---|
 | `protocol self:update` | Update Protocol to the latest release |
 | `protocol self:update --nightly` | Update to the latest commit (bleeding edge) |
+| `protocol self:global` | Install Protocol as a global command (symlink to `/usr/local/bin`) |
 | `protocol cron:add` | Add a `@reboot` crontab entry so Protocol restarts after reboots |
 | `protocol cron:remove` | Remove the crontab entry |
 | `protocol key:generate` | Generate an SSH deploy key for pulling from private repos |
@@ -407,9 +696,16 @@ Housekeeping and setup commands.
 | Create a release | `protocol release:create` |
 | Deploy to all nodes | `protocol deploy:push 1.2.0` |
 | Roll back | `protocol deploy:rollback` |
+| Zero-downtime deploy | `protocol shadow:build v1.2.0` then `protocol shadow:start` |
+| Shadow rollback (instant) | `protocol shadow:rollback` |
 | Set up configs & secrets | `protocol config:init` |
 | Run a command in Docker | `protocol docker:exec "your command"` |
 | View your encryption key | `protocol secrets:key` |
 | Run a security scan | `protocol security:audit` |
 | Check SOC 2 readiness | `protocol soc2:check` |
+| Install SIEM agent | `protocol siem:install --manager=host` |
+| View incident dashboard | `protocol incident:status` |
+| Report an incident | `protocol incident:report 1 "msg"` |
+| Capture forensic snapshot | `protocol incident:snapshot` |
+| Real-time monitoring | `protocol top` |
 | Update Protocol itself | `protocol self:update` |

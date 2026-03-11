@@ -29,6 +29,9 @@ Before any configuration, Protocol already handles:
 | **Change approval chain** | `deploy:push` captures PR number, author, approvers, and merger from GitHub and writes APPROVAL entries to the audit log |
 | **Docker health checks** | Container health checks with automatic restart ensure availability monitoring |
 | **Branch protection** | GitHub branch protection enforces required CI status checks and PR reviews before merge to master |
+| **Webhook notifications** | Configurable webhooks fire on deploy, security audit failures, SOC 2 check failures, and incidents. Supports Slack, PagerDuty, and any webhook-compatible service |
+| **Incident reporting** | `protocol incident:report` gathers system state, creates a GitHub issue, sends to webhooks, and logs to audit trail |
+| **Forensic snapshots** | `protocol incident:snapshot` captures full system evidence (logs, processes, network, containers, git state) for incident response |
 
 ## Trust Service Criteria Mapping
 

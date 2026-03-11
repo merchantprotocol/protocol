@@ -42,6 +42,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\GitHub;
+use Gitcd\Helpers\Release;
 
 Class ReleaseCreate extends Command {
 
@@ -99,7 +100,7 @@ Class ReleaseCreate extends Command {
             $bump = 'patch';
             if ($input->getOption('major')) $bump = 'major';
             if ($input->getOption('minor')) $bump = 'minor';
-            $version = $this->autoVersion($repo_dir, $bump);
+            $version = Release::autoVersion($repo_dir, $bump);
 
             if (!$version) {
                 $output->writeln('<error>No existing tags found. Please specify a version: protocol release:create v1.0.0</error>');
@@ -108,7 +109,7 @@ Class ReleaseCreate extends Command {
             $output->writeln("<comment>Auto-bumped {$bump} version: {$version}</comment>");
         }
 
-        $version = $this->normalizeVersion($version);
+        $version = Release::normalizeVersion($version);
         if (!$version) {
             $output->writeln('<error>Invalid version format. Use semver: v1.2.3</error>');
             return Command::FAILURE;
@@ -173,50 +174,4 @@ Class ReleaseCreate extends Command {
         return Command::SUCCESS;
     }
 
-    /**
-     * Normalize version string to v-prefixed semver.
-     */
-    protected function normalizeVersion(string $version): ?string
-    {
-        $version = ltrim($version, 'v');
-        if (!preg_match('/^\d+\.\d+\.\d+(-[\w.]+)?$/', $version)) {
-            return null;
-        }
-        return 'v' . $version;
-    }
-
-    /**
-     * Auto-generate next version from latest tag.
-     */
-    protected function autoVersion(string $repo_dir, string $bump = 'patch'): ?string
-    {
-        $tags = GitHub::getTags($repo_dir);
-        if (empty($tags)) return null;
-
-        $latest = ltrim($tags[0], 'v');
-        $parts = explode('.', $latest);
-        if (count($parts) !== 3) return null;
-
-        $major = (int) $parts[0];
-        $minor = (int) $parts[1];
-        $patch = (int) $parts[2];
-
-        switch ($bump) {
-            case 'major':
-                $major++;
-                $minor = 0;
-                $patch = 0;
-                break;
-            case 'minor':
-                $minor++;
-                $patch = 0;
-                break;
-            case 'patch':
-            default:
-                $patch++;
-                break;
-        }
-
-        return "v{$major}.{$minor}.{$patch}";
-    }
 }

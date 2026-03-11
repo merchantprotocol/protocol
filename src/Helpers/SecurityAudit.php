@@ -6,16 +6,8 @@ namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Yaml;
 
-class SecurityAudit
+class SecurityAudit extends BaseAuditChecker
 {
-    private string $repoDir;
-    private array $results = [];
-
-    public function __construct(string $repoDir)
-    {
-        $this->repoDir = $repoDir;
-    }
-
     /**
      * Run all security checks and return results.
      */
@@ -32,28 +24,9 @@ class SecurityAudit
     }
 
     /**
-     * True if no checks returned 'fail' status.
-     */
-    public function passed(): bool
-    {
-        foreach ($this->results as $r) {
-            if ($r['status'] === 'fail') return false;
-        }
-        return true;
-    }
-
-    /**
-     * Get all check results.
-     */
-    public function getResults(): array
-    {
-        return $this->results;
-    }
-
-    /**
      * Scan PHP files for suspicious/malicious function calls.
      */
-    private function checkMaliciousCode(): void
+    protected function checkMaliciousCode(): void
     {
         $patterns = [
             'eval', 'base64_decode', 'gzinflate', 'str_rot13',
@@ -94,7 +67,7 @@ class SecurityAudit
     /**
      * Verify sensitive file permissions.
      */
-    private function checkFilePermissions(): void
+    protected function checkFilePermissions(): void
     {
         $issues = [];
 
@@ -136,7 +109,7 @@ class SecurityAudit
     /**
      * Check for known dependency vulnerabilities via composer audit.
      */
-    private function checkDependencies(): void
+    protected function checkDependencies(): void
     {
         $composerJson = rtrim($this->repoDir, '/') . '/composer.json';
         if (!is_file($composerJson)) {
@@ -180,7 +153,7 @@ class SecurityAudit
     /**
      * Check for suspicious running processes.
      */
-    private function checkProcesses(): void
+    protected function checkProcesses(): void
     {
         $suspicious = ['xmrig', 'cryptominer', 'kinsing', 'dota', 'tsunami'];
         $found = [];
@@ -205,7 +178,7 @@ class SecurityAudit
     /**
      * Check Docker Compose configuration for security issues.
      */
-    private function checkDockerSecurity(): void
+    protected function checkDockerSecurity(): void
     {
         $composeFile = rtrim($this->repoDir, '/') . '/docker-compose.yml';
         if (!is_file($composeFile)) {
@@ -250,7 +223,7 @@ class SecurityAudit
     /**
      * Check for recently modified files outside of git tracking.
      */
-    private function checkRecentChanges(): void
+    protected function checkRecentChanges(): void
     {
         $dir = escapeshellarg($this->repoDir);
 
@@ -282,15 +255,4 @@ class SecurityAudit
         }
     }
 
-    /**
-     * Add a check result.
-     */
-    private function addResult(string $name, string $status, string $message): void
-    {
-        $this->results[] = [
-            'name' => $name,
-            'status' => $status,
-            'message' => $message,
-        ];
-    }
 }
