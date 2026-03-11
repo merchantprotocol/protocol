@@ -45,6 +45,18 @@ use Gitcd\Utils\Yaml;
 
 abstract class BaseInitializer implements ProjectInitializerInterface
 {
+    protected ?string $customImage = null;
+
+    public function setCustomImage(?string $image): void
+    {
+        $this->customImage = $image;
+    }
+
+    public function getCustomImage(): ?string
+    {
+        return $this->customImage;
+    }
+
     /**
      * Get the Docker Hub image for this project type
      */
@@ -98,25 +110,19 @@ abstract class BaseInitializer implements ProjectInitializerInterface
         $githubRepo = $this->getGitHubRepo();
         $projectName = basename($repo_dir) ?: 'app';
 
+        $customImage = $this->getCustomImage();
+
         $output->writeln('');
-        $output->writeln("    <fg=gray>Build from:</> <fg=cyan>{$githubRepo}</>");
+        if ($customImage) {
+            $output->writeln("    <fg=gray>Image:</> <fg=white>{$customImage}</>");
+        } else {
+            $output->writeln("    <fg=gray>Build from:</> <fg=cyan>{$githubRepo}</>");
+        }
         $output->writeln('');
 
         // Ask for container name
         $question = new Question("    Container name [{$projectName}]: ", $projectName);
         $containerName = $helper->ask($input, $output, $question);
-
-        // Ask if they want to use a custom Docker Hub image instead
-        $question = new ConfirmationQuestion(
-            '    Use a custom Docker Hub image instead of building from GitHub? [y/<fg=green>N</>] ', false
-        );
-        $useCustomImage = $helper->ask($input, $output, $question);
-
-        $customImage = null;
-        if ($useCustomImage) {
-            $question = new Question('    Docker image (e.g. myorg/myimage:latest): ');
-            $customImage = $helper->ask($input, $output, $question);
-        }
 
         if (file_exists($dockerComposePath)) {
             $question = new ConfirmationQuestion(
@@ -133,7 +139,8 @@ abstract class BaseInitializer implements ProjectInitializerInterface
             $imageOrBuild = "    image: {$customImage}";
             $sourceLabel = $customImage;
         } else {
-            $imageOrBuild = "    build:\n      context: {$githubRepo}";
+            $buildUrl = rtrim($githubRepo, '/') . '.git';
+            $imageOrBuild = "    build:\n      context: {$buildUrl}";
             $sourceLabel = $githubRepo;
         }
 
@@ -171,7 +178,7 @@ YAML;
     /**
      * Create override directories with README files explaining their purpose
      */
-    protected function createOverrideDirectories(string $repo_dir, OutputInterface $output): void
+    public function createOverrideDirectories(string $repo_dir, OutputInterface $output): void
     {
         $dirs = [
             'nginx.d' => <<<'README'
@@ -327,9 +334,12 @@ README
      * @param OutputInterface $output
      * @return void
      */
-    public function createProtocolJson(string $repo_dir, string $projectTypeKey, OutputInterface $output): void
+    public function createProtocolJson(string $repo_dir, string $projectTypeKey, OutputInterface $output, int $schemaVersion = 1): void
     {
         $output->writeln('<comment>Creating protocol.json configuration...</comment>');
+
+        // Stamp the schema version so fix/migrate knows what format to expect
+        Json::write('protocol_version', $schemaVersion, $repo_dir);
 
         // Write basic project metadata
         Json::write('name', basename($repo_dir), $repo_dir);

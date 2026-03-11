@@ -51,11 +51,23 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
 use Gitcd\Commands\Init\Php81;
+use Gitcd\Commands\Init\Php82;
 use Gitcd\Commands\Init\Php82Ffmpeg;
 
 Class ProtocolInit extends Command {
 
     use LockableTrait;
+
+    /**
+     * Current protocol.json schema version.
+     * Bump this when the config format changes so fix/migrate knows what to update.
+     *
+     * Version history:
+     *   0 — no version field (legacy, pre-versioning)
+     *   1 — initial versioned schema: build context with .git suffix,
+     *       scaffold dirs, project_type field, deployment.strategy
+     */
+    const SCHEMA_VERSION = 1;
 
     protected static $defaultName = 'init';
     protected static $defaultDescription = 'Initialize a new project or connect an existing repository';
@@ -91,6 +103,7 @@ Class ProtocolInit extends Command {
     protected function getAvailableInitializers(): array
     {
         return [
+            'php82'       => new Php82(),
             'php82ffmpeg' => new Php82Ffmpeg(),
             'php81'       => new Php81(),
         ];
@@ -110,9 +123,15 @@ Class ProtocolInit extends Command {
         $output->writeln('');
     }
 
+    protected function clearAndBanner(OutputInterface $output): void
+    {
+        fwrite(STDOUT, "\033[2J\033[H");
+        $this->writeBanner($output);
+    }
+
     protected function writeStep(OutputInterface $output, int $step, int $total, string $title): void
     {
-        $output->writeln('');
+        $this->clearAndBanner($output);
         $output->writeln("<fg=cyan>  ── </><fg=white;options=bold>[{$step}/{$total}] {$title}</><fg=cyan> ──────────────────────────────────────</>");
         $output->writeln('');
     }
@@ -289,7 +308,7 @@ Class ProtocolInit extends Command {
         $helper = $this->getHelper('question');
         $io = new SymfonyStyle($input, $output);
 
-        $this->writeBanner($output);
+        $this->clearAndBanner($output);
 
         // ── Auto-detect scenario ─────────────────────────────────
         $isGitRepo = Git::isInitializedRepo($repo_dir);
@@ -302,6 +321,10 @@ Class ProtocolInit extends Command {
         } else {
             $scenario = 'new';
         }
+
+        $output->writeln("    <fg=gray>We detected your project and pre-selected the best option.</>");
+        $output->writeln("    <fg=gray>Directory:</> <fg=white>{$repo_dir}</>");
+        $output->writeln('');
 
         $selectedKey = $this->askWithDots($input, $output, $helper, [
             'new'      => 'Start a new project',
@@ -333,39 +356,37 @@ Class ProtocolInit extends Command {
         $helper,
         SymfonyStyle $io
     ): int {
-        $totalSteps = 5;
+        $totalSteps = 4;
 
-        // Step 1: Initialize git
-        $this->writeStep($output, 1, $totalSteps, 'Initialize Git Repository');
-
+        // Initialize git silently
         if (!Git::isInitializedRepo($repo_dir)) {
             Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
-            $output->writeln("    <fg=green>✓</> Git repository initialized");
-        } else {
-            $output->writeln("    <fg=green>✓</> Git repository already initialized");
         }
 
-        // Step 2: Project type + scaffold
-        $this->writeStep($output, 2, $totalSteps, 'Project Type');
+        // Step 1: Project type + scaffold
+        $this->writeStep($output, 1, $totalSteps, 'Project Type');
+        $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
+        $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
+        $output->writeln('');
         $selectedInitializer = $this->selectProjectType($input, $output, $helper);
-
-        $output->writeln('');
         $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
-        $output->writeln('');
-
         $selectedKey = $this->getInitializerKey($selectedInitializer);
-        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
+        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
 
-        // Step 3: Deployment strategy
-        $this->writeStep($output, 3, $totalSteps, 'Deployment Strategy');
+        // Step 2: Deployment strategy
+        $this->writeStep($output, 2, $totalSteps, 'Deployment Strategy');
+        $output->writeln("    <fg=gray>This controls how code gets to your servers. Release-based</>");
+        $output->writeln("    <fg=gray>creates tagged versions you can roll back. Branch-based</>");
+        $output->writeln("    <fg=gray>just follows the tip of a branch.</>");
+        $output->writeln('');
         $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
 
-        // Step 4: Secrets
-        $this->writeStep($output, 4, $totalSteps, 'Secrets Management');
+        // Step 3: Secrets
+        $this->writeStep($output, 3, $totalSteps, 'Secrets Management');
         $this->configureSecrets($repo_dir, $input, $output, $helper);
 
-        // Step 5: Config repo
-        $this->writeStep($output, 5, $totalSteps, 'Configuration Repository');
+        // Step 4: Config repo
+        $this->writeStep($output, 4, $totalSteps, 'Configuration Repository');
         $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
 
         // Done
@@ -387,22 +408,20 @@ Class ProtocolInit extends Command {
 
         // Step 1: Project type + scaffold
         $this->writeStep($output, 1, $totalSteps, 'Project Type');
-
-        $remote = Git::RemoteUrl($repo_dir) ?: 'local only';
-        $output->writeln("    <fg=gray>Remote:</> <fg=white>{$remote}</>");
+        $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
+        $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
         $output->writeln('');
-
         $selectedInitializer = $this->selectProjectType($input, $output, $helper);
-
-        $output->writeln('');
         $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
-        $output->writeln('');
-
         $selectedKey = $this->getInitializerKey($selectedInitializer);
-        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output);
+        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
 
         // Step 2: Deployment strategy
         $this->writeStep($output, 2, $totalSteps, 'Deployment Strategy');
+        $output->writeln("    <fg=gray>This controls how code gets to your servers. Release-based</>");
+        $output->writeln("    <fg=gray>creates tagged versions you can roll back. Branch-based</>");
+        $output->writeln("    <fg=gray>just follows the tip of a branch.</>");
+        $output->writeln('');
         $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
 
         // Step 3: Secrets
@@ -431,20 +450,26 @@ Class ProtocolInit extends Command {
         $currentStrategy = Json::read('deployment.strategy', 'branch', $repo_dir);
         $projectName = Json::read('name', basename($repo_dir), $repo_dir);
 
-        $output->writeln('');
+        $this->clearAndBanner($output);
         $output->writeln("    <fg=white;options=bold>{$projectName}</>");
         $output->writeln("    <fg=gray>Strategy:</> <fg=cyan>{$currentStrategy}</>  <fg=gray>·</>  <fg=gray>Dir:</> <fg=white>{$repo_dir}</>");
         $output->writeln('');
+        $output->writeln("    <fg=gray>What would you like to update?</>");
+        $output->writeln('');
 
         $actionKey = $this->askWithDots($input, $output, $helper, [
-            'settings' => 'Re-run full project setup',
+            'fix'      => 'Fix / Migrate — regenerate configs, fix paths, update structure',
+            'settings' => 'Re-run full project setup from scratch',
             'strategy' => 'Change deployment strategy',
             'secrets'  => 'Set up encrypted secrets',
             'config'   => 'Initialize configuration repository',
             'exit'     => 'Exit without changes',
-        ], 'settings');
+        ], 'fix');
 
         switch ($actionKey) {
+            case 'fix':
+                return $this->flowFixMigrate($repo_dir, $input, $output, $helper, $io);
+
             case 'settings':
                 return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
 
@@ -477,6 +502,182 @@ Class ProtocolInit extends Command {
         return Command::SUCCESS;
     }
 
+    // ─── Flow: Fix / Migrate ───────────────────────────────────
+
+    protected function flowFixMigrate(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        SymfonyStyle $io
+    ): int {
+        $this->clearAndBanner($output);
+
+        $currentVersion = (int) Json::read('protocol_version', 0, $repo_dir);
+        $targetVersion = self::SCHEMA_VERSION;
+
+        if ($currentVersion >= $targetVersion) {
+            $output->writeln("    <fg=green>✓</> protocol.json is up to date <fg=gray>(v{$currentVersion})</>");
+            $output->writeln('');
+            $output->writeln("    <fg=gray>Running integrity checks...</>");
+            $output->writeln('');
+        } else {
+            $output->writeln("    <fg=yellow>!</> protocol.json version: <fg=white>v{$currentVersion}</> → <fg=green>v{$targetVersion}</>");
+            $output->writeln('');
+        }
+
+        $fixes = [];
+
+        // Detect project type
+        $projectType = Json::read('project_type', 'php82', $repo_dir);
+        $initializers = $this->getAvailableInitializers();
+        $initializer = $initializers[$projectType] ?? reset($initializers);
+
+        // Run migrations for each version the project is behind
+        if ($currentVersion < 1) {
+            $migrated = $this->migrateToV1($repo_dir, $input, $output, $helper, $initializer);
+            $fixes = array_merge($fixes, $migrated);
+        }
+
+        // Always run integrity checks regardless of version
+        $integrity = $this->runIntegrityChecks($repo_dir, $output, $initializer);
+        $fixes = array_merge($fixes, $integrity);
+
+        // Stamp the current version
+        Json::write('protocol_version', $targetVersion, $repo_dir);
+        Json::save($repo_dir);
+
+        // Summary
+        $output->writeln('');
+        if (!empty($fixes)) {
+            $output->writeln("    <fg=green;options=bold>Done!</> Applied " . count($fixes) . " fix(es):");
+            foreach ($fixes as $fix) {
+                $output->writeln("      <fg=green>✓</> {$fix}");
+            }
+        } else {
+            $output->writeln("    <fg=green;options=bold>Everything looks good!</> No fixes needed.");
+        }
+
+        $this->commitProtocolFiles($output, $repo_dir);
+
+        $output->writeln('');
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Migration: v0 → v1
+     * - Convert image: to build: context: with .git suffix
+     * - Add missing protocol.json fields (project_type, name, deployment.strategy)
+     * - Create scaffold directories (nginx.d, cron.d, supervisor.d)
+     */
+    protected function migrateToV1(
+        string $repo_dir,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper,
+        $initializer
+    ): array {
+        $fixes = [];
+        $output->writeln("    <fg=cyan>── Migrating to v1 ──</>");
+        $output->writeln('');
+
+        // Fix docker-compose.yml
+        $dockerComposePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        if (file_exists($dockerComposePath)) {
+            $content = file_get_contents($dockerComposePath);
+            $reasons = [];
+
+            $customImage = Json::read('docker.image', null, $repo_dir);
+            if (!$customImage && preg_match('/^\s+image:/m', $content)) {
+                $reasons[] = 'convert image: to build: context:';
+            }
+            if (preg_match('/context:\s+(https:\/\/github\.com\/[^\s]+)/', $content, $m)) {
+                if (!str_ends_with(trim($m[1]), '.git')) {
+                    $reasons[] = 'add .git suffix to build context URL';
+                }
+            }
+
+            if (!empty($reasons)) {
+                foreach ($reasons as $reason) {
+                    $output->writeln("      <fg=yellow>!</> {$reason}");
+                }
+                $output->writeln('');
+                $question = new ConfirmationQuestion(
+                    '    Regenerate docker-compose.yml? [<fg=green>Y</>/n] ', true
+                );
+                if ($helper->ask($input, $output, $question)) {
+                    $initializer->initialize($repo_dir, $input, $output, $helper);
+                    $fixes[] = 'Regenerated docker-compose.yml (v1 format)';
+                }
+            }
+        } else {
+            $output->writeln("    <fg=yellow>!</> No docker-compose.yml found");
+            $output->writeln('');
+            $question = new ConfirmationQuestion(
+                '    Generate docker-compose.yml? [<fg=green>Y</>/n] ', true
+            );
+            if ($helper->ask($input, $output, $question)) {
+                $initializer->initialize($repo_dir, $input, $output, $helper);
+                $fixes[] = 'Created docker-compose.yml';
+            }
+        }
+
+        // Ensure protocol.json has required v1 fields
+        $updated = false;
+        if (!Json::read('project_type', null, $repo_dir)) {
+            Json::write('project_type', $this->getInitializerKey($initializer), $repo_dir);
+            $updated = true;
+        }
+        if (!Json::read('name', null, $repo_dir)) {
+            Json::write('name', basename($repo_dir), $repo_dir);
+            $updated = true;
+        }
+        if (!Json::read('deployment.strategy', null, $repo_dir)) {
+            Json::write('deployment.strategy', 'release', $repo_dir);
+            $updated = true;
+        }
+        $remoteurl = Git::RemoteUrl($repo_dir);
+        if ($remoteurl && $remoteurl !== Json::read('git.remote', null, $repo_dir)) {
+            Json::write('git.remote', $remoteurl, $repo_dir);
+            $updated = true;
+        }
+        if ($updated) {
+            Json::save($repo_dir);
+            $fixes[] = 'Added missing protocol.json fields';
+            $output->writeln("    <fg=green>✓</> Updated protocol.json with v1 fields");
+        }
+
+        $output->writeln('');
+        return $fixes;
+    }
+
+    /**
+     * Integrity checks run every time, regardless of version.
+     * Catches drift like missing directories or .gitignore entries.
+     */
+    protected function runIntegrityChecks(string $repo_dir, OutputInterface $output, $initializer): array
+    {
+        $fixes = [];
+
+        // Ensure .gitignore has protocol.lock
+        Git::addIgnore('protocol.lock', $repo_dir);
+
+        // Create missing scaffold directories
+        foreach (['nginx.d', 'cron.d', 'supervisor.d'] as $dir) {
+            if (!is_dir(rtrim($repo_dir, '/') . '/' . $dir)) {
+                $initializer->createOverrideDirectories($repo_dir, $output);
+                $fixes[] = 'Created missing scaffold directories';
+                break;
+            }
+        }
+
+        if (empty($fixes)) {
+            $output->writeln("    <fg=green>✓</> Scaffold directories present");
+        }
+
+        return $fixes;
+    }
+
     // ─── Shared steps ────────────────────────────────────────────
 
     protected function selectProjectType(InputInterface $input, OutputInterface $output, $helper)
@@ -486,11 +687,21 @@ Class ProtocolInit extends Command {
         foreach ($initializers as $key => $initializer) {
             $choices[$key] = $initializer->getName() . ' — ' . $initializer->getDescription();
         }
+        $choices['custom'] = 'Custom Docker image';
 
-        $selectedKey = $this->askWithDots($input, $output, $helper, $choices, 'php82ffmpeg');
+        $selectedKey = $this->askWithDots($input, $output, $helper, $choices, 'php82');
 
-        $selectedInitializer = $initializers[$selectedKey];
-        $output->writeln("    <fg=green>✓</> Selected: <fg=white;options=bold>{$selectedInitializer->getName()}</>");
+        if ($selectedKey === 'custom') {
+            $question = new Question('    Docker image (e.g. myorg/myimage:latest): ');
+            $customImage = $helper->ask($input, $output, $question);
+            // Use the default initializer but override the image
+            $selectedInitializer = reset($initializers);
+            $selectedInitializer->setCustomImage($customImage);
+            $output->writeln("    <fg=green>✓</> Selected: <fg=white;options=bold>{$customImage}</>");
+        } else {
+            $selectedInitializer = $initializers[$selectedKey];
+            $output->writeln("    <fg=green>✓</> Selected: <fg=white;options=bold>{$selectedInitializer->getName()}</>");
+        }
 
         return $selectedInitializer;
     }
@@ -503,7 +714,7 @@ Class ProtocolInit extends Command {
                 return $key;
             }
         }
-        return 'php82ffmpeg';
+        return 'php82';
     }
 
     protected function configureDeploymentStrategy(
@@ -592,7 +803,7 @@ Class ProtocolInit extends Command {
         // Auto-commit protocol files
         $this->commitProtocolFiles($output, $repo_dir);
 
-        $output->writeln('');
+        $this->clearAndBanner($output);
         $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Setup Complete!</>                                    <fg=cyan>│</>');

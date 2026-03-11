@@ -74,6 +74,7 @@ Class Yaml extends Config
 		if (!$repo_dir) {
 			$repo_dir = WORKING_DIR;
 		}
+		$repo_dir = rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 		$file = $repo_dir.'docker-compose.yml';
 		$self = self::getInstance();
         $self->put( $file );
@@ -90,6 +91,7 @@ Class Yaml extends Config
 		if (!$repo_dir) {
 			$repo_dir = WORKING_DIR;
 		}
+		$repo_dir = rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 		if (!$file) {
 			$file = $repo_dir.'docker-compose.yml';
 		}
@@ -120,6 +122,7 @@ Class Yaml extends Config
 		if (!$repo_dir) {
 			$repo_dir = Git::getGitLocalFolder();
 		}
+		$repo_dir = rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 		if (!$file) {
 			$file = $repo_dir.'docker-compose.yml';
 		}
