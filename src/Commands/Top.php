@@ -120,25 +120,49 @@ Class Top extends Command {
         // ── Chrome header (4 lines)
         $hostname = trim(Shell::run('hostname -s 2>/dev/null') ?: Shell::run('hostname 2>/dev/null')) ?: 'server';
         $now = date('Y-m-d H:i:s');
-        $uptime = trim(Shell::run('uptime -p 2>/dev/null') ?: Shell::run('uptime 2>/dev/null'));
-        if (preg_match('/up\s+(.+?)(?:,\s*\d+ user|$)/i', $uptime, $um)) $uptime = trim($um[1]);
+
+        // macOS doesn't support `uptime -p`, parse the standard uptime output
+        $rawUptime = trim(Shell::run('uptime 2>/dev/null') ?: '');
+        $uptime = '?';
+        if (preg_match('/up\s+(.+?)(?:,\s*\d+ user|\s*$)/i', $rawUptime, $um)) {
+            $uptime = trim(rtrim(trim($um[1]), ','));
+        }
+        // Truncate long uptime strings
+        if (strlen($uptime) > 20) $uptime = substr($uptime, 0, 20);
 
         $o = self::B;
         $x = self::X;
+
+        // Line 1: top border
         $this->w("{$o}╭" . str_repeat('─', $pw) . "╮{$x}");
+
+        // Line 2: dots + title + time
+        // Build the visible text first to calculate padding accurately
+        // visible: "│ ● ● ●   protocol top — HOST          DATETIME  │"
+        // visible chars: 1 + 1 + 5 + 3 + 12 + 3 + hostLen + pad + dateLen + 2 + 1
+        $hostTrunc = $this->trunc($hostname, 20);
+        $titleVis = "protocol top — {$hostTrunc}";
+        $innerW = $pw - 2; // inside the │ ... │ (subtract 1 left space + 1 right space)
+        $usedChars = 5 + 3 + strlen($titleVis) + strlen($now); // dots + gap + title + time
+        $pad = max(1, $innerW - $usedChars);
+
         $dots = self::R . "●" . $x . " " . self::Y . "●" . $x . " " . self::GN . "●" . $x;
-        $titlePart = self::M . "protocol top" . $x . self::D . " — {$hostname}" . $x;
+        $titlePart = self::M . "protocol top" . $x . self::D . " — {$hostTrunc}" . $x;
         $timePart = self::D . $now . $x;
-        $visLen = 5 + 3 + 12 + 3 + strlen($hostname) + 3 + strlen($now) + 2;
-        $pad = max(1, $pw - $visLen);
-        $this->w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart}  {$o}│{$x}");
+        $this->w("{$o}│{$x} {$dots}   {$titlePart}" . str_repeat(' ', $pad) . "{$timePart} {$o}│{$x}");
+
+        // Line 3: brand + uptime
+        // visible: "│ MERCHANT PROTOCOL  command center        up UPTIME │"
+        $brandVis = " MERCHANT PROTOCOL  command center";
+        $uptimeVis = "up {$uptime}";
+        $usedBrand = strlen($brandVis) + strlen($uptimeVis);
+        $bPad = max(1, $innerW - $usedBrand);
 
         $brand = self::G . self::BD . " MERCHANT PROTOCOL" . $x . "  " . self::D . "command center" . $x;
         $uptimeStr = self::M . "up " . $x . self::T . $uptime . $x;
-        $bLen = 18 + 2 + 14;
-        $uLen = 3 + strlen($uptime);
-        $bPad = max(1, $pw - $bLen - $uLen - 2);
         $this->w("{$o}│{$x}{$brand}" . str_repeat(' ', $bPad) . "{$uptimeStr} {$o}│{$x}");
+
+        // Line 4: separator
         $this->w("{$o}├" . str_repeat('─', $pw) . "┤{$x}");
         $linesUsed += 4;
 
@@ -146,14 +170,13 @@ Class Top extends Command {
         $this->sec($output, 'SYSTEM', $pw); $linesUsed++;
 
         if ($isMac) {
-            $cpuUsage = trim(Shell::run("ps -A -o %cpu | awk '{s+=\$1} END {printf \"%.1f\", s}'"));
-            $cpuCores = trim(Shell::run('sysctl -n hw.ncpu 2>/dev/null'));
+            $cpuCores = (int)trim(Shell::run('sysctl -n hw.ncpu 2>/dev/null') ?: '1');
+            $cpuRaw = (float)trim(Shell::run("ps -A -o %cpu | awk '{s+=\$1} END {printf \"%.1f\", s}'") ?: '0');
+            $cpuUsage = $cpuCores > 0 ? round($cpuRaw / $cpuCores, 1) : $cpuRaw;
         } else {
-            $cpuUsage = trim(Shell::run("grep 'cpu ' /proc/stat | awk '{usage=(\$2+\$4)*100/(\$2+\$4+\$5)} END {printf \"%.1f\", usage}'"));
-            $cpuCores = trim(Shell::run('nproc 2>/dev/null'));
+            $cpuCores = (int)trim(Shell::run('nproc 2>/dev/null') ?: '1');
+            $cpuUsage = (float)trim(Shell::run("grep 'cpu ' /proc/stat | awk '{usage=(\$2+\$4)*100/(\$2+\$4+\$5)} END {printf \"%.1f\", usage}'") ?: '0');
         }
-        $loadAvg = trim(Shell::run('cat /proc/loadavg 2>/dev/null') ?: Shell::run("sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'"));
-
         if ($isMac) {
             $memTotal = (int)trim(Shell::run('sysctl -n hw.memsize 2>/dev/null'));
             $memTotalGB = round($memTotal / 1073741824, 1);
@@ -175,14 +198,13 @@ Class Top extends Command {
         }
 
         $memPct = $memTotalGB > 0 ? round(($memUsedGB / $memTotalGB) * 100, 1) : 0;
-        $cpuF = min((float)$cpuUsage, 100);
+        $cpuF = min((float)$cpuUsage, 100.0);
 
         $this->ln($output,
-            self::M . "cpu " . $x . $this->bar($cpuF, 20) . $this->clr($cpuF) . sprintf(" %5.1f%%", $cpuF) . $x
+            self::M . "cpu " . $x . $this->bar($cpuF, 12) . $this->clr($cpuF) . sprintf(" %5.1f%%", $cpuF) . $x
             . self::D . " {$cpuCores}c" . $x
-            . self::M . "  mem " . $x . $this->bar($memPct, 20) . $this->clr($memPct) . sprintf(" %5.1f%%", $memPct) . $x
+            . self::M . "  mem " . $x . $this->bar($memPct, 12) . $this->clr($memPct) . sprintf(" %5.1f%%", $memPct) . $x
             . self::D . " {$memUsedGB}/{$memTotalGB}G" . $x
-            . self::M . "  load " . $x . self::T . $loadAvg . $x
         );
         $linesUsed++;
 
@@ -214,8 +236,9 @@ Class Top extends Command {
                 }
                 $this->ln($output,
                     self::T . sprintf("%-18s", $this->trunc($fs, 18)) . $x
-                    . self::M . sprintf(" %6s %6s %6s", $p[1], $p[2], $p[3]) . $x
+                    . " " . $this->bar($pctN, 14)
                     . $pc . sprintf(" %5s", $p[4]) . $x
+                    . self::M . sprintf(" %5s/%s", $p[2], $p[1]) . $x
                     . self::D . "  {$mt}" . $x
                 );
                 $linesUsed++;
@@ -248,10 +271,13 @@ Class Top extends Command {
         $this->ln($output, self::D . sprintf("  %-6s %-6s %-7s %-10s %s", '%CPU', '%MEM', 'PID', 'USER', 'COMMAND') . $x);
         $linesUsed++;
 
-        $topCpu = Shell::run("ps -eo %cpu,%mem,pid,user,comm --sort=-%cpu 2>/dev/null | tail -n +2 | head -2");
-        if (!$topCpu) $topCpu = Shell::run("ps -eo %cpu,%mem,pid,user,comm -r 2>/dev/null | tail -n +2 | head -2");
-        $topMem = Shell::run("ps -eo %mem,%cpu,pid,user,comm --sort=-%mem 2>/dev/null | tail -n +2 | head -2");
-        if (!$topMem) $topMem = Shell::run("ps -eo %mem,%cpu,pid,user,comm -m 2>/dev/null | tail -n +2 | head -2");
+        if ($isMac) {
+            $topCpu = Shell::run("ps -eo %cpu,%mem,pid,user,comm -r 2>/dev/null | sed -n '2,3p'");
+            $topMem = Shell::run("ps -eo %mem,%cpu,pid,user,comm -m 2>/dev/null | sed -n '2,3p'");
+        } else {
+            $topCpu = Shell::run("ps -eo %cpu,%mem,pid,user,comm --sort=-%cpu 2>/dev/null | sed -n '2,3p'");
+            $topMem = Shell::run("ps -eo %mem,%cpu,pid,user,comm --sort=-%mem 2>/dev/null | sed -n '2,3p'");
+        }
 
         $shown = [];
         foreach ([$topCpu, $topMem] as $block) {
@@ -262,10 +288,11 @@ Class Top extends Command {
                 $key = $pp[2]; // PID
                 if (isset($shown[$key])) continue;
                 $shown[$key] = true;
+                $user = strlen($pp[3]) > 10 ? substr($pp[3], 0, 10) : $pp[3];
                 $comm = $this->trunc(implode(' ', array_slice($pp, 4)), 30);
                 $this->ln($output,
                     self::G . sprintf("  %-6s", $pp[0]) . $x
-                    . self::M . sprintf(" %-6s %-7s %-10s", $pp[1], $pp[2], $this->trunc($pp[3], 10)) . $x
+                    . self::M . sprintf(" %-6s %-7s %-10s", $pp[1], $pp[2], $user) . $x
                     . self::T . " {$comm}" . $x
                 );
                 $linesUsed++;
@@ -282,7 +309,7 @@ Class Top extends Command {
         $this->sec($output, 'LARGEST FILES', $pw); $linesUsed++;
         $dir = escapeshellarg($scanDir);
         $exc = "-not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '/proc/*' -not -path '/sys/*' -not -path '/dev/*'";
-        $fResult = Shell::run("find {$dir} -maxdepth 5 -type f {$exc} -exec ls -s {} + 2>/dev/null | sort -rn | head -{$fileCount}");
+        $fResult = Shell::run("find {$dir} -maxdepth 5 -type f {$exc} -exec ls -s {} + 2>/dev/null | sort -rn | sed -n '1,{$fileCount}p'");
         if ($fResult) {
             foreach (array_filter(array_map('trim', explode("\n", $fResult))) as $fl) {
                 if (preg_match('/^\s*(\d+)\s+(.+)$/', $fl, $fm)) {
@@ -304,9 +331,9 @@ Class Top extends Command {
         $isMac2 = Shell::getOS() === Shell::MAC;
         $exc2 = "-not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '/proc/*' -not -path '/sys/*' -not -path '/dev/*' -not -path '/run/*'";
         if ($isMac2) {
-            $rCmd = "find {$dir} -maxdepth 4 -type f {$exc2} -mtime -1 -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | head -{$fileCount}";
+            $rCmd = "find {$dir} -maxdepth 4 -type f {$exc2} -mtime -1 -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | sed -n '1,{$fileCount}p'";
         } else {
-            $rCmd = "find {$dir} -maxdepth 4 -type f {$exc2} -mtime -1 -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -{$fileCount}";
+            $rCmd = "find {$dir} -maxdepth 4 -type f {$exc2} -mtime -1 -printf '%T@ %p\n' 2>/dev/null | sort -rn | sed -n '1,{$fileCount}p'";
         }
         $rResult = Shell::run($rCmd);
         if ($rResult && trim($rResult) !== '') {
