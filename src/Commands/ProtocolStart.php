@@ -137,11 +137,32 @@ Class ProtocolStart extends Command {
         // ── Stage 2: Infrastructure provisioning ────────────────
         $runner->run('Infrastructure provisioning', function() use ($app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev) {
 
+            $configRemote = Json::read('configuration.remote', false, $repo_dir);
+            $configRepo = Config::repo($repo_dir);
+            $hasConfigRepo = $configRemote || is_dir($configRepo);
+
+            // If config repo has a remote but hasn't been cloned yet, clone it silently
+            if ($configRemote && !is_dir($configRepo)) {
+                $basedir = dirname($repo_dir) . DIRECTORY_SEPARATOR;
+                $foldername = basename($repo_dir) . '-config';
+                $configPath = $basedir . $foldername;
+                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configPath) . " 2>&1");
+
+                // Switch to environment branch if needed
+                if ($environment) {
+                    $currentBranch = Git::branch($configPath);
+                    if ($environment !== $currentBranch) {
+                        Shell::run("git -C " . escapeshellarg($configPath) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                    }
+                }
+            }
+
             if ($strategy === 'release') {
                 // Release-based deployment mode
-                if (Json::read('configuration.remote', false, $repo_dir)) {
-                    $app->find('config:init')->run($arrInput1, $nullOutput);
-                    $app->find('config:slave')->run($arrInput, $nullOutput);
+                if ($hasConfigRepo) {
+                    if ($configRemote) {
+                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                    }
                     $app->find('config:link')->run($arrInput, $nullOutput);
                 }
 
@@ -155,10 +176,8 @@ Class ProtocolStart extends Command {
                     $app->find('git:slave')->run($arrInput, $nullOutput);
                 }
 
-                if (Json::read('configuration.remote', false, $repo_dir)) {
-                    $app->find('config:init')->run($arrInput1, $nullOutput);
-
-                    if (!$isDev) {
+                if ($hasConfigRepo) {
+                    if (!$isDev && $configRemote) {
                         $app->find('config:slave')->run($arrInput, $nullOutput);
                     }
 

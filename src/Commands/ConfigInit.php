@@ -519,6 +519,8 @@ Class ConfigInit extends Command {
             $output->writeln("    <fg=green>✓</> Switched to branch: <fg=white;options=bold>{$environment}</>");
         }
 
+        // Ensure configuration.local is set so ProtocolStart can find the config repo
+        Json::write('configuration.local', '..' . DIRECTORY_SEPARATOR . $foldername, $repo_dir);
         Json::save($repo_dir);
 
         // Step 3: Secrets

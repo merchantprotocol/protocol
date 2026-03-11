@@ -499,8 +499,10 @@ README
             }
             Shell::run("git -C '$configrepo' branch -m $environment");
             $output->writeln("  <info>✓</info> Initialized config repo at: <comment>$configrepo</comment>");
-            Json::write('configuration.local', '..' . DIRECTORY_SEPARATOR . $foldername, $repo_dir);
         }
+
+        // Always write configuration.local so ProtocolStart can find the config repo
+        Json::write('configuration.local', '..' . DIRECTORY_SEPARATOR . $foldername, $repo_dir);
 
         // Setup remote URL
         $configRemoteUrl = $preExistingRemoteUrl ?: Git::RemoteUrl($configrepo);
@@ -510,9 +512,13 @@ README
 
             if ($configRemoteUrl) {
                 Shell::passthru("git -C '$configrepo' remote add origin '$configRemoteUrl'");
-                Json::write('configuration.remote', $configRemoteUrl, $repo_dir);
                 $output->writeln("  <info>✓</info> Added remote: <comment>$configRemoteUrl</comment>");
             }
+        }
+
+        // Always write configuration.remote if we have one, so ProtocolStart runs the config pipeline
+        if ($configRemoteUrl) {
+            Json::write('configuration.remote', $configRemoteUrl, $repo_dir);
         }
 
         // Create environment branch if needed
