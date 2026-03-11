@@ -56,33 +56,33 @@ while (true) {
             $bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
 
             if ($bluegreenEnabled) {
-                echo "[" . date('Y-m-d H:i:s') . "] Shadow mode: building slots/{$activeRelease}/\n";
+                echo "[" . date('Y-m-d H:i:s') . "] Shadow mode: building {$activeRelease}\n";
 
-                $slotDir = BlueGreen::getSlotDir($repo_dir, $activeRelease);
+                $gitRemote = BlueGreen::getGitRemote($repo_dir);
+                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeRelease);
 
-                // Initialize slot directory with git clone
-                $gitRemote = Git::RemoteUrl($repo_dir);
-                BlueGreen::initSlotDir($repo_dir, $activeRelease, $gitRemote);
+                // Initialize release directory with git clone
+                BlueGreen::initReleaseDir($repo_dir, $activeRelease, $gitRemote);
 
                 // Checkout version tag
-                if (!BlueGreen::checkoutVersion($slotDir, $activeRelease)) {
+                if (!BlueGreen::checkoutVersion($releaseDir, $activeRelease)) {
                     echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to checkout {$activeRelease}\n";
                     sleep($interval);
                     continue;
                 }
-                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease} in slots/{$activeRelease}/\n";
+                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
 
                 // Patch compose file for parameterized ports
-                BlueGreen::patchComposeFile($slotDir);
+                BlueGreen::patchComposeFile($releaseDir);
 
                 // Write shadow port config
-                BlueGreen::writeSlotEnv($slotDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
+                BlueGreen::writeReleaseEnv($releaseDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
 
                 // Build containers on shadow ports (slow step)
                 echo "[" . date('Y-m-d H:i:s') . "] Building containers on shadow ports...\n";
-                if (!BlueGreen::buildContainers($slotDir)) {
+                if (!BlueGreen::buildContainers($releaseDir)) {
                     echo "[" . date('Y-m-d H:i:s') . "] ERROR: Docker build failed for {$activeRelease}\n";
-                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
                     AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                     sleep($interval);
                     continue;
@@ -94,7 +94,7 @@ while (true) {
                 $healthy = BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $activeRelease);
 
                 if ($healthy) {
-                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
+                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
                     BlueGreen::setShadowVersion($repo_dir, $activeRelease);
                     AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
                     echo "[" . date('Y-m-d H:i:s') . "] Shadow {$activeRelease} ready\n";
@@ -115,7 +115,7 @@ while (true) {
                         echo "[" . date('Y-m-d H:i:s') . "] Shadow ready. Run 'protocol shadow:start' to promote.\n";
                     }
                 } else {
-                    BlueGreen::setSlotState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
                     AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                     echo "[" . date('Y-m-d H:i:s') . "] Health check FAILED for {$activeRelease}\n";
                 }

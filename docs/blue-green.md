@@ -1,6 +1,6 @@
 # Shadow Deployment
 
-Shadow deployment builds each release version into its own self-contained directory (`slots/v1.2.0/`) with a full git clone, config, and Docker containers named with the release tag. One version serves live traffic (active), the other builds in the background (shadow). When the shadow is verified, you swap the ports — a sub-second operation that gives you zero-downtime deploys with instant rollback.
+Shadow deployment builds each release version into its own self-contained directory with a full git clone, config, and Docker containers named with the release tag. One version serves live traffic (active), the other builds in the background (shadow). When the shadow is verified, you swap the ports — a sub-second operation that gives you zero-downtime deploys with instant rollback.
 
 ## Why Shadow Deployment?
 
@@ -33,7 +33,7 @@ Shadow deployment solves all three:
                └────────┘      └────────┘
 
 1. v1.2.0 serves traffic on port 80
-2. v1.3.0 builds in slots/v1.3.0/ on port 8080 (nobody sees it)
+2. v1.3.0 builds in myapp-releases/v1.3.0/ on port 8080
 3. Health checks pass on :8080
 4. Swap: v1.3.0 gets :80, v1.2.0 goes to standby
 5. v1.3.0 is now serving. v1.2.0 is available for instant rollback.
@@ -52,7 +52,17 @@ Each version gets its own Docker containers named with the release tag (e.g., `m
 protocol shadow:init
 ```
 
-An interactive wizard walks you through configuration — auto-promote preferences, health checks. This enables `bluegreen.enabled: true` in protocol.json.
+An interactive wizard walks you through configuration — releases directory, auto-promote preferences, health checks. This enables `bluegreen.enabled: true` in protocol.json.
+
+Or, for a fresh production server without an existing clone:
+
+```bash
+mkdir /opt/myapp && cd /opt/myapp
+protocol init
+# Select: "Configure as a shadow deployment node"
+# Enter your GitHub repo URL
+# Choose your releases directory
+```
 
 ### 2. Build a Release in the Shadow
 
@@ -60,8 +70,8 @@ An interactive wizard walks you through configuration — auto-promote preferenc
 protocol shadow:build v1.3.0
 ```
 
-This creates a version-named slot:
-1. Clones your repo into `slots/v1.3.0/`
+This creates a version-named release directory:
+1. Clones your repo into `<project>-releases/v1.3.0/`
 2. Checks out the `v1.3.0` tag
 3. Patches docker-compose.yml for parameterized ports
 4. Builds and starts containers on shadow ports (8080/8443)
@@ -97,10 +107,10 @@ Swaps back to the previous version. Same ~1 second operation — the standby ver
 | Command | Description | Speed |
 |---|---|---|
 | `shadow:init` | Configure shadow deployment (interactive wizard) | Once |
-| `shadow:build <version>` | Build a release in a version-named slot | Slow (minutes) |
+| `shadow:build <version>` | Build a release in a version-named directory | Slow (minutes) |
 | `shadow:start` | Promote shadow to production (swap ports) | Fast (~1s) |
 | `shadow:rollback` | Revert to previous version | Fast (~1s) |
-| `shadow:status` | Show all version slots, states, and health | Instant |
+| `shadow:status` | Show all releases, states, and health | Instant |
 
 ### shadow:init
 
@@ -108,9 +118,9 @@ Swaps back to the previous version. Same ~1 second operation — the standby ver
 protocol shadow:init
 ```
 
-Interactive wizard that configures shadow deployment in protocol.json. Sets auto-promote preferences and health checks. Run this once before using other shadow commands.
+Interactive wizard that configures shadow deployment in protocol.json. Sets the releases directory path, auto-promote preferences, and health checks. Run this once before using other shadow commands.
 
-Version slots are created automatically when you run `shadow:build`.
+Release directories are created automatically when you run `shadow:build`.
 
 ### shadow:build
 
@@ -118,14 +128,14 @@ Version slots are created automatically when you run `shadow:build`.
 protocol shadow:build <version> [--skip-health-check]
 ```
 
-Creates `slots/<version>/` with a full git clone, checks out the tag, and builds Docker containers on shadow ports (8080/8443).
+Creates `<project>-releases/<version>/` with a full git clone, checks out the tag, and builds Docker containers on shadow ports (8080/8443).
 
 **Options:**
 - `--skip-health-check` — Skip post-build health checks
 
 **What it does:**
 1. Validates the version tag exists
-2. Clones the repo into `slots/<version>/`
+2. Clones the repo into the releases directory
 3. Checks out the tag
 4. Patches docker-compose.yml for parameterized ports
 5. Builds and starts containers on shadow ports
@@ -165,7 +175,7 @@ Same port-swap mechanism as `shadow:start` — approximately 1 second.
 protocol shadow:status [--json]
 ```
 
-Displays the current state of all version slots:
+Displays the current state of all release versions:
 
 ```
 Shadow Deployment Status
@@ -175,6 +185,7 @@ Shadow Deployment Status
   Previous: v1.1.0 (rollback available)
   Shadow:   v1.3.0 (ready to promote)
   Promoted: 2026-03-10T21:00:00+00:00
+  Releases: /opt/myapp-releases/
 
       Version          Port     Status       Running
       -------          ----     ------       -------
@@ -196,6 +207,8 @@ Use `--json` for machine-readable output.
 {
     "bluegreen": {
         "enabled": true,
+        "releases_dir": "myapp-releases",
+        "git_remote": "git@github.com:yourorg/yourapp.git",
         "auto_promote": false,
         "health_checks": [
             {"type": "http", "path": "/health", "expect_status": 200},
@@ -209,6 +222,8 @@ Use `--json` for machine-readable output.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `false` | Enable shadow deployment mode |
+| `releases_dir` | string | `<project>-releases` | Releases directory (relative to parent, or absolute path) |
+| `git_remote` | string | repo's remote | Git URL to clone releases from |
 | `auto_promote` | boolean | `false` | Automatically promote after successful shadow build |
 | `health_checks` | array | `[]` | Health checks to run after build and promote |
 
@@ -252,7 +267,7 @@ Shadow deployment state is tracked in `protocol.lock` (gitignored):
         "previous_version": "v1.1.0",
         "shadow_version": "v1.3.0",
         "promoted_at": "2026-03-10T21:00:00+00:00",
-        "slots": {
+        "releases": {
             "v1.2.0": {
                 "version": "v1.2.0",
                 "port": 80,
@@ -273,7 +288,7 @@ Shadow deployment state is tracked in `protocol.lock` (gitignored):
 }
 ```
 
-**Slot statuses:**
+**Release statuses:**
 
 | Status | Meaning |
 |---|---|
@@ -287,7 +302,7 @@ Shadow deployment state is tracked in `protocol.lock` (gitignored):
 When shadow deployment is enabled, the release watcher daemon (`protocol start` → `deploy:slave`) automatically uses shadow builds instead of in-place deployments:
 
 1. Watcher detects a new release pointer on GitHub
-2. Creates `slots/<version>/` and builds the release (shadow ports)
+2. Clones and builds the release in a new directory (shadow ports)
 3. Runs health checks
 4. If `auto_promote: true` — automatically swaps to production
 5. If `auto_promote: false` — logs "Shadow ready" and waits for manual `shadow:start`
@@ -304,26 +319,30 @@ The watcher handles the shadow mechanics automatically. The only difference is w
 ## Directory Structure
 
 ```
-your-project/
-├── protocol.json          ← bluegreen config lives here
-├── protocol.lock          ← runtime state (gitignored)
-├── docker-compose.yml     ← original (not used in shadow mode)
-├── slots/
-│   ├── v1.2.0/
-│   │   ├── .git/
-│   │   ├── .env.bluegreen    ← port config (auto-generated)
-│   │   ├── docker-compose.yml ← patched with parameterized ports
-│   │   └── ...app files...
-│   ├── v1.3.0/
-│   │   ├── .git/
-│   │   ├── .env.bluegreen
-│   │   ├── docker-compose.yml
-│   │   └── ...app files...
-│   └── v1.1.0/
-│       └── ...standby version...
+/opt/
+├── myapp/                     ← project directory (protocol.json lives here)
+│   ├── protocol.json          ← bluegreen config
+│   ├── protocol.lock          ← runtime state (gitignored)
+│   └── docker-compose.yml     ← original (not used in shadow mode)
+│
+└── myapp-releases/            ← sibling releases directory
+    ├── v1.2.0/
+    │   ├── .git/
+    │   ├── .env.bluegreen     ← port config (auto-generated)
+    │   ├── docker-compose.yml ← patched with parameterized ports
+    │   └── ...app files...
+    ├── v1.3.0/
+    │   ├── .git/
+    │   ├── .env.bluegreen
+    │   ├── docker-compose.yml
+    │   └── ...app files...
+    └── v1.1.0/
+        └── ...standby version...
 ```
 
-Each version slot is a full, independent git clone. They share nothing — different containers, different port mappings, different checked-out versions. Docker containers are named with the version tag (e.g., `myapp-v1.2.0`) so they never collide.
+Each release is a full, independent git clone. They share nothing — different containers, different port mappings, different checked-out versions. Docker containers are named with the version tag (e.g., `myapp-v1.2.0`) so they never collide.
+
+The releases directory is a sibling to your project by default (`<project>-releases/`), but you can configure any path in protocol.json.
 
 ## Ports
 
@@ -338,12 +357,22 @@ The shadow ports (8080/8443) let you inspect and test the shadow build before pr
 
 ## Workflow Examples
 
-### First-Time Setup
+### First-Time Setup (Existing Project)
 
 ```bash
 protocol shadow:init             # Configure shadow deployment (wizard)
 protocol shadow:build v1.0.0     # Build initial version
 protocol shadow:start            # Promote to production
+```
+
+### First-Time Setup (Fresh Server)
+
+```bash
+mkdir /opt/myapp && cd /opt/myapp
+protocol init                    # Select "Configure as a shadow deployment node"
+protocol shadow:build v1.0.0    # Build initial version
+protocol shadow:start            # Promote to production
+protocol start                   # Start watcher daemon
 ```
 
 ### Deploying a New Version
@@ -385,7 +414,7 @@ protocol deploy:push v1.1.0
 
 # On production (automatic):
 # 1. Watcher detects v1.1.0
-# 2. Creates slots/v1.1.0/ and builds
+# 2. Clones into myapp-releases/v1.1.0/ and builds
 # 3. Health checks pass
 # 4. Auto-promotes to production
 # 5. Old version on standby for rollback
@@ -405,9 +434,9 @@ Shadow deployment is **opt-in** and fully backward compatible:
 All shadow operations are logged to `~/.protocol/deployments.log`:
 
 ```
-2026-03-10T21:00:00+00:00 SHADOW repo='/opt/app' action='build' slot='v1.3.0' version='v1.3.0' status='success' user='deploy'
-2026-03-10T21:05:00+00:00 SHADOW repo='/opt/app' action='promote' slot='v1.3.0' version='v1.3.0' status='success' user='deploy'
-2026-03-10T21:05:00+00:00 DEPLOY repo='/opt/app' from='v1.2.0' to='v1.3.0' status='success' scope='shadow-promote' user='deploy'
+2026-03-10T21:00:00+00:00 SHADOW repo='/opt/myapp' action='build' slot='v1.3.0' version='v1.3.0' status='success' user='deploy'
+2026-03-10T21:05:00+00:00 SHADOW repo='/opt/myapp' action='promote' slot='v1.3.0' version='v1.3.0' status='success' user='deploy'
+2026-03-10T21:05:00+00:00 DEPLOY repo='/opt/myapp' from='v1.2.0' to='v1.3.0' status='success' scope='shadow-promote' user='deploy'
 ```
 
 SOC 2 Type II compliant — every build, promotion, and rollback is tracked with timestamps, versions, and user identity.

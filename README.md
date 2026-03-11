@@ -157,11 +157,11 @@ Rollback is instant — `protocol deploy:rollback` sets the pointer back to the 
 
 ### Shadow Deploys (Zero Downtime)
 
-For applications with long build times, enable shadow deployment. Each version gets its own self-contained directory (`slots/v1.3.0/`) with a full git clone, config, and Docker containers named with the release tag. Build in the background, swap ports in under a second.
+For applications with long build times, enable shadow deployment. Each version gets its own self-contained sibling directory (`<project>-releases/v1.3.0/`) with a full git clone, config, and Docker containers named with the release tag. Build in the background, swap ports in under a second.
 
 ```bash
 protocol shadow:init              # Configure shadow deployment (wizard)
-protocol shadow:build v1.3.0     # Build in slots/v1.3.0/ on shadow ports
+protocol shadow:build v1.3.0     # Clone + build on shadow ports
 protocol shadow:start             # Swap to production (~1 second)
 protocol shadow:rollback          # Instant rollback if needed
 ```
