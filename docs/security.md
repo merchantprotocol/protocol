@@ -1,228 +1,230 @@
-# Security & SOC2 Type II Compliance
+# Security & SOC2 Compliance
 
-This document covers security considerations for using Protocol in environments that require SOC2 Type II compliance. It identifies current gaps, provides hardening guidance, and maps Protocol's capabilities to SOC2 trust service criteria.
+If you're running Protocol in a production environment — especially one that needs to pass a SOC2 audit — this page covers what Protocol gives you, what you need to add, and how to lock everything down.
 
-## SOC2 Type II Overview
+## What Protocol Already Handles
 
-SOC2 Type II evaluates an organization's controls over time across five trust service criteria:
+Protocol was built with security in mind. Here's what you get out of the box:
 
-1. **Security** — Protection against unauthorized access
-2. **Availability** — System uptime and operational reliability
-3. **Processing Integrity** — Accurate and complete data processing
-4. **Confidentiality** — Protection of confidential information
-5. **Privacy** — Personal information handling
+### Encrypted Secrets
 
-Protocol touches Security, Availability, Confidentiality, and Processing Integrity through its deployment and configuration management functions.
+Your `.env` files are encrypted with **AES-256-GCM** before they touch git. The same encryption standard used by banks, governments, and every serious security system. The encryption key stays on your machines — only gibberish travels through repositories.
 
-## How Protocol Maps to SOC2 Controls
+### Audit Trail
 
-### CC6: Logical and Physical Access Controls
+Every deployment writes a timestamped log entry: what version was running before, what version is running now, when it happened, and whether it succeeded. View it with `protocol deploy:log`.
 
-#### What Protocol Provides
+### Immutable Deployments
 
-- **SSH Key Management** — `protocol key:generate` creates ed25519 SSH keys for deployment, avoiding password-based authentication
-- **Separate Config Repositories** — Secrets and configuration files are stored in a separate, access-controlled repository
-- **Environment Isolation** — Each environment (production, staging, dev) uses a separate config branch, preventing cross-environment credential leakage
+Release mode deploys specific git tags. Tags are immutable — `v1.2.0` always means the same code. You can't accidentally deploy "whatever's on master." And because tags don't change, rolling back means deploying a known-good version, not reverting commits.
 
-#### Current Gaps and Recommendations
+### Environment Isolation
 
-| Gap | Risk | Recommendation |
-|---|---|---|
-| `protocol.json` can store Docker registry passwords in plaintext | Credential exposure if repo is compromised | Use environment variables or a secrets manager (Vault, AWS Secrets Manager) instead of storing credentials in `protocol.json` |
-| `docker:push` passes passwords via `echo \| docker login --password-stdin` | Password visible in process list briefly | Use `docker login` with credential helpers or CI/CD-managed tokens |
-| No audit logging of who ran what commands | Cannot prove access controls are enforced | Implement command execution logging (see Audit Logging section below) |
-| SSH key generated with hardcoded comment `worker@ec2.com` | Key attribution is unclear | Generate keys with identifiable comments tied to the operator or service account |
-| Config files may contain secrets symlinked into the app directory | Secrets accessible to application runtime | Use runtime secret injection (environment variables) where possible |
+Each environment (production, staging, dev) has its own branch in the config repo with its own secrets. A developer's laptop never touches production credentials. The environments share nothing except the encryption key.
 
-### CC7: System Operations / Change Management
+### SSH Key Management
 
-#### What Protocol Provides
+`protocol key:generate` creates ed25519 SSH keys for deployment, so no passwords are used for git access.
 
-- **Git-Based Deployment** — All code changes flow through git, providing a complete audit trail of what was deployed and when
-- **Git-Based Configuration** — Config changes are versioned in git, enabling rollback and change history
-- **Slave Mode** — Automated deployment ensures consistency across nodes; manual changes to production are overwritten
-- **`protocol.lock`** — Runtime state file tracks active PIDs, symlinks, and environment
+---
 
-#### Current Gaps and Recommendations
+## SOC2 Type II — What Auditors Want to See
 
-| Gap | Risk | Recommendation |
-|---|---|---|
-| `git:pull` does a hard reset — no review gate | Untested code can reach production immediately | Add a pre-pull hook that checks for required CI status checks or approval tags |
-| No deployment approval workflow | Changes bypass change management | Integrate with GitHub branch protection rules; only deploy from branches with required reviews |
-| No deployment notifications | Team unaware of production changes | Add webhook or notification hooks (Slack, email) on `change_pulled` events |
-| Config slave mode auto-pulls config changes | Config changes bypass review | Require pull request reviews on config repo branches, especially production |
-| No rollback mechanism beyond git revert | Recovery requires manual git operations | Add `protocol rollback` command that reverts to a previous known-good commit |
+SOC2 Type II evaluates your controls over time. Here's how Protocol maps to the things auditors care about:
 
-### CC8: Change Management
+### Access Controls (CC6)
 
-#### What Protocol Provides
+**What you can show them:**
 
-- **`protocol.json` versioned in git** — Infrastructure-as-code pattern; deployment configuration is tracked
-- **`release:changelog`** — Generates changelogs from git history for change documentation
-- **Project Initializers** — Standardized project setup reduces configuration drift
+- Secrets are encrypted at rest in git — nobody can read `.env` files without the key
+- Each environment is isolated in its own config branch
+- SSH keys are used for all git operations — no shared passwords
+- Encryption keys have strict file permissions (`0600`) and live outside any repository
 
-#### Current Gaps and Recommendations
+**What you should add:**
 
-| Gap | Risk | Recommendation |
-|---|---|---|
-| No environment promotion workflow | Changes may skip staging | Add `protocol promote` command that moves a tested config from staging to production |
-| No config diff before applying | Unknown what will change | Add `protocol config:diff` command that shows differences before switching environments |
-| `protocol.json` schema is not validated | Invalid config can cause runtime failures | Add JSON schema validation on load |
+- Use GitHub branch protection to restrict who can push to the `production` config branch
+- Require pull request reviews before config changes reach production
+- Use GitHub's CODEOWNERS file to require specific approvers for sensitive files
 
-### A1: Availability
+### Change Management (CC7/CC8)
 
-#### What Protocol Provides
+**What you can show them:**
 
-- **Crontab Restart** — `@reboot` cron entry ensures Protocol restarts after server reboot (`protocol cron:add`)
-- **Process Monitoring** — `protocol status` shows whether slave watchers and containers are running
-- **Docker Compose Integration** — Container orchestration with automatic restart
+- All code changes flow through git — every change has an author, timestamp, and commit message
+- All config changes flow through git — same audit trail
+- Deployments use explicit version tags — creating a release is a deliberate approval decision
+- The audit log tracks every deployment with before/after versions
 
-#### Current Gaps and Recommendations
+**What you should add:**
 
-| Gap | Risk | Recommendation |
-|---|---|---|
-| Slave mode polling is the only health check | No alerting if slave mode dies silently | Add health check endpoint or external monitoring integration |
-| No graceful degradation | If config repo is unreachable, slave mode stops | Add retry logic with exponential backoff and alerting on repeated failures |
-| `LockableTrait` prevents concurrent runs but has no timeout | Stale locks can prevent restarts | Add lock timeout/expiry mechanism |
-| PID-based process tracking can be stale | PIDs get recycled by the OS | Verify process name matches, not just PID existence |
+- Enable required status checks on your main branch (CI must pass before merge)
+- Use GitHub's required reviewers feature on production branches
+- Set up deployment notifications (Slack, email, PagerDuty) so the team knows when production changes
 
-### C1: Confidentiality
+### Availability (A1)
 
-#### What Protocol Provides
+**What you can show them:**
 
-- **Separate Config Repository** — Secrets live outside the application codebase
-- **Branch-Based Environment Isolation** — Production secrets are on a different branch than development
-- **`.gitignore` Integration** — `config:mv` automatically adds moved files to `.gitignore`
+- `protocol cron:add` ensures Protocol restarts after server reboots
+- `protocol status` gives a health overview of all running processes
+- Docker Compose handles container restart policies
 
-#### Current Gaps and Recommendations
+**What you should add:**
 
-| Gap | Risk | Recommendation |
-|---|---|---|
-| No encryption at rest for config files | Secrets readable if server is compromised | Use encrypted config files or a secrets manager |
-| Config repo may be cloned to developer machines | Production secrets on developer laptops | Use branch protection to prevent developers from checking out production branches |
-| No secret rotation support | Stale credentials increase breach impact | Document secret rotation procedures; consider integration with secrets managers |
-| Background process log may contain sensitive output | Log files expose operational details | Ensure log file permissions are restricted; rotate and purge logs |
+- External monitoring (Uptime Robot, Datadog, etc.) that alerts when nodes go down
+- Health check endpoints in your application that monitoring services can ping
+- Load balancing across multiple nodes so one node going down doesn't take everything offline
 
-## Known Security Vulnerabilities
+### Confidentiality (C1)
 
-The following issues exist in the current codebase and should be addressed before using Protocol in a SOC2-audited environment.
+**What you can show them:**
 
-### Command Injection (Critical)
+- Secrets are encrypted with AES-256-GCM before being stored anywhere
+- Decryption keys have strict filesystem permissions and never enter git
+- Plaintext secrets are gitignored and deleted after encryption
+- Each machine decrypts independently — secrets don't travel in plaintext over the network
 
-Several helpers pass unsanitized input directly into shell commands:
+**What you should add:**
 
-**Affected Files:**
-- `src/Helpers/Shell.php` — `run()` and `background()` execute unescaped `$command` parameters
-- `src/Helpers/Git.php` — `commit()` passes `$message` directly into shell: `git commit -m '$message'`
-- `src/Helpers/Crontab.php` — `appendCrontab()` injects `$toappend` into shell pipe without escaping
+- Document your key rotation schedule (how often you change the encryption key)
+- Keep a backup of your encryption key in a password manager or vault
+- Restrict which team members have access to the encryption key
 
-**Impact:** An attacker who can influence command arguments, commit messages, branch names, or file paths could execute arbitrary system commands.
+---
 
-**Remediation:**
-- Use `escapeshellarg()` for all variables interpolated into shell commands
-- Use `ProcessBuilder` or `symfony/process` instead of raw `exec()`/`passthru()`
-- Validate and sanitize all user-provided inputs (branch names, file paths, environment names)
+## The Hardening Checklist
 
-### Path Traversal (Medium)
+Before running Protocol in a SOC2-audited environment, go through this list:
 
-- `Helpers\Config::repo()` checks for `..` in paths but the validation is insufficient
-- File operations in `config:mv`, `config:cp` accept relative paths without boundary checking
+### Must Do
 
-**Remediation:**
-- Validate that resolved paths stay within expected directories
-- Use `realpath()` and verify the result starts with the expected base path
-
-### Debug Code in Production (Low)
-
-- `src/Helpers/Release.php` contains `var_dump($releases); die;`
-- `src/Helpers/Shell.php` `getProcess()` contains `var_dump()` with no return
-
-**Remediation:** Remove all debug statements.
-
-### Credential Exposure (Medium)
-
-- `protocol.json` can store Docker registry credentials in plaintext
-- `docker:push` passes password via shell pipe
-- SSH key generation uses a hardcoded, non-identifying email
-
-**Remediation:**
-- Never store credentials in `protocol.json` — use environment variables or credential helpers
-- Use Docker credential stores
-- Generate SSH keys with identifiable metadata
-
-## Audit Logging Recommendations
-
-For SOC2 Type II compliance, you need evidence that controls operate effectively over time. Protocol currently has no audit logging.
-
-### Recommended Implementation
-
-1. **Command Execution Log** — Log every Protocol command execution with timestamp, user, command, arguments, and outcome to a dedicated log file
-2. **Deployment Log** — Record every `git:pull` and `config:switch` with before/after commit hashes
-3. **Access Log** — Track `config:link`, `config:unlink`, and environment switches
-4. **Error Log** — Capture all command failures with context
-
-### Log Format Recommendation
-
-```
-[2024-01-15T10:30:00Z] user=deploy command="protocol start" dir=/opt/app result=success
-[2024-01-15T10:30:01Z] user=deploy command="git:pull" dir=/opt/app before=abc123 after=def456 result=success
-[2024-01-15T10:30:05Z] user=deploy command="config:link" dir=/opt/app env=production files=3 result=success
-```
-
-### Log Retention
-
-SOC2 Type II audits typically cover a 6-12 month period. Retain audit logs for at least 12 months. Consider forwarding to a centralized logging system (CloudWatch, Datadog, Splunk) that provides tamper-evident storage.
-
-## Hardening Checklist
-
-Before deploying Protocol in a SOC2-compliant environment:
-
-- [ ] Remove all credentials from `protocol.json` — use environment variables or secrets manager
-- [ ] Ensure config repositories are private with restricted access
-- [ ] Enable branch protection on production branches (both code and config repos)
+- [ ] Set `deployment.strategy` to `"release"` in `protocol.json` — branch mode has no audit trail
+- [ ] Set `deployment.secrets` to `"encrypted"` — never store plaintext secrets in git
+- [ ] Enable GitHub branch protection on your main branch and production config branch
 - [ ] Require pull request reviews before merging to production
-- [ ] Set up deployment notifications (Slack, email, PagerDuty)
-- [ ] Implement audit logging for all Protocol commands
-- [ ] Run `security:trojansearch` as part of CI/CD pipeline
-- [ ] Restrict `protocol.lock` and log file permissions (`chmod 600`)
-- [ ] Use SSH key authentication exclusively (no password-based git access)
-- [ ] Set up monitoring and alerting for slave mode process health
-- [ ] Document incident response procedures for deployment failures
-- [ ] Implement secret rotation schedule
-- [ ] Review and fix command injection vulnerabilities in Shell, Git, and Crontab helpers
-- [ ] Remove debug code (`var_dump`, `die`) from production
-- [ ] Set up log forwarding to a centralized, tamper-evident logging system
-- [ ] Document the deployment process in a runbook for auditors
+- [ ] Set up `protocol cron:add` on every node for reboot recovery
+- [ ] Keep your encryption key in a password manager as a backup
+- [ ] Restrict `~/.protocol/key` permissions to `0600` (Protocol does this by default)
 
-## Recommended Architecture for SOC2 Environments
+### Should Do
+
+- [ ] Set up deployment notifications (Slack webhook, email) when releases are pushed
+- [ ] Set up external health monitoring for each production node
+- [ ] Document your deployment process in a runbook
+- [ ] Document your key rotation procedure
+- [ ] Forward audit logs (`~/.protocol/deployments.log`) to a centralized logging system (CloudWatch, Datadog, Splunk)
+- [ ] Run `protocol status` checks as part of your monitoring
+
+### Nice to Have
+
+- [ ] Use `security:trojansearch` in your CI pipeline to scan for suspicious code patterns
+- [ ] Set up `security:changedfiles` alerts to review files modified in the last 15 days
+- [ ] Use GitHub's CODEOWNERS feature for sensitive files
+
+---
+
+## How Secrets Stay Safe
+
+Here's the full journey of a secret, from your keyboard to a running container:
 
 ```
-┌──────────────────────────────────────────────────┐
-│                  GitHub / GitLab                  │
-│                                                  │
-│  ┌──────────┐    ┌──────────────┐               │
-│  │ App Repo │    │ Config Repo  │               │
-│  │ (private)│    │ (private)    │               │
-│  │          │    │              │               │
-│  │ Branch   │    │ Branch       │               │
-│  │ protect  │    │ protection   │               │
-│  │ + CI     │    │ + reviews    │               │
-│  └────┬─────┘    └──────┬───────┘               │
-│       │                 │                        │
-└───────┼─────────────────┼────────────────────────┘
-        │                 │
-        ▼                 ▼
-┌──────────────────────────────────────────────────┐
-│              Production Node                     │
-│                                                  │
-│  protocol start                                  │
-│  ├── git:slave (polls app repo)                  │
-│  ├── config:slave (polls config repo)            │
-│  ├── Audit Logger (all commands logged)          │
-│  └── Docker containers                           │
-│                                                  │
-│  Secrets: injected via env vars / secrets mgr    │
-│  Logs: forwarded to centralized system           │
-│  Monitoring: external health checks              │
-└──────────────────────────────────────────────────┘
+Your Machine                    Git                         Production Node
+─────────────                   ───                         ───────────────
+1. You edit .env
+2. protocol config:init
+   → Encrypt secrets
+3. .env → AES-256-GCM
+   → .env.enc                  4. .env.enc committed
+   → plaintext deleted             and pushed
+   → .gitignore updated                                    5. protocol start
+                                                              → pulls config repo
+                                                              → reads ~/.protocol/key
+                                                              → decrypts .env.enc
+                                                              → .env exists in memory
+                                                              → passed to Docker
+                                                              → containers run with secrets
+                                                              → audit log written
 ```
+
+At no point does a plaintext secret travel through git. At no point is a plaintext secret stored in a shared location. The encrypted file is useless without the key, and the key never leaves the machines it's installed on.
+
+### Encryption Details
+
+- **Algorithm:** AES-256-GCM (authenticated encryption — tamper-proof)
+- **Key size:** 256-bit (64-character hex string)
+- **Nonce:** Random 12 bytes per file (prevents identical plaintext from producing identical ciphertext)
+- **Output format:** `base64(nonce + auth_tag + ciphertext)`
+- **Implementation:** PHP's built-in `openssl_encrypt()` — no external dependencies
+
+---
+
+## The Deployment Audit Log
+
+Every deployment action writes to `~/.protocol/deployments.log`:
+
+```
+2024-01-15T10:30:01Z deploy repo=/opt/myapp from=v1.1.0 to=v1.2.0 status=success
+2024-01-15T10:30:05Z config repo=/opt/myapp env=production files=3 status=success
+2024-01-15T10:30:08Z docker repo=/opt/myapp image=registry/app:latest action=rebuild status=success
+2024-03-01T14:22:00Z rollback repo=/opt/myapp from=v1.3.0 to=v1.2.0 status=success
+```
+
+**What gets logged:**
+- Every deployment (version transitions)
+- Every rollback
+- Config changes
+- Docker rebuilds
+
+**What you should do with it:**
+- Keep logs for at least 12 months (SOC2 audits typically cover 6-12 months)
+- Forward to a centralized, tamper-evident logging system
+- Set up alerts on `status=failure` entries
+
+View your logs anytime:
+
+```bash
+protocol deploy:log
+```
+
+---
+
+## Key Rotation
+
+When you need to change your encryption key (and you should, periodically):
+
+```bash
+# 1. Decrypt everything with the old key
+protocol config:init    # → choose "Decrypt secrets"
+
+# 2. Generate a new key
+protocol secrets:setup
+
+# 3. Re-encrypt with the new key
+protocol config:init    # → choose "Encrypt secrets"
+
+# 4. Push encrypted files
+protocol config:save
+
+# 5. Distribute the new key to all nodes
+protocol secrets:key --scp=deploy@prod-server-1
+protocol secrets:key --scp=deploy@prod-server-2
+
+# 6. Restart nodes to pick up the new key
+# (on each node)
+protocol stop && protocol start
+```
+
+---
+
+## Quick Reference
+
+| Question | Answer |
+|---|---|
+| What encryption does Protocol use? | AES-256-GCM (same as banks and governments) |
+| Where is the key stored? | `~/.protocol/key` on each machine, with `0600` permissions |
+| Can I recover secrets without the key? | No. Keep a backup in a password manager. |
+| Are secrets stored in git? | Only the encrypted versions. Plaintext is gitignored and deleted. |
+| Does each environment use a different key? | No. Same key, different secrets (on different config branches). |
+| How do I transfer the key to production? | `protocol secrets:key --scp=user@host` or `protocol secrets:key --push` (GitHub) |
+| Where is the audit log? | `~/.protocol/deployments.log` — view with `protocol deploy:log` |

@@ -1,651 +1,333 @@
-# Command Reference
+# Commands
 
-Complete reference for all Protocol CLI commands. Run `protocol <command> --help` for usage details on any command.
+Everything Protocol can do, organized by what you're trying to accomplish. Run `protocol <command> --help` on any command for the full details.
 
-## Core Commands
+## The Essentials
 
-### `init`
+These are the commands you'll use every day.
 
-Interactive setup wizard for new or existing projects.
+### `protocol init`
 
-```
-protocol init [environment] [--dir=PATH] [--with-config]
-```
+Set up a new project or update an existing one. A wizard walks you through it.
 
-| Argument/Option | Description |
-|---|---|
-| `environment` | (Optional) Environment name |
-| `--dir`, `-d` | Directory path (defaults to current git repo root) |
-| `--with-config`, `-c` | Also initialize the configuration repository |
-
-**What it does:**
-
-1. **Compatibility check** — Verifies git, docker-compose, GitHub CLI availability
-2. **Existing project detection** — If `protocol.json` exists, offers update/strategy/secrets/config options
-3. **Project type selection** — Currently PHP 8.1 available
-4. **Deployment strategy** — Choose release-based (recommended) or branch-based (legacy)
-5. **Secrets management** — Optionally set up AES-256-GCM encrypted secrets
-6. **Configuration repository** — Optionally initialize a config repo
-
-Safe to re-run on existing projects — detects current state and offers updates.
-
----
-
-### `start`
-
-Starts a node — deploys the active release (or pulls latest branch in dev mode), links config, injects secrets, boots Docker containers.
-
-```
-protocol start [environment] [--dir=PATH]
-```
-
-**Release mode** (`deployment.strategy: "release"`):
-
-1. `config:init` — Ensures config repo is initialized
-2. `config:link` — Symlinks non-secret config files
-3. `config:slave` — Starts config repo watcher
-4. `deploy:slave` — Starts release watcher (polls GitHub variable)
-5. Decrypts secrets + `docker:compose:rebuild` — Rebuilds containers with injected secrets
-6. `composer:install` — Installs PHP dependencies
-7. `cron:add` — Ensures reboot recovery
-8. `status` — Displays system state
-
-**Branch mode** (`deployment.strategy: "branch"`, local dev):
-
-1. `git:pull` — Force-pulls latest code
-2. `config:init` — Ensures config repo is initialized
-3. `config:link` — Symlinks config files (including plaintext `.env`)
-4. `config:slave` — Starts config repo watcher
-5. `git:slave` — Starts branch watcher
-6. `docker:compose:rebuild` — Rebuilds containers
-7. `composer:install` — Installs PHP dependencies
-8. `status` — Displays system state
-
----
-
-### `stop`
-
-Stops all running watchers and Docker containers.
-
-```
-protocol stop [--dir=PATH]
-```
-
-1. Stops release watcher OR git slave (depending on strategy)
-2. Stops config slave
-3. Unlinks config symlinks
-4. Brings down Docker containers (`docker:compose:down`)
-5. Removes crontab restart entry (`cron:remove`)
-
----
-
-### `restart`
-
-Stops and re-starts a node. Designed for use in crontab `@reboot` entries.
-
-```
-protocol restart [local] [--dir=PATH]
-```
-
-Uses `LockableTrait` to prevent concurrent restarts.
-
-**Crontab usage:**
-```
-@reboot /path/to/protocol restart /path/to/repo
-```
-
----
-
-### `status`
-
-Displays a system health overview.
-
-```
-protocol status [--dir=PATH]
-```
-
-**Output includes:**
-
-| Field | Description |
-|---|---|
-| Deployment Strategy | `release` or `branch` |
-| Current Release | Deployed version tag (release mode) |
-| Last Deployed | Timestamp of last deployment |
-| Release Watcher | Running/stopped + PID (release mode) |
-| Git Slave | Running/stopped + PID (branch mode) |
-| Config Slave | Running/stopped + PID |
-| Secrets Mode | `encrypted` or `file` |
-| Decryption Key | Present/missing (encrypted mode) |
-| Environment | Current environment name |
-| Config Branch | Active branch in the config repo |
-| Docker Services | List of running containers |
-| Crontab | Whether restart cron entry exists |
-
----
-
-### `docker:exec`
-
-Opens a shell or runs a command inside the Docker container.
-
-```
-protocol docker:exec [cmd] [--dir=PATH]
-```
-
-| Argument | Description |
-|---|---|
-| `cmd` | (Optional) Command to run, defaults to `/bin/bash` |
-
----
-
-### `migrate`
-
-Interactive migration wizard for converting branch-based projects to release-based deployment.
-
-```
-protocol migrate [--secrets-only] [--dir=PATH]
-```
-
-| Option | Description |
-|---|---|
-| `--secrets-only` | Only set up encrypted secrets (skip strategy migration) |
-
-**Migration steps:**
-
-1. Detects current deployment strategy
-2. Sets `deployment.strategy` to `release`
-3. Creates initial release tag from current HEAD
-4. Sets the GitHub release pointer variable
-5. Optionally sets up encrypted secrets
-6. Starts the release watcher
-
-See [migration.md](migration.md) for a full guide.
-
----
-
-## Release Commands
-
-### `release:create`
-
-Creates a new release: writes VERSION file, tags, pushes, and creates a GitHub Release.
-
-```
-protocol release:create [version] [--major] [--minor] [--draft] [--no-push] [--dir=PATH]
-```
-
-| Argument/Option | Description |
-|---|---|
-| `version` | (Optional) Semver version (e.g. `1.2.3`). Auto-bumps patch if omitted. |
-| `--major` | Bump major version instead of patch |
-| `--minor` | Bump minor version instead of patch |
-| `--draft` | Create as a draft GitHub Release |
-| `--no-push` | Tag locally without pushing or creating GitHub Release |
-
-**What it does:**
-
-1. Validates semver format
-2. Ensures working tree is clean
-3. Checks tag doesn't already exist
-4. Writes `VERSION` file
-5. Commits and tags
-6. Pushes tag and commit
-7. Creates a GitHub Release (requires `gh` CLI)
-
----
-
-### `release:list`
-
-Lists available releases for this repository.
-
-```
-protocol release:list [--dir=PATH]
-```
-
-Displays a table of all release tags. The currently deployed version is marked with a `*`. Falls back to local git tags if GitHub releases are unavailable.
-
----
-
-### `release:changelog`
-
-Creates a CHANGELOG.md file for your application.
-
-```
-protocol release:changelog [--dir=PATH]
-```
-
----
-
-### `release:prepare`
-
-Prepares the codebase for the next release.
-
-```
-protocol release:prepare [--dir=PATH]
-```
-
----
-
-## Deployment Commands
-
-### `deploy:push`
-
-Deploys a release to ALL nodes by updating the GitHub release pointer variable.
-
-```
-protocol deploy:push <version> [--dir=PATH]
-```
-
-Sets the `PROTOCOL_ACTIVE_RELEASE` GitHub repository variable. All nodes running `deploy:slave` will detect the change and auto-deploy.
-
-**Requires:** GitHub CLI (`gh`) authenticated with repo access.
-
----
-
-### `deploy:rollback`
-
-Rolls back ALL nodes to the previous release.
-
-```
-protocol deploy:rollback [--dir=PATH]
-```
-
-Reads `release.previous` from `protocol.lock` and runs `deploy:push` with that version. Fails if no previous release is recorded.
-
----
-
-### `deploy:status`
-
-Shows the current active release pointer and this node's deployed version.
-
-```
-protocol deploy:status [--dir=PATH]
-```
-
-Displays:
-- Active release (from GitHub variable)
-- Locally deployed version
-- Whether the node is in sync
-
----
-
-### `deploy:log`
-
-Displays the deployment audit log.
-
-```
-protocol deploy:log [--limit=20] [--dir=PATH]
-```
-
-Shows the last N entries from `~/.protocol/deployments.log` with version transitions, timestamps, and outcomes.
-
----
-
-### `deploy:slave`
-
-Starts the release watcher daemon that polls for the active release.
-
-```
-protocol deploy:slave [--increment=60] [--no-daemon] [--dir=PATH]
-```
-
-| Option | Description |
-|---|---|
-| `--increment` | Seconds between polls (default: 60) |
-| `--no-daemon` | Run in foreground instead of background |
-
-Launches `bin/release-watcher.php` as a background process. The watcher:
-
-1. Reads the `PROTOCOL_ACTIVE_RELEASE` GitHub repository variable
-2. Compares to currently deployed version
-3. If different, deploys the target version (forward or rollback)
-4. Logs every deployment to the audit log
-
-Stores the watcher PID in `protocol.lock`.
-
----
-
-### `deploy:slave:stop`
-
-Stops the release watcher daemon.
-
-```
-protocol deploy:slave:stop [--dir=PATH]
-```
-
----
-
-## Node Commands
-
-### `node:deploy`
-
-Deploy a specific release on THIS node only (for staging/testing).
-
-```
-protocol node:deploy <version> [--dir=PATH]
-```
-
-**What it does:**
-
-1. Validates the tag exists
-2. `git fetch --all --tags`
-3. `git checkout tags/<version>`
-4. Decrypts secrets if `deployment.secrets` is `encrypted`
-5. Rebuilds Docker containers with injected secrets
-6. Updates `protocol.lock`: `release.current`, `release.previous`, `release.deployed_at`
-7. Writes an audit log entry
-
-Use for manual deployments to staging before publishing to all nodes via `deploy:push`.
-
----
-
-### `node:rollback`
-
-Roll back THIS node only to the previous release.
-
-```
-protocol node:rollback [--dir=PATH]
-```
-
-Reads `release.previous` from `protocol.lock` and runs `node:deploy` with that version.
-
----
-
-## Secrets Commands
-
-### `secrets:setup`
-
-Generate or store the encryption key on this node.
-
-```
-protocol secrets:setup [key]
-```
-
-| Argument | Description |
-|---|---|
-| `key` | (Optional) Hex-encoded key from another node. If omitted, generates a new key. |
-
-Creates `~/.protocol/` (permissions `0700`) and writes the key to `~/.protocol/key` (permissions `0600`).
-
-Run once per node. The same key must be shared across all nodes that need to decrypt the same config repo.
-
----
-
-### `secrets:encrypt`
-
-Encrypts a `.env` file into `.env.enc`.
-
-```
-protocol secrets:encrypt [file] [--dir=PATH] [--output=PATH]
-```
-
-| Argument | Description |
-|---|---|
-| `file` | (Optional) Input file, defaults to `.env` in the config repo |
-| `--output` | (Optional) Output path, defaults to `.env.enc` alongside input |
-
-**Typical workflow:**
 ```bash
-# Edit secrets locally
-vim ../myapp-config/.env
+protocol init
+```
 
-# Encrypt before committing
-protocol secrets:encrypt
+If it's a new project, you pick your Docker image, choose a deploy strategy, and optionally set up secrets and a config repo. If you've already set up, it offers to fix/migrate, change strategy, or set up secrets.
 
-# Remove plaintext
-rm ../myapp-config/.env
+Safe to re-run anytime — it detects what's already there.
 
-# Commit encrypted version
+### `protocol start`
+
+Start everything. This is the one command that makes it all work.
+
+```bash
+protocol start
+```
+
+Pulls your code, links your configs, decrypts your secrets, boots Docker, starts the watchers. On a fresh production node, this is the last command you run during setup.
+
+### `protocol stop`
+
+Stop everything. Kills watchers, unlinks configs, stops Docker containers, removes the reboot cron entry.
+
+```bash
+protocol stop
+```
+
+### `protocol status`
+
+See what's going on. Shows your deploy strategy, current version, running watchers, Docker containers, and whether everything looks healthy.
+
+```bash
+protocol status
+```
+
+### `protocol restart`
+
+Stop and start again. Designed for `@reboot` crontab entries so your app survives server restarts.
+
+```bash
+protocol restart
+```
+
+---
+
+## Releases
+
+Creating and managing versioned releases of your code.
+
+### `protocol release:create`
+
+Tag a new release. Writes a VERSION file, creates a git tag, pushes it, and creates a GitHub Release.
+
+```bash
+protocol release:create              # auto-bumps patch (1.0.0 → 1.0.1)
+protocol release:create 2.0.0       # specific version
+protocol release:create --minor     # bumps minor (1.0.1 → 1.1.0)
+protocol release:create --major     # bumps major (1.1.0 → 2.0.0)
+protocol release:create --draft     # creates as draft release
+```
+
+### `protocol release:list`
+
+See all your releases. The currently deployed version gets a `*` next to it.
+
+```bash
+protocol release:list
+```
+
+---
+
+## Deployment
+
+Pushing releases to your fleet and rolling back when things go wrong.
+
+### `protocol deploy:push`
+
+Deploy a release to ALL nodes. Sets the GitHub variable that every node watches.
+
+```bash
+protocol deploy:push 1.2.0
+```
+
+Every node running `protocol start` will pick this up within 60 seconds and deploy automatically.
+
+### `protocol deploy:rollback`
+
+Undo the last deploy. Sets the pointer back to the previous version. Every node follows.
+
+```bash
+protocol deploy:rollback
+```
+
+### `protocol deploy:status`
+
+Check if your nodes are in sync. Shows the active release (what GitHub says) vs. the local version (what this node is running).
+
+```bash
+protocol deploy:status
+```
+
+### `protocol deploy:log`
+
+View the deployment audit trail. Every deploy and rollback is logged with timestamps and version transitions.
+
+```bash
+protocol deploy:log
+protocol deploy:log --limit=50      # show more entries
+```
+
+### `protocol node:deploy`
+
+Deploy a specific version on THIS node only. Useful for testing a release on staging before pushing it to everyone.
+
+```bash
+protocol node:deploy 1.2.0          # on your staging server
+```
+
+### `protocol node:rollback`
+
+Roll back THIS node only.
+
+```bash
+protocol node:rollback
+```
+
+---
+
+## Secrets
+
+Managing your encryption key and encrypted files.
+
+### `protocol secrets:setup`
+
+Generate a new encryption key or store one from another node.
+
+```bash
+protocol secrets:setup                          # generate new key
+protocol secrets:setup "your-64-char-hex-key"   # store existing key
+```
+
+The key is saved at `~/.protocol/key` with strict permissions. Run this once per machine.
+
+In CI/CD, it also reads from the `PROTOCOL_ENCRYPTION_KEY` environment variable automatically.
+
+### `protocol secrets:key`
+
+View your encryption key and all the ways to transfer it to other machines.
+
+```bash
+protocol secrets:key                            # show key + transfer options
+protocol secrets:key --raw                      # just the key (for scripting)
+protocol secrets:key --push                     # push to GitHub as a secret
+protocol secrets:key --scp=deploy@prod-server   # SCP to a remote node
+```
+
+### `protocol secrets:encrypt`
+
+Encrypt `.env` files in your config repo.
+
+```bash
+protocol secrets:encrypt              # encrypts .env → .env.enc
+protocol secrets:encrypt myfile.env   # encrypt a specific file
+```
+
+### `protocol secrets:decrypt`
+
+Decrypt and display an encrypted file. For debugging — secrets are decrypted automatically during `protocol start`.
+
+```bash
+protocol secrets:decrypt
+```
+
+---
+
+## Configuration
+
+Managing your config repo and environment-specific files.
+
+### `protocol config:init`
+
+The config wizard. Creates your config repo, encrypts or decrypts secrets, or re-initializes from scratch.
+
+```bash
+protocol config:init
+```
+
+If a config repo already exists, it shows you a smart menu — recommending encrypt if you have unencrypted `.env` files, or decrypt if you have encrypted files but no key on this machine.
+
+### `protocol config:env`
+
+Set this machine's environment name. This determines which branch of the config repo gets used.
+
+```bash
+protocol config:env production
+protocol config:env localhost-sarah
+```
+
+### `protocol config:mv`
+
+Move a file from your project into the config repo. Creates a symlink back so your app still finds it.
+
+```bash
+protocol config:mv .env
+protocol config:mv nginx.conf
+```
+
+Also adds the file to `.gitignore` in your project.
+
+### `protocol config:link`
+
+Create all the symlinks from your config repo into your project. Happens automatically during `protocol start`, but you can run it manually.
+
+```bash
+protocol config:link
+```
+
+### `protocol config:unlink`
+
+Remove all config symlinks.
+
+```bash
+protocol config:unlink
+```
+
+### `protocol config:switch`
+
+Switch to a different environment. Saves current changes, unlinks, switches the branch, and re-links.
+
+```bash
+protocol config:switch staging
+protocol config:switch production
+```
+
+### `protocol config:save`
+
+Commit and push changes in your config repo.
+
+```bash
 protocol config:save
 ```
 
 ---
 
-### `secrets:decrypt`
+## Docker
 
-Decrypts a `.env.enc` file and displays the plaintext.
+Managing your containers.
 
-```
-protocol secrets:decrypt [file] [--dir=PATH]
-```
+### `protocol docker:compose`
 
-Outputs decrypted contents to stdout. For debugging only — secrets are decrypted automatically at deploy time.
+Start your Docker containers. In encrypted mode, decrypts secrets and injects them.
 
----
-
-## Configuration Commands
-
-### `config:env`
-
-Sets the global environment name for this machine.
-
-```
-protocol config:env [environment]
+```bash
+protocol docker:compose
 ```
 
----
+### `protocol docker:compose:rebuild`
 
-### `config:init`
+Rebuild and restart containers. Use this after changing your Dockerfile or docker-compose.yml.
 
-Initializes the configuration repository.
-
-```
-protocol config:init [environment] [--dir=PATH]
+```bash
+protocol docker:compose:rebuild
 ```
 
-Creates a sibling directory (`appname-config/`), initializes a git repo, sets the environment as the branch name, and prompts for a remote URL.
+### `protocol docker:compose:down`
 
-**Requires:** `protocol.json` must exist.
+Stop and remove containers.
 
----
-
-### `config:cp`
-
-Copies a file into the configuration repository.
-
-```
-protocol config:cp <path> [--dir=PATH]
+```bash
+protocol docker:compose:down
 ```
 
----
+### `protocol docker:exec`
 
-### `config:mv`
+Run a command inside your container. Opens a bash shell if you don't specify a command.
 
-Moves a file to the config repo, deletes from the app repo, creates a symlink back.
-
-```
-protocol config:mv <path> [--dir=PATH]
-```
-
-Also adds the file to `.gitignore`.
-
----
-
-### `config:link`
-
-Creates symlinks for non-secret config files.
-
-```
-protocol config:link [--dir=PATH]
+```bash
+protocol docker:exec                           # opens bash
+protocol docker:exec "php artisan migrate"     # run a specific command
 ```
 
-Excludes `.gitignore`, `README.md`, `.git`, and `.env.enc` from symlinking. Stores the symlink list in `protocol.lock`.
+### `protocol docker:logs`
 
----
+Follow your container's logs.
 
-### `config:unlink`
-
-Removes all config symlinks.
-
-```
-protocol config:unlink [--dir=PATH]
+```bash
+protocol docker:logs
 ```
 
 ---
 
-### `config:switch`
+## System
 
-Switches to a different environment branch.
+Housekeeping and setup commands.
 
-```
-protocol config:switch [environment] [--dir=PATH]
-```
-
-Saves changes, unlinks, switches branch, re-links.
-
----
-
-### `config:new`
-
-Creates a new environment branch.
-
-```
-protocol config:new [--dir=PATH]
-```
-
----
-
-### `config:refresh`
-
-Rebuilds all symlinks.
-
-```
-protocol config:refresh [--dir=PATH]
-```
-
----
-
-### `config:save`
-
-Commits and pushes config changes.
-
-```
-protocol config:save [--dir=PATH]
-```
-
-Prompts for a commit message.
-
----
-
-### `config:slave` / `config:slave:stop`
-
-Starts/stops the config repo watcher.
-
-```
-protocol config:slave [--increment=10] [--no-daemon] [--dir=PATH]
-protocol config:slave:stop [--dir=PATH]
-```
-
----
-
-## Git Commands
-
-### `git:pull`
-
-Force-pulls from remote (branch mode only). Destructive.
-
-```
-protocol git:pull [local] [--dir=PATH]
-```
-
----
-
-### `git:slave` / `git:slave:stop`
-
-Starts/stops branch tracking (dev mode only).
-
-```
-protocol git:slave [--increment=10] [--no-daemon] [--dir=PATH]
-protocol git:slave:stop [--dir=PATH]
-```
-
----
-
-### `git:clean`
-
-Cleans git repository bloat.
-
-```
-protocol git:clean [local] [--dir=PATH]
-```
-
----
-
-## Docker Commands
-
-### `docker:compose`
-
-Brings up Docker containers. In encrypted mode, decrypts and injects secrets.
-
-```
-protocol docker:compose [--dir=PATH]
-```
-
----
-
-### `docker:compose:rebuild`
-
-Rebuilds and restarts containers with secrets injection.
-
-```
-protocol docker:compose:rebuild [--dir=PATH]
-```
-
----
-
-### `docker:compose:down`
-
-Stops and removes containers.
-
-```
-protocol docker:compose:down [--dir=PATH]
-```
-
----
-
-### `docker:build` / `docker:pull` / `docker:push`
-
-Build, pull, or push Docker images.
-
-```
-protocol docker:build [local] [image] [--dir=PATH]
-protocol docker:pull [image] [--dir=PATH]
-protocol docker:push [image] [--dir=PATH]
-```
-
-Registry credentials are read from environment variables, not `protocol.json`.
-
----
-
-### `docker:logs`
-
-Follows Docker container logs.
-
-```
-protocol docker:logs [--dir=PATH]
-```
-
----
-
-## System Commands
-
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `self:update` | Update Protocol to the latest version |
-| `self:global` | Install Protocol as a global command (`--force` to replace existing) |
-| `key:generate` | Generate SSH deploy key |
-| `cron:add` | Add `@reboot` restart to crontab |
-| `cron:remove` | Remove crontab entry |
-| `nginx:logs` | Tail nginx/PHP-FPM logs from container |
+| `protocol self:update` | Update Protocol to the latest release |
+| `protocol self:update --nightly` | Update to the latest commit (bleeding edge) |
+| `protocol cron:add` | Add a `@reboot` crontab entry so Protocol restarts after reboots |
+| `protocol cron:remove` | Remove the crontab entry |
+| `protocol key:generate` | Generate an SSH deploy key for pulling from private repos |
+| `protocol nginx:logs` | Tail nginx and PHP-FPM logs from inside the container |
+| `protocol migrate` | Interactive wizard to convert from branch-based to release-based deployment |
 
 ---
 
-## Hidden/Internal Commands
+## Quick Reference
 
-| Command | Purpose |
+| What you want to do | Command |
 |---|---|
-| `git:clone` | Clones a repo with setup (used by config:init) |
-| `composer:install` | Runs bundled composer.phar install |
-| `env:default` | Sets environment variables for the current process |
-| `security:changedfiles` | Lists files changed in the last 15 days |
-| `security:trojansearch` | Scans for suspicious code patterns |
-| `ssh:banner` | Configures SSH MOTD banner (requires sudo) |
-| `completion` | Shell completion override (no-op) |
+| Set up a new project | `protocol init` |
+| Start everything | `protocol start` |
+| Stop everything | `protocol stop` |
+| Check what's running | `protocol status` |
+| Create a release | `protocol release:create` |
+| Deploy to all nodes | `protocol deploy:push 1.2.0` |
+| Roll back | `protocol deploy:rollback` |
+| Set up configs & secrets | `protocol config:init` |
+| Run a command in Docker | `protocol docker:exec "your command"` |
+| View your encryption key | `protocol secrets:key` |
+| Update Protocol itself | `protocol self:update` |

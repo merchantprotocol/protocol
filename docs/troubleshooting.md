@@ -1,131 +1,87 @@
 # Troubleshooting
 
-Common issues and their solutions when working with Protocol.
+Something not working? Start here. These are the issues people actually run into, in the order they usually run into them.
 
-## Configuration Issues
+## "First initialize this repository..."
 
-### "First initialize this repository to work with protocol by running `protocol init`"
+You ran a Protocol command but it can't find `protocol.json` in the current directory.
 
-**Cause:** You ran a config command but `protocol.json` doesn't exist in the current directory.
+**Fix:** Make sure you're in your project's root directory, then run `protocol init` if you haven't already.
 
-**Fix:**
 ```bash
-cd /path/to/your/repo
+cd /path/to/your/project
 protocol init
 ```
 
-### Config file errors on startup
+---
 
-**Cause:** `config/config.php` is empty or doesn't return an array. This happens when Protocol creates the file with `touch()` but it never gets populated.
+## Config Symlinks Don't Work Inside Docker
 
-**Fix:** Ensure the file contains a valid PHP array:
-```php
-<?php return array(
-    'env' => 'your-environment-name',
-);
-```
+Protocol creates relative symlinks that point to `../project-config/`. If Docker doesn't know about that directory, the symlinks point to nothing.
 
-Or set your environment which will create it properly:
-```bash
-protocol config:env your-environment
-```
+**Fix:** Mount the config directory as a volume in `docker-compose.yml`:
 
-### Config symlinks not working inside Docker
-
-**Cause:** Protocol creates relative symlinks that point to `../project-config/`. If the config directory isn't mounted in Docker, the symlinks resolve to nothing.
-
-**Fix:** Add the config directory as a volume in `docker-compose.yml`:
 ```yaml
 volumes:
   - '.:/var/www/html:rw'
   - '../myproject-config/:/var/www/myproject-config:rw'
 ```
 
-The config directory must be mounted as a sibling to the application directory, matching the relative symlink paths.
+The config directory needs to be a sibling to your project inside the container, matching the relative symlink paths.
 
-### "Unable to create a git repo" during config:init
+---
 
-**Cause:** Permission issue creating the config directory.
+## Secrets Won't Decrypt
 
-**Fix:** Check that you have write permissions in the parent directory of your project:
+### "No key found" or decryption fails silently
+
+The encryption key isn't on this machine.
+
+**Fix:** Get the key from wherever it lives (your dev machine, your password manager, a teammate) and install it:
+
 ```bash
-ls -la $(dirname $(pwd))
+protocol secrets:setup "your-64-character-hex-key"
 ```
 
-## Slave Mode Issues
+Or if someone else has the key and can SCP it to you:
 
-### Slave mode shows as running but changes aren't being pulled
-
-**Cause:** The PID in `protocol.lock` may reference a dead process (PID recycling), or the git-repo-watcher script encountered an error.
-
-**Fix:**
 ```bash
-# Check if the process is actually running
-protocol status
-
-# Stop and restart slave mode
-protocol git:slave:stop
-protocol git:slave
-
-# Check the background process log
-cat ~/protocol_background_process.log
+# On the machine that has the key:
+protocol secrets:key --scp=you@this-machine
 ```
 
-### "Slave mode is already running"
+### Wrong key
 
-**Cause:** A previous watcher process is still running or its PID is stale in `protocol.lock`.
+If you have a key but decryption produces garbage, you have the wrong key. The key must match the one that was used to encrypt.
 
-**Fix:**
-```bash
-# Stop the existing slave
-protocol git:slave:stop
+**Fix:** Get the correct key from whoever encrypted the secrets. There's no way to recover — AES-256-GCM doesn't guess.
 
-# If that doesn't work, find and kill the process manually
-ps aux | grep git-repo-watcher
-kill <pid>
-
-# Clean up the lock file
-# Delete protocol.lock and restart
-rm protocol.lock
-protocol git:slave
-```
-
-### Slave mode stops after local changes
-
-**Cause:** By design, the git-repo-watcher detects local uncommitted changes and pauses to avoid overwriting them. If the local repository diverges from the remote, slave mode disconnects.
-
-**Fix:** On slave/production nodes, there should be no local changes. If files were modified:
-```bash
-# Reset local changes (WARNING: destructive)
-git checkout .
-git clean -fd
-
-# Restart slave mode
-protocol git:slave
-```
+---
 
 ## Docker Issues
 
-### "docker:compose command not found" or compose fails
+### Containers Don't Start
 
-**Cause:** Protocol tries both `docker compose` (v2) and `docker-compose` (v1). If neither works, Docker Compose may not be installed.
-
-**Fix:**
+**Check Docker is running:**
 ```bash
-# Check which is available
 docker compose version
-docker-compose --version
-
-# Install Docker Compose v2 (comes with Docker Desktop)
-# Or install standalone:
-sudo apt-get install docker-compose-plugin
 ```
 
-### Container name not found for exec/logs
+If that fails, Docker isn't installed or isn't running.
 
-**Cause:** Protocol reads the container name from `protocol.json` (`docker.container_name`) or from `docker-compose.yml`. If neither is set, it can't determine which container to target.
+**Check your docker-compose.yml:**
+```bash
+docker compose config
+```
+
+If that shows errors, fix your compose file first.
+
+### "Container name not found" for exec/logs
+
+Protocol needs to know which container to target.
 
 **Fix:** Add `container_name` to your `protocol.json`:
+
 ```json
 {
     "docker": {
@@ -134,129 +90,210 @@ sudo apt-get install docker-compose-plugin
 }
 ```
 
-Or ensure your `docker-compose.yml` defines a `container_name` for the service.
+### Containers Don't Survive Reboots
 
-### Docker containers don't start after reboot
+**Fix:** Make sure Protocol is set to restart on reboot, and Docker starts on boot:
 
-**Cause:** The crontab restart entry may not be installed, or Docker isn't starting before Protocol.
+```bash
+protocol cron:add
+sudo systemctl enable docker
+```
+
+---
+
+## Watcher/Slave Mode Issues
+
+### Changes Aren't Being Picked Up
+
+The watcher might have died quietly while its PID is still recorded.
 
 **Fix:**
 ```bash
-# Ensure crontab entry exists
-protocol cron:add
+# See what's actually running
+protocol status
 
-# Ensure Docker starts on boot
-sudo systemctl enable docker
-
-# Manually restart
-protocol restart /path/to/repo
+# Restart everything
+protocol stop
+protocol start
 ```
+
+### "Slave mode is already running"
+
+A previous watcher is still alive, or the PID file is stale.
+
+**Fix:**
+```bash
+# Try stopping gracefully
+protocol git:slave:stop        # for branch mode
+protocol deploy:slave:stop     # for release mode
+
+# If that doesn't work, kill it manually
+ps aux | grep -E "git-repo-watcher|release-watcher"
+kill <pid>
+
+# Clean up and restart
+rm protocol.lock
+protocol start
+```
+
+### Slave Mode Stops After Local Changes
+
+By design. The watcher pauses when it detects uncommitted local changes to avoid overwriting your work. On a production node, there shouldn't be local changes.
+
+**Fix:** Reset the local state and restart:
+
+```bash
+git checkout .
+git clean -fd
+protocol start
+```
+
+---
 
 ## Git Issues
 
-### "Not a git repository" errors
+### "Not a git repository"
 
-**Cause:** Protocol commands default to the current directory for the git repo. If you're not in a git repository, commands will fail.
+You're not in a git repo. Protocol needs git to do almost everything.
 
-**Fix:** Either `cd` into your git repository, or use the `--dir` option:
+**Fix:** Either `cd` into your git repo, or tell Protocol where it is:
+
 ```bash
 protocol status --dir=/path/to/your/repo
 ```
 
-### git:pull fails or hangs
+### Git Pull Fails or Hangs
 
-**Cause:** SSH key authentication may not be configured, or the remote is unreachable.
+Usually an SSH key issue.
 
 **Fix:**
 ```bash
 # Test SSH access
 ssh -T git@github.com
 
-# If key isn't configured
+# If it fails, generate a deploy key
 protocol key:generate
-# Add the output public key to GitHub
+# Add the public key to GitHub as a deploy key
 
-# Test manual pull
+# Test again
 git -C /path/to/repo fetch origin
 ```
 
-### Merge conflicts in slave mode
+### "No GitHub CLI found"
 
-**Cause:** Slave mode does a hard reset (`git reset --hard`), so true merge conflicts shouldn't happen. If they do, the local repo may be in a corrupted state.
-
-**Fix:**
-```bash
-protocol git:slave:stop
-git -C /path/to/repo reset --hard origin/master
-protocol git:slave
-```
-
-## Process Issues
-
-### Protocol commands hang or time out
-
-**Cause:** A locked process may be blocking. Protocol uses `LockableTrait` on some commands to prevent concurrent execution.
+Release-based deployment needs the `gh` CLI for managing repository variables.
 
 **Fix:**
 ```bash
-# Check for lock files
-ls /tmp/sf.* 2>/dev/null
+# macOS
+brew install gh
 
-# Remove stale locks (be careful — only if you're sure no other protocol process is running)
-rm /tmp/sf.*
+# Ubuntu/Debian
+sudo apt install gh
+
+# Then log in
+gh auth login
 ```
 
-### Multiple git-repo-watcher processes running
-
-**Cause:** Slave mode was started multiple times without stopping, or the PID tracking in `protocol.lock` lost track of a process.
-
-**Fix:**
-```bash
-# Find all watcher processes
-ps aux | grep git-repo-watcher
-
-# Kill them all
-pkill -f git-repo-watcher
-
-# Clean up and restart
-rm protocol.lock
-protocol git:slave
-```
+---
 
 ## Permission Issues
 
-### "Permission denied" when running protocol
+### "Permission denied" Running Protocol
 
-**Cause:** The protocol binary isn't executable.
+The binary isn't executable.
 
 **Fix:**
 ```bash
 chmod +x /path/to/protocol/protocol
 ```
 
-### Can't write to config files
+### Can't Write Config Files
 
-**Cause:** Protocol's `config/config.php` may have restrictive permissions.
+Protocol's own config file has restrictive permissions.
 
 **Fix:**
 ```bash
 chmod 755 /path/to/protocol/config/config.php
 ```
 
-### Crontab operations fail silently
+### "Unable to create a git repo" During config:init
 
-**Cause:** The user running protocol may not have permission to modify crontab, or cron may not be available in a container.
+You don't have write permissions in the parent directory.
+
+**Fix:** Check permissions:
+```bash
+ls -la $(dirname $(pwd))
+```
+
+---
+
+## Protocol Commands Hang
+
+A lock file might be blocking. Protocol uses locks to prevent concurrent execution of certain commands.
 
 **Fix:**
 ```bash
-# Check current crontab
-crontab -l
+# Check for stale lock files
+ls /tmp/sf.* 2>/dev/null
 
-# Ensure cron service is running
-sudo systemctl status cron
+# Remove them (only if you're sure no other Protocol process is running)
+rm /tmp/sf.*
 ```
 
-## Getting Help
+---
+
+## Release Watcher Not Deploying
+
+### Check the basics
+
+```bash
+# Is the watcher running?
+protocol status
+
+# What does it think the active release is?
+protocol deploy:status
+
+# Any errors in the log?
+protocol deploy:log
+```
+
+### "Variable not found"
+
+The GitHub CLI can't access your repository variables.
+
+**Fix:**
+```bash
+# Make sure gh is authenticated
+gh auth status
+
+# Make sure it can see your repo
+gh repo view
+```
+
+---
+
+## Config File Errors on Startup
+
+Protocol's `config/config.php` might be empty or malformed.
+
+**Fix:** Make sure it contains valid PHP:
+
+```php
+<?php return array(
+    'env' => 'your-environment-name',
+);
+```
+
+Or just set your environment again:
+
+```bash
+protocol config:env your-environment
+```
+
+---
+
+## Still Stuck?
 
 ```bash
 # List all available commands
@@ -265,11 +302,11 @@ protocol list
 # Get help on a specific command
 protocol <command> --help
 
-# Check system status
+# Check everything
 protocol status
 
-# Increase verbosity for debugging
+# Turn on maximum verbosity for debugging
 protocol <command> -vvv
 ```
 
-For bug reports or feature requests, visit the project repository on GitHub.
+For bug reports or feature requests, visit the [GitHub repository](https://github.com/merchantprotocol/protocol).
