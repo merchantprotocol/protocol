@@ -277,6 +277,7 @@ During a SOC 2 Type II audit, you'll be asked to demonstrate that controls have 
 
 | Document | What it covers |
 |---|---|
+| [SOC 2 Controls Matrix](soc2-controls-matrix.md) | Auditor-facing evidence matrix — every numbered criterion mapped to controls and evidence |
 | [Security & Hardening](security.md) | Detailed security controls, encryption internals, audit log format |
 | [Incident Response Runbook](incident-response.md) | Detection, triage, containment, resolution, post-incident review |
 | [Key Rotation Procedure](key-rotation.md) | Step-by-step key rotation, rollback plan, automation |

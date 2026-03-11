@@ -357,6 +357,7 @@ Composer is bundled — no separate install needed.
 | [Configuration](docs/configuration.md) | protocol.json, config repos, environments |
 | [Architecture](docs/architecture.md) | System design and data flow |
 | [SOC 2 Ready](docs/soc2.md) | Trust Service Criteria mapping, readiness checks, auditor guide |
+| [SOC 2 Controls Matrix](docs/soc2-controls-matrix.md) | Auditor evidence matrix — every SOC 2 criterion mapped to controls and evidence |
 | [Security & Hardening](docs/security.md) | Security controls, encryption internals, vulnerability scanning |
 | [Blue-Green Deploys](docs/blue-green.md) | Shadow deployments with instant rollback |
 | [Migration](docs/migration.md) | Upgrade from branch-based to release-based |
