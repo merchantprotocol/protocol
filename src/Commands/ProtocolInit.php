@@ -54,6 +54,7 @@ use Gitcd\Commands\Init\Php81;
 use Gitcd\Commands\Init\Php82;
 use Gitcd\Commands\Init\Php82Ffmpeg;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Utils\NodeConfig;
 use Gitcd\Commands\Init\DotMenuTrait;
 
 Class ProtocolInit extends Command {
@@ -199,7 +200,7 @@ Class ProtocolInit extends Command {
         $selectedKey = $this->askWithDots($input, $output, $helper, [
             'new'      => 'Start a new project',
             'existing' => 'Connect an existing repository',
-            'shadow'   => 'Configure as a shadow deployment node',
+            'slave'    => 'Make this a slave node (production / staging deploy)',
             'protocol' => 'Update an existing Protocol project',
         ], $scenario);
 
@@ -211,8 +212,8 @@ Class ProtocolInit extends Command {
             case 'existing':
                 return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
 
-            case 'shadow':
-                return $this->flowShadowNode($repo_dir, $input, $output, $helper, $io);
+            case 'slave':
+                return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io);
 
             case 'protocol':
                 return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
@@ -376,68 +377,84 @@ Class ProtocolInit extends Command {
         return Command::SUCCESS;
     }
 
-    // ─── Flow: Shadow Deployment Node ──────────────────────────
+    // ─── Flow: Slave Node ─────────────────────────────────────
 
-    protected function flowShadowNode(
+    protected function flowSlaveNode(
         string $repo_dir,
         InputInterface $input,
         OutputInterface $output,
         $helper,
         SymfonyStyle $io
     ): int {
-        $totalSteps = 4;
+        $totalSteps = 3;
 
-        // Initialize git if not already
-        if (!Git::isInitializedRepo($repo_dir)) {
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
-        }
-
-        // Step 1: GitHub repo URL
+        // Step 1: Repository URL
         $this->writeStep($output, 1, $totalSteps, 'Repository');
 
-        $output->writeln("    <fg=gray>Shadow deployment clones each release version into its own</>");
-        $output->writeln("    <fg=gray>directory. No need to clone the full repo here — just tell</>");
-        $output->writeln("    <fg=gray>us where to pull releases from.</>");
+        $output->writeln("    <fg=gray>This node will watch a repository and automatically deploy</>");
+        $output->writeln("    <fg=gray>new releases. Tell us the repository to listen to.</>");
         $output->writeln('');
 
         $existingRemote = Git::RemoteUrl($repo_dir);
         $defaultRemote = $existingRemote ?: '';
 
         $question = new Question(
-            '    GitHub repo URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
+            '    Repository URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
             $defaultRemote
         );
         $gitRemote = $helper->ask($input, $output, $question);
 
         if (!$gitRemote) {
             $output->writeln('');
-            $output->writeln('    <error>A git remote URL is required.</error>');
+            $output->writeln('    <error>A repository URL is required.</error>');
             return Command::FAILURE;
         }
-
-        // Create minimal protocol.json
-        Json::write('name', basename($repo_dir), $repo_dir);
-        Json::write('deployment.strategy', 'release', $repo_dir);
-        Json::write('deployment.pointer', 'github_variable', $repo_dir);
-        Json::write('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
-        Json::write('git.remote', $gitRemote, $repo_dir);
-        Json::write('bluegreen.enabled', true, $repo_dir);
-        Json::write('bluegreen.git_remote', $gitRemote, $repo_dir);
-        Json::save($repo_dir);
 
         $output->writeln('');
         $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
 
-        // Step 2: Releases directory
-        $this->writeStep($output, 2, $totalSteps, 'Releases Directory');
-
-        $defaultReleasesDir = basename(rtrim($repo_dir, '/')) . '-releases';
-        $defaultReleasesPath = dirname(rtrim($repo_dir, '/')) . '/' . $defaultReleasesDir . '/';
-
-        $output->writeln("    <fg=gray>Each version gets its own directory with a full git clone,</>");
-        $output->writeln("    <fg=gray>config, and Docker containers named with the release tag.</>");
+        // Fetch protocol.json from the remote repo
         $output->writeln('');
-        $output->writeln("    <fg=gray>Default:</> <fg=white>{$defaultReleasesPath}</>");
+        $output->writeln("    <fg=gray>›</> Fetching project configuration...");
+
+        $protocolData = $this->fetchRemoteProtocolJson($gitRemote);
+        $projectName = $protocolData['name'] ?? basename(parse_url($gitRemote, PHP_URL_PATH) ?: $gitRemote, '.git');
+
+        if (!empty($protocolData)) {
+            $output->writeln("    <fg=green>✓</> Found protocol.json for <fg=white;options=bold>{$projectName}</>");
+        } else {
+            $output->writeln("    <fg=yellow>!</> No protocol.json found — using defaults");
+            $protocolData = [
+                'name' => $projectName,
+                'deployment' => [
+                    'strategy' => 'release',
+                    'pointer' => 'github_variable',
+                    'pointer_name' => 'PROTOCOL_ACTIVE_RELEASE',
+                ],
+            ];
+        }
+
+        // Step 2: Environment
+        $this->writeStep($output, 2, $totalSteps, 'Environment');
+
+        $output->writeln("    <fg=gray>Choose what environment this node will be. This determines</>");
+        $output->writeln("    <fg=gray>which configuration branch gets used for secrets and settings.</>");
+        $output->writeln('');
+
+        $environment = $this->askEnvironment($gitRemote, $protocolData, $input, $output, $helper);
+
+        $output->writeln('');
+        $output->writeln("    <fg=green>✓</> Environment: <fg=white;options=bold>{$environment}</>");
+
+        // Step 3: Releases directory
+        $this->writeStep($output, 3, $totalSteps, 'Code Location');
+
+        $defaultReleasesDir = dirname(rtrim($repo_dir, '/')) . '/' . $projectName . '-releases';
+
+        $output->writeln("    <fg=gray>Each release gets its own directory with a full git clone,</>");
+        $output->writeln("    <fg=gray>Docker containers, and config files.</>");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Default:</> <fg=white>{$defaultReleasesDir}/</>");
         $output->writeln('');
 
         $question = new Question(
@@ -445,80 +462,211 @@ Class ProtocolInit extends Command {
             $defaultReleasesDir
         );
         $releasesDir = $helper->ask($input, $output, $question);
+        $releasesDir = rtrim($releasesDir, '/');
 
-        Json::write('bluegreen.releases_dir', $releasesDir, $repo_dir);
-        Json::save($repo_dir);
-
-        $resolvedPath = BlueGreen::getReleasesDir($repo_dir);
         $output->writeln('');
-        $output->writeln("    <fg=green>✓</> Releases: <fg=white>{$resolvedPath}</>");
+        $output->writeln("    <fg=green>✓</> Releases: <fg=white>{$releasesDir}/</>");
 
-        // Step 3: Auto-promote
-        $this->writeStep($output, 3, $totalSteps, 'Auto-Promote');
+        // Save node config to ~/.protocol/nodes/
+        $nodeData = $protocolData;
+        $nodeData['name'] = $projectName;
+        $nodeData['node_type'] = 'slave';
+        $nodeData['environment'] = $environment;
+        $nodeData['repo_dir'] = $repo_dir;
+        $nodeData['git'] = $nodeData['git'] ?? [];
+        $nodeData['git']['remote'] = $gitRemote;
+        $nodeData['deployment'] = $nodeData['deployment'] ?? [];
+        $nodeData['deployment']['strategy'] = $nodeData['deployment']['strategy'] ?? 'release';
+        $nodeData['deployment']['pointer'] = $nodeData['deployment']['pointer'] ?? 'github_variable';
+        $nodeData['deployment']['pointer_name'] = $nodeData['deployment']['pointer_name'] ?? 'PROTOCOL_ACTIVE_RELEASE';
+        $nodeData['bluegreen'] = $nodeData['bluegreen'] ?? [];
+        $nodeData['bluegreen']['enabled'] = true;
+        $nodeData['bluegreen']['git_remote'] = $gitRemote;
+        $nodeData['bluegreen']['releases_dir'] = $releasesDir;
+        $nodeData['bluegreen']['auto_promote'] = true;
 
-        $output->writeln("    <fg=gray>When the release watcher detects a new version, it will</>");
-        $output->writeln("    <fg=gray>build a shadow release. After health checks pass:</>");
-        $output->writeln('');
-
-        $choiceKey = $this->askWithDots($input, $output, $helper, [
-            'manual' => 'Manual — wait for you to run shadow:start',
-            'auto'   => 'Automatic — promote to production immediately',
-        ], 'manual');
-
-        $autoPromote = ($choiceKey === 'auto');
-        Json::write('bluegreen.auto_promote', $autoPromote, $repo_dir);
-        Json::save($repo_dir);
-
-        // Step 4: Health checks
-        $this->writeStep($output, 4, $totalSteps, 'Health Checks');
-
-        $output->writeln("    <fg=gray>Health checks verify the shadow build before promotion.</>");
-        $output->writeln('');
-
-        $question = new ConfirmationQuestion(
-            '    Add a default HTTP health check (GET /health → 200)? [<fg=green>Y</>/n] ', true
-        );
-        if ($helper->ask($input, $output, $question)) {
-            Json::write('bluegreen.health_checks', [
+        // Add health check default
+        if (!isset($nodeData['bluegreen']['health_checks'])) {
+            $nodeData['bluegreen']['health_checks'] = [
                 ['type' => 'http', 'path' => '/health', 'expect_status' => 200],
-            ], $repo_dir);
-        } else {
-            Json::write('bluegreen.health_checks', [], $repo_dir);
+            ];
         }
+
+        NodeConfig::save($projectName, $nodeData);
+
+        // Also write protocol.json locally so existing commands work
+        if (!Git::isInitializedRepo($repo_dir)) {
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
+        }
+
+        Json::write('name', $projectName, $repo_dir);
+        Json::write('deployment.strategy', $nodeData['deployment']['strategy'], $repo_dir);
+        Json::write('deployment.pointer', $nodeData['deployment']['pointer'], $repo_dir);
+        Json::write('deployment.pointer_name', $nodeData['deployment']['pointer_name'], $repo_dir);
+        Json::write('git.remote', $gitRemote, $repo_dir);
+        Json::write('bluegreen.enabled', true, $repo_dir);
+        Json::write('bluegreen.git_remote', $gitRemote, $repo_dir);
+        Json::write('bluegreen.releases_dir', $releasesDir, $repo_dir);
+        Json::write('bluegreen.auto_promote', true, $repo_dir);
         Json::save($repo_dir);
 
-        // Add protocol.lock to .gitignore
-        Git::addIgnore('protocol.lock', $repo_dir);
-
-        // Commit
-        $this->commitProtocolFiles($output, $repo_dir);
+        // Set the environment globally
+        \Gitcd\Helpers\Config::write('env', $environment);
 
         // Completion
         $this->clearAndBanner($output);
 
-        $autoLabel = $autoPromote ? '<fg=green>automatic</>' : '<fg=yellow>manual</>';
-        $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
-        $healthLabel = count($healthChecks) > 0 ? '<fg=green>' . count($healthChecks) . ' configured</>' : '<fg=yellow>none</>';
+        $configPath = NodeConfig::configPath($projectName);
 
         $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Shadow Deployment Node Ready!</>                    <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Ready!</>                                  <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>Next steps:</>                                            <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=yellow>1.</> <fg=white>protocol shadow:build v1.0.0</>  <fg=gray>Build first release</>  <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=yellow>2.</> <fg=white>protocol shadow:start</>         <fg=gray>Go live (~1 second)</>   <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=yellow>3.</> <fg=white>protocol start</>                <fg=gray>Start watcher daemon</> <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>1.</> <fg=white>protocol start</>                <fg=gray>Start watcher daemon</> <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=yellow>2.</> <fg=white>protocol status</>               <fg=gray>Check node health</>    <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
         $output->writeln('');
+        $output->writeln("    <fg=gray>Project:</>      <fg=white>{$projectName}</>");
         $output->writeln("    <fg=gray>Remote:</>       <fg=white>{$gitRemote}</>");
-        $output->writeln("    <fg=gray>Releases dir:</> <fg=white>{$resolvedPath}</>");
-        $output->writeln("    <fg=gray>Auto-promote:</> {$autoLabel}");
-        $output->writeln("    <fg=gray>Health checks:</> {$healthLabel}");
+        $output->writeln("    <fg=gray>Environment:</> <fg=white>{$environment}</>");
+        $output->writeln("    <fg=gray>Releases dir:</> <fg=white>{$releasesDir}/</>");
+        $output->writeln("    <fg=gray>Node config:</>  <fg=white>{$configPath}</>");
         $output->writeln('');
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Fetch protocol.json from a remote git repository.
+     *
+     * Tries GitHub API first (for github.com repos), falls back to
+     * git archive for SSH remotes.
+     */
+    protected function fetchRemoteProtocolJson(string $gitRemote): array
+    {
+        // Try GitHub API if it's a GitHub URL
+        if (preg_match('#github\.com[:/]([^/]+)/([^/.]+)#', $gitRemote, $matches)) {
+            $owner = $matches[1];
+            $repo = $matches[2];
+
+            $json = Shell::run("gh api repos/" . escapeshellarg("{$owner}/{$repo}") . "/contents/protocol.json --jq '.content' 2>/dev/null");
+            if ($json && trim($json)) {
+                $decoded = base64_decode(trim($json));
+                if ($decoded) {
+                    $data = json_decode($decoded, true);
+                    if (is_array($data)) {
+                        return $data;
+                    }
+                }
+            }
+        }
+
+        // Fall back to git archive (works with SSH remotes)
+        $tmpDir = sys_get_temp_dir() . '/protocol-fetch-' . uniqid();
+        mkdir($tmpDir, 0700);
+        $result = Shell::run("git archive --remote=" . escapeshellarg($gitRemote) . " HEAD protocol.json 2>/dev/null | tar -xO -C " . escapeshellarg($tmpDir) . " 2>/dev/null");
+        if ($result && trim($result)) {
+            $data = json_decode(trim($result), true);
+            @rmdir($tmpDir);
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+        @rmdir($tmpDir);
+
+        // Last resort: shallow clone
+        $tmpClone = sys_get_temp_dir() . '/protocol-clone-' . uniqid();
+        Shell::run("git clone --depth 1 " . escapeshellarg($gitRemote) . " " . escapeshellarg($tmpClone) . " 2>/dev/null");
+        $protocolFile = $tmpClone . '/protocol.json';
+        if (is_file($protocolFile)) {
+            $data = json_decode(file_get_contents($protocolFile), true);
+            Shell::run("rm -rf " . escapeshellarg($tmpClone));
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+        Shell::run("rm -rf " . escapeshellarg($tmpClone));
+
+        return [];
+    }
+
+    /**
+     * Ask the user which environment this node should be.
+     *
+     * Lists branches from the config repo (filtering out local/localhost dev branches),
+     * plus standard options (production, staging, custom).
+     */
+    protected function askEnvironment(
+        string $gitRemote,
+        array $protocolData,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
+    ): string {
+        $options = [];
+        $remoteBranches = [];
+
+        // Try to list branches from the config repo
+        $configRemote = $protocolData['configuration']['remote'] ?? null;
+        if ($configRemote) {
+            $output->writeln("    <fg=gray>›</> Checking config repo for available environments...");
+            $branchOutput = Shell::run("git ls-remote --heads " . escapeshellarg($configRemote) . " 2>/dev/null");
+
+            if ($branchOutput) {
+                $lines = explode("\n", trim($branchOutput));
+                foreach ($lines as $line) {
+                    if (preg_match('#refs/heads/(.+)$#', trim($line), $m)) {
+                        $branch = $m[1];
+                        // Filter out local dev branches
+                        if (preg_match('/^(local|localhost)/i', $branch)) {
+                            continue;
+                        }
+                        $remoteBranches[] = $branch;
+                    }
+                }
+            }
+            $output->writeln('');
+        }
+
+        // Build the menu: remote branches first, then standard options
+        if (!empty($remoteBranches)) {
+            foreach ($remoteBranches as $branch) {
+                $label = $branch;
+                if ($branch === 'production') {
+                    $label = 'production — live environment';
+                } elseif ($branch === 'staging') {
+                    $label = 'staging — pre-production testing';
+                } elseif ($branch === 'main' || $branch === 'master') {
+                    $label = $branch . ' — default branch';
+                }
+                $options[$branch] = $label;
+            }
+        } else {
+            // No config repo or no branches found — offer standard options
+            $options['production'] = 'production — live environment';
+            $options['staging'] = 'staging — pre-production testing';
+        }
+
+        $options['custom'] = 'Custom environment name';
+
+        // Default to production if available, otherwise first option
+        $defaultKey = in_array('production', array_keys($options)) ? 'production' : array_keys($options)[0];
+
+        $selectedKey = $this->askWithDots($input, $output, $helper, $options, $defaultKey);
+
+        if ($selectedKey === 'custom') {
+            $question = new Question('    Environment name: ');
+            $environment = $helper->ask($input, $output, $question);
+            if (!$environment) {
+                $environment = 'production';
+            }
+            return $environment;
+        }
+
+        return $selectedKey;
     }
 
     // ─── Flow: Fix / Migrate ───────────────────────────────────
