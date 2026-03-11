@@ -86,6 +86,12 @@ When you run `protocol start`, it works through six stages. Each stage shows its
 [protocol] Health checks.................. PASS
 
 ✓ Deployment complete. All systems operational.
+  Environment  production
+  Strategy     release (v1.2.0)
+  Secrets      decrypted
+  Containers   3/3 running
+  Watchers     release watcher running
+  Crontab      installed
   Completed in 12.3s
 ```
 
@@ -98,7 +104,7 @@ Here's what each stage does:
 5. **SOC 2 compliance check** — Verifies encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions
 6. **Health checks** — Confirms Docker containers are actually running and watchers are alive
 
-If a stage fails, it shows FAIL with the error detail and continues to the next stage. The final summary tells you whether everything passed or if there were issues.
+If a stage fails, it shows FAIL with the error detail and continues to the next stage. The summary at the end confirms your operational state — which environment you're on, whether secrets were decrypted, container and watcher status, and crontab recovery.
 
 In CI/CD environments (where there's no terminal), the output drops the ANSI animations and prints plain text lines instead.
 
@@ -114,10 +120,14 @@ In CI/CD environments (where there's no terminal), the output drops the ANSI ani
 [protocol] Verifying shutdown............. PASS
 
 ✓ Shutdown complete. All services stopped.
+  Environment  production
+  Containers   3/3 stopped
+  Watchers     stopped
+  Crontab      removed
   Completed in 3.1s
 ```
 
-The verification stage checks that containers are actually stopped and watchers are no longer running — it doesn't just trust that the stop commands worked.
+The verification stage checks that containers are actually stopped and watchers are no longer running — it doesn't just trust that the stop commands worked. The summary confirms the final state of each service.
 
 ## The Audit Trail
 

@@ -37,10 +37,16 @@ Runs through six stages — scanning your codebase, provisioning infrastructure,
 [protocol] Health checks.................. PASS
 
 ✓ Deployment complete. All systems operational.
+  Environment  production
+  Strategy     release (v1.2.0)
+  Secrets      decrypted
+  Containers   3/3 running
+  Watchers     release watcher running
+  Crontab      installed
   Completed in 12.3s
 ```
 
-If a stage fails, it shows the error detail below the FAIL line and continues to the next stage. In CI/CD environments (non-TTY), the output drops the ANSI formatting automatically.
+The summary confirms your environment, whether secrets were decrypted, how many containers are up, whether watchers are active, and crontab status. If a stage fails, it shows the error detail below the FAIL line and continues to the next stage. In CI/CD environments (non-TTY), the output drops the ANSI formatting automatically.
 
 ### `protocol stop`
 
@@ -60,6 +66,10 @@ Same staged output as `protocol start` — five stages with verification at the 
 [protocol] Verifying shutdown............. PASS
 
 ✓ Shutdown complete. All services stopped.
+  Environment  production
+  Containers   3/3 stopped
+  Watchers     stopped
+  Crontab      removed
   Completed in 3.1s
 ```
 

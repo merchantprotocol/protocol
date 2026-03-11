@@ -74,12 +74,19 @@ class StageRunner
     }
 
     /**
-     * Write the final summary banner.
+     * Write the final summary banner with optional status info lines.
+     *
+     * @param array $info Key-value pairs to display (e.g. ['Environment' => 'production'])
+     * @param string|null $successMessage Custom success message (default: "Deployment complete.")
+     * @param string|null $failMessage Custom failure message (default: "Deployment completed with issues.")
      */
-    public function writeSummary(): void
+    public function writeSummary(array $info = [], ?string $successMessage = null, ?string $failMessage = null): void
     {
         $totalTime = round(microtime(true) - $this->startTime, 1);
         $allPassed = empty(array_filter($this->completedStages, fn($s) => !$s['success']));
+
+        $successMessage = $successMessage ?? 'Deployment complete.';
+        $failMessage = $failMessage ?? 'Deployment completed with issues.';
 
         if ($this->isTty) {
             fwrite(STDOUT, "\n");
@@ -89,21 +96,26 @@ class StageRunner
 
         if ($allPassed) {
             $this->writeTty(
-                "\033[32m✓\033[0m \033[1mDeployment complete.\033[0m All systems operational.\n"
-            );
-            $this->writeTty(
-                "  \033[90mCompleted in {$totalTime}s\033[0m\n"
+                "\033[32m✓\033[0m \033[1m{$successMessage}\033[0m All systems operational.\n"
             );
         } else {
             $failures = array_filter($this->completedStages, fn($s) => !$s['success']);
             $count = count($failures);
             $this->writeTty(
-                "\033[31m✗\033[0m \033[1mDeployment completed with issues.\033[0m {$count} stage(s) failed.\n"
-            );
-            $this->writeTty(
-                "  \033[90mCompleted in {$totalTime}s\033[0m\n"
+                "\033[31m✗\033[0m \033[1m{$failMessage}\033[0m {$count} stage(s) failed.\n"
             );
         }
+
+        // Write status info lines
+        if (!empty($info)) {
+            $maxKeyLen = max(array_map('strlen', array_keys($info)));
+            foreach ($info as $key => $value) {
+                $padded = str_pad($key, $maxKeyLen);
+                $this->writeTty("  \033[90m{$padded}\033[0m  {$value}\n");
+            }
+        }
+
+        $this->writeTty("  \033[90mCompleted in {$totalTime}s\033[0m\n");
     }
 
     /**

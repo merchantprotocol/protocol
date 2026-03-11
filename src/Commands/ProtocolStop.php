@@ -40,6 +40,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
@@ -150,26 +151,30 @@ Class ProtocolStop extends Command {
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
-        $allPassed = empty(array_filter($runner->getResults(), fn($s) => !$s['success']));
-        $totalTime = round(array_sum(array_column($runner->getResults(), 'duration')), 1);
+        $environment = Config::read('env', 'unknown');
 
-        if (StageRunner::isTty()) {
-            fwrite(STDOUT, "\n");
-            if ($allPassed) {
-                fwrite(STDOUT, "\033[32m✓\033[0m \033[1mShutdown complete.\033[0m All services stopped.\n");
-            } else {
-                fwrite(STDOUT, "\033[31m✗\033[0m \033[1mShutdown completed with issues.\033[0m\n");
-            }
-            fwrite(STDOUT, "  \033[90mCompleted in {$totalTime}s\033[0m\n");
-        } else {
-            $output->writeln('');
-            if ($allPassed) {
-                $output->writeln('✓ Shutdown complete. All services stopped.');
-            } else {
-                $output->writeln('✗ Shutdown completed with issues.');
-            }
-            $output->writeln("  Completed in {$totalTime}s");
+        $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+        $stoppedCount = 0;
+        foreach ($containerNames as $name) {
+            if (!Docker::isDockerContainerRunning($name)) $stoppedCount++;
         }
+        $containerTotal = count($containerNames);
+        $containerStatus = $containerTotal > 0
+            ? "{$stoppedCount}/{$containerTotal} stopped"
+            : 'none configured';
+
+        $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'still installed' : 'removed';
+
+        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
+        $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
+        $watcherStatus = (!$watcherPid || !Shell::isRunning($watcherPid)) ? 'stopped' : 'still running';
+
+        $runner->writeSummary([
+            'Environment' => $environment,
+            'Containers'  => $containerStatus,
+            'Watchers'    => $watcherStatus,
+            'Crontab'     => $cronStatus,
+        ], 'Shutdown complete.', 'Shutdown completed with issues.');
 
         return Command::SUCCESS;
     }
