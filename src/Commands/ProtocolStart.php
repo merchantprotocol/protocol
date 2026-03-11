@@ -116,28 +116,55 @@ Class ProtocolStart extends Command {
                 'environment' => $environment
             ]));
 
-        // if not a local dev env
-        if (!$isDev) {
-            // run update
-            $command = $this->getApplication()->find('git:pull');
-            $returnCode = $command->run($arrInput, $output);
+        // Detect deployment strategy: "release" (new) or "branch" (legacy/default)
+        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
 
-            // run repo slave
-            $command = $this->getApplication()->find('git:slave');
-            $returnCode = $command->run($arrInput, $output);
-        }
+        if ($strategy === 'release') {
+            // Release-based deployment mode
+            $output->writeln('<info>Deployment strategy: release</info>');
 
-        if (Json::read('configuration.remote', false, $repo_dir)) {
-            $command = $this->getApplication()->find('config:init');
-            $returnCode = $command->run($arrInput1, $output);
+            // Initialize config repo if configured
+            if (Json::read('configuration.remote', false, $repo_dir)) {
+                $command = $this->getApplication()->find('config:init');
+                $returnCode = $command->run($arrInput1, $output);
 
-            if (!$isDev) {
                 $command = $this->getApplication()->find('config:slave');
+                $returnCode = $command->run($arrInput, $output);
+
+                $command = $this->getApplication()->find('config:link');
                 $returnCode = $command->run($arrInput, $output);
             }
 
-            $command = $this->getApplication()->find('config:link');
+            // Start the release watcher daemon (replaces git:slave for release mode)
+            $command = $this->getApplication()->find('deploy:slave');
             $returnCode = $command->run($arrInput, $output);
+
+        } else {
+            // Legacy branch-based deployment mode
+            $output->writeln('<info>Deployment strategy: branch</info>');
+
+            if (!$isDev) {
+                // run update
+                $command = $this->getApplication()->find('git:pull');
+                $returnCode = $command->run($arrInput, $output);
+
+                // run repo slave
+                $command = $this->getApplication()->find('git:slave');
+                $returnCode = $command->run($arrInput, $output);
+            }
+
+            if (Json::read('configuration.remote', false, $repo_dir)) {
+                $command = $this->getApplication()->find('config:init');
+                $returnCode = $command->run($arrInput1, $output);
+
+                if (!$isDev) {
+                    $command = $this->getApplication()->find('config:slave');
+                    $returnCode = $command->run($arrInput, $output);
+                }
+
+                $command = $this->getApplication()->find('config:link');
+                $returnCode = $command->run($arrInput, $output);
+            }
         }
 
         // add crontab restart command
@@ -152,7 +179,7 @@ Class ProtocolStart extends Command {
         $returnCode = $command->run($arrInput, $output);
 
         // run composer install inside docker container
-        $command = $this->getApplication()->find('exec');
+        $command = $this->getApplication()->find('docker:exec');
         $arrInputComposer = new ArrayInput([
             '--dir' => $repo_dir,
             'cmd' => 'composer install'

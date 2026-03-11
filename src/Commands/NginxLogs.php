@@ -84,7 +84,7 @@ Class NginxLogs extends Command {
         ]);
 
         // run update
-        $command = $this->getApplication()->find('exec');
+        $command = $this->getApplication()->find('docker:exec');
         $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;

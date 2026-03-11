@@ -98,9 +98,18 @@ Class ProtocolStop extends Command {
                 '--dir' => $repo_dir
             ]);
 
-        // run update
-        $command = $this->getApplication()->find('git:slave:stop');
-        $returnCode = $command->run($arrInput, $output);
+        // Stop watchers based on deployment strategy
+        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+
+        if ($strategy === 'release') {
+            // Stop the release watcher
+            $command = $this->getApplication()->find('deploy:slave:stop');
+            $returnCode = $command->run($arrInput, $output);
+        } else {
+            // Stop the legacy git watcher
+            $command = $this->getApplication()->find('git:slave:stop');
+            $returnCode = $command->run($arrInput, $output);
+        }
 
         if (Json::read('configuration.remote', false, $repo_dir)) {
             $command = $this->getApplication()->find('config:slave:stop');

@@ -6,7 +6,7 @@ Complete reference for all Protocol CLI commands. Run `protocol <command> --help
 
 ### `init`
 
-Creates the `protocol.json` file and initializes the project for use with Protocol.
+Interactive setup wizard for new or existing projects.
 
 ```
 protocol init [environment] [--dir=PATH] [--with-config]
@@ -20,13 +20,14 @@ protocol init [environment] [--dir=PATH] [--with-config]
 
 **What it does:**
 
-1. Verifies the directory is a git repository
-2. Prompts for project type (currently PHP 8.1 available)
-3. Runs the project-specific initializer (creates nginx configs, docker-compose, etc.)
-4. Creates `protocol.json` with git remote, branch, docker, and deployment strategy settings
-5. Optionally initializes a configuration repository
+1. **Compatibility check** — Verifies git, docker-compose, GitHub CLI availability
+2. **Existing project detection** — If `protocol.json` exists, offers update/strategy/secrets/config options
+3. **Project type selection** — Currently PHP 8.1 available
+4. **Deployment strategy** — Choose release-based (recommended) or branch-based (legacy)
+5. **Secrets management** — Optionally set up AES-256-GCM encrypted secrets
+6. **Configuration repository** — Optionally initialize a config repo
 
-**Requires:** Git repository initialized with a remote.
+Safe to re-run on existing projects — detects current state and offers updates.
 
 ---
 
@@ -122,12 +123,12 @@ protocol status [--dir=PATH]
 
 ---
 
-### `exec`
+### `docker:exec`
 
 Opens a shell or runs a command inside the Docker container.
 
 ```
-protocol exec [cmd] [--dir=PATH]
+protocol docker:exec [cmd] [--dir=PATH]
 ```
 
 | Argument | Description |
@@ -136,51 +137,145 @@ protocol exec [cmd] [--dir=PATH]
 
 ---
 
-## Deployment Commands
+### `migrate`
 
-### `deploy`
-
-Deploys a specific release version.
+Interactive migration wizard for converting branch-based projects to release-based deployment.
 
 ```
-protocol deploy <version> [--dir=PATH]
+protocol migrate [--secrets-only] [--dir=PATH]
 ```
+
+| Option | Description |
+|---|---|
+| `--secrets-only` | Only set up encrypted secrets (skip strategy migration) |
+
+**Migration steps:**
+
+1. Detects current deployment strategy
+2. Sets `deployment.strategy` to `release`
+3. Creates initial release tag from current HEAD
+4. Sets the GitHub release pointer variable
+5. Optionally sets up encrypted secrets
+6. Starts the release watcher
+
+See [migration.md](migration.md) for a full guide.
+
+---
+
+## Release Commands
+
+### `release:create`
+
+Creates a new release: writes VERSION file, tags, pushes, and creates a GitHub Release.
+
+```
+protocol release:create [version] [--major] [--minor] [--draft] [--no-push] [--dir=PATH]
+```
+
+| Argument/Option | Description |
+|---|---|
+| `version` | (Optional) Semver version (e.g. `1.2.3`). Auto-bumps patch if omitted. |
+| `--major` | Bump major version instead of patch |
+| `--minor` | Bump minor version instead of patch |
+| `--draft` | Create as a draft GitHub Release |
+| `--no-push` | Tag locally without pushing or creating GitHub Release |
 
 **What it does:**
 
-1. Validates the tag exists (`git tag --list`)
-2. `git fetch --all --tags`
-3. `git checkout tags/<version>`
-4. Decrypts secrets if `deployment.secrets` is `encrypted`
-5. Rebuilds Docker containers with injected secrets
-6. Updates `protocol.lock`: `release.current`, `release.previous`, `release.deployed_at`
-7. Writes an audit log entry
-
-Use for manual deployments to staging before publishing to all nodes via the release pointer.
+1. Validates semver format
+2. Ensures working tree is clean
+3. Checks tag doesn't already exist
+4. Writes `VERSION` file
+5. Commits and tags
+6. Pushes tag and commit
+7. Creates a GitHub Release (requires `gh` CLI)
 
 ---
 
-### `rollback`
+### `release:list`
 
-Reverts to the previously deployed release.
+Lists available releases for this repository.
 
 ```
-protocol rollback [--dir=PATH]
+protocol release:list [--dir=PATH]
 ```
 
-Reads `release.previous` from `protocol.lock` and runs `deploy` with that version. Fails if no previous release is recorded.
+Displays a table of all release tags. The currently deployed version is marked with a `*`. Falls back to local git tags if GitHub releases are unavailable.
 
 ---
 
-### `releases`
+### `release:changelog`
 
-Lists available release tags.
+Creates a CHANGELOG.md file for your application.
 
 ```
-protocol releases [--dir=PATH]
+protocol release:changelog [--dir=PATH]
 ```
 
-Displays a table of all release tags with the currently deployed version marked.
+---
+
+### `release:prepare`
+
+Prepares the codebase for the next release.
+
+```
+protocol release:prepare [--dir=PATH]
+```
+
+---
+
+## Deployment Commands
+
+### `deploy:push`
+
+Deploys a release to ALL nodes by updating the GitHub release pointer variable.
+
+```
+protocol deploy:push <version> [--dir=PATH]
+```
+
+Sets the `PROTOCOL_ACTIVE_RELEASE` GitHub repository variable. All nodes running `deploy:slave` will detect the change and auto-deploy.
+
+**Requires:** GitHub CLI (`gh`) authenticated with repo access.
+
+---
+
+### `deploy:rollback`
+
+Rolls back ALL nodes to the previous release.
+
+```
+protocol deploy:rollback [--dir=PATH]
+```
+
+Reads `release.previous` from `protocol.lock` and runs `deploy:push` with that version. Fails if no previous release is recorded.
+
+---
+
+### `deploy:status`
+
+Shows the current active release pointer and this node's deployed version.
+
+```
+protocol deploy:status [--dir=PATH]
+```
+
+Displays:
+- Active release (from GitHub variable)
+- Locally deployed version
+- Whether the node is in sync
+
+---
+
+### `deploy:log`
+
+Displays the deployment audit log.
+
+```
+protocol deploy:log [--limit=20] [--dir=PATH]
+```
+
+Shows the last N entries from `~/.protocol/deployments.log` with version transitions, timestamps, and outcomes.
 
 ---
 
@@ -218,15 +313,39 @@ protocol deploy:slave:stop [--dir=PATH]
 
 ---
 
-### `deploy:log`
+## Node Commands
 
-Displays the deployment audit log.
+### `node:deploy`
+
+Deploy a specific release on THIS node only (for staging/testing).
 
 ```
-protocol deploy:log [--limit=20] [--dir=PATH]
+protocol node:deploy <version> [--dir=PATH]
 ```
 
-Shows the last N entries from the deployment log with version transitions, timestamps, and outcomes.
+**What it does:**
+
+1. Validates the tag exists
+2. `git fetch --all --tags`
+3. `git checkout tags/<version>`
+4. Decrypts secrets if `deployment.secrets` is `encrypted`
+5. Rebuilds Docker containers with injected secrets
+6. Updates `protocol.lock`: `release.current`, `release.previous`, `release.deployed_at`
+7. Writes an audit log entry
+
+Use for manual deployments to staging before publishing to all nodes via `deploy:push`.
+
+---
+
+### `node:rollback`
+
+Roll back THIS node only to the previous release.
+
+```
+protocol node:rollback [--dir=PATH]
+```
+
+Reads `release.previous` from `protocol.lock` and runs `node:deploy` with that version.
 
 ---
 
@@ -234,7 +353,7 @@ Shows the last N entries from the deployment log with version transitions, times
 
 ### `secrets:setup`
 
-Stores the decryption key on the current node.
+Generate or store the encryption key on this node.
 
 ```
 protocol secrets:setup [key]
@@ -242,7 +361,7 @@ protocol secrets:setup [key]
 
 | Argument | Description |
 |---|---|
-| `key` | (Optional) Base64-encoded key. If omitted, prompts or generates a new key. |
+| `key` | (Optional) Hex-encoded key from another node. If omitted, generates a new key. |
 
 Creates `~/.protocol/` (permissions `0700`) and writes the key to `~/.protocol/key` (permissions `0600`).
 
@@ -511,7 +630,7 @@ protocol docker:logs [--dir=PATH]
 | Command | Description |
 |---|---|
 | `self:update` | Update Protocol to the latest version |
-| `self:global` | Install Protocol as a global command |
+| `self:global` | Install Protocol as a global command (`--force` to replace existing) |
 | `key:generate` | Generate SSH deploy key |
 | `cron:add` | Add `@reboot` restart to crontab |
 | `cron:remove` | Remove crontab entry |
