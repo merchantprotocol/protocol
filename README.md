@@ -1,185 +1,308 @@
-# PROTOCOL - A Command Line Tool for Highly Available Applications
+<p align="center">
+  <h1 align="center">Protocol</h1>
+  <p align="center">
+    Zero-complexity continuous deployment and configuration management for PHP applications.
+    <br />
+    <a href="docs/architecture.md"><strong>Architecture</strong></a>
+    &middot;
+    <a href="docs/commands.md"><strong>Commands</strong></a>
+    &middot;
+    <a href="docs/configuration.md"><strong>Configuration</strong></a>
+    &middot;
+    <a href="docs/security.md"><strong>Security</strong></a>
+  </p>
+</p>
 
-PROTOCOL is a command line tool designed to help you keep a highly available application in sync.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://github.com/merchantprotocol/protocol/actions"><img src="https://github.com/merchantprotocol/protocol/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/merchantprotocol/protocol/actions"><img src="https://github.com/merchantprotocol/protocol/actions/workflows/security-scan.yml/badge.svg" alt="Security Scan"></a>
+  <img src="https://img.shields.io/badge/php-8.1%2B-8892BF.svg" alt="PHP 8.1+">
+  <img src="https://img.shields.io/badge/SOC2-Type%20II%20Ready-green.svg" alt="SOC2 Type II Ready">
+</p>
 
-## USE CASE - CI/CD
+---
 
-You have a PHP application like Laravel that you track in a private git repo. You've decided to use docker running on an EC2 VPS to serve your PHP application. 
+## Why Protocol?
 
-  - Application hosted on a remote git repo
-  - (optional) Docker image hosted on a remote docker registry
-  - You have 1 or more worker nodes serving the application behind a load balancer
+Most CI/CD pipelines are overkill. You configure webhooks, build runners, deploy scripts, artifact storage, rollback strategies — all before a single line of code reaches production. And when you scale to multiple nodes behind a load balancer, complexity explodes.
 
-Your development is done elsewhere and you want your VPS node(s) to stay up to date with your latest git repo changes and/or your docker image changes.
+Protocol takes a different approach. Every node is a **follower** that watches its upstream branch and pulls changes automatically. No build server. No webhook endpoints. No deploy scripts. Just git.
 
-  - Development is done locally
-  - When you push changes to your git remote master branch, you want those changes to go out to all your nodes without fail.
-
-Most continuous delivery pipelines are just too complex. They're cumbersome to setup initially and even more complex when you introduce multiple (and always changing) auto scaling worker nodes.
-
-I wanted something that was quick to setup, whether I was running a single node or 100. I needed something that could update new auto scaled worker nodes as soon as they came online, and something that kept the worker nodes constantly in sync.
-
-My solution was to create a master/slave continuous deployment system. I have always lived by the idea that the MASTER branch should always be production ready. All of our work should be done on feature branches and only merged into master after all tests have passed and manual QA has been done. Therefore having a tool that builds worker nodes and keeps them in sync with the master repo was the ideal solution.
-
-Once installed, any commits made to the master repo will immediately be replicated to the slave node, thanks to PROTOCOL.
-
-## USE CASE - Multiple Configuration Environments
-
-Let's say you have multiple production nodes, multiple staging servers for each of your new feature branches, and every developer has their own development environment on their localhost. Maybe your CI/CD even has it's own testing configurations that are deployed during automated testing.
-
-That's a lot of different configuration environments that could all demand their own configuration setup.
-
-On top of that complexity you might even have multiple configurations files for your docker container, or your nginx configs, or your cron configs, or multiple configurations files for your application.
-
-That could be a lot of different configuration files for each environment.
-
-Like most people you probably don't want to commit your secrets into the application repo itself, specially if you're working on an open source project. You also don't want to be overwriting other peoples configurations and other environments configurations by committing them to the application repository.
-
-### So what's the solution?
-
-This original solution was designed by Github, and we at Merchant Protocol have fully developed the idea.
-
-We've decided to use a git repository so that our configuration files are backed up in case a node goes down, and the only set of configuration files are not stored on the nodes. Having our config files in a git repo also gives us the added benefit of being able to see a history of our configuration changes, allowing us to rollback configurations and attach them to the incremental changes of the application repo.
-
-A git repo also gives us the backbone of managing multiple configuration files and even multiple configuration environments when we introduce branches. This is all compatible with Github, Gitlab, Gitea and any other remote git repo management system you might use.
-
-So our architecture is simple. We use a git repo to house all of our configurations files. The branches are named after each of the different types of environments. Developers can even create and backup their own custom configurations.
-
-We use simple symbolic linking of the application files from the config repo into the application repo.
-
-And `Protocol` manages the entire process for us. Protocol even provides us with the added benefit of `slave mode` which will keep our production environments in sync with a remote repo, or disable slave mode and pin your configuration state to the application commits.
-
-Using `protocol config:init` will create your new configurations directory and initialize it for you. Just create a remote repo on your platform of choice and provide it with the remote url when asked.
-
-You can now use `protocol config:cp` or `protocol config:mv` to move your configurations files into your new config repo. The config files will be stored in .gitignore on your application repo and symlinked from the config repo to the application repo.
-
-`protocol config:save` will commit your changes and push your config repo.
-
-You can easily `protocol config:new` create a new config environment and switch between them with `protocol config:switch`.
-
-
-
-
-## System Requirements
-
-- git
-- php 7.4
-- composer (optional)
-- docker
-- docker-compose
-
-## Installation
-
-```
-sudo curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | bash
+```bash
+# On any node, anywhere:
+protocol start
 ```
 
-If you want to install protocol independently, you can just clone down the repo
+That single command pulls your code, links your environment config, starts your Docker containers, and begins watching for changes. Push to your branch, and every node updates within seconds.
 
-```
-git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
-chmod +x $HOME/protocol/protocol
-protocol self::global
-```
+## What It Does
 
-You should then make protocol globally available by creating a symlink into a $PATH directory.
+**Continuous Deployment** — Each node polls its remote branch and auto-deploys changes. No webhooks, no build servers, no agents. Push to git, nodes update.
 
-### Generate a key to be used with your remote git account
+**Configuration Management** — Environment configs (`.env`, nginx, cron, etc.) live in a separate git repo. Each branch is an environment. Protocol symlinks the right config into your app at runtime. Production secrets never touch your application repo.
 
-This command generates the key using default params, sets the permissions, adds it to be used in every ssh command and then returns the public key to be added to your remote git account.
+**Docker Orchestration** — Manages the full container lifecycle through docker-compose. Build, pull, start, stop, rebuild — all through Protocol.
 
-```
-# protocol key:generate
-```
+**Reboot Survival** — A single crontab entry ensures nodes come back online automatically after a reboot, fully configured and running.
 
-### Setting up a node for the first time
+## Quick Start
 
-1. Use `git clone` standard command to pull down the repository of choice. If you're running a docker image, then the docker-compose.yml file should exist in this repo.
+### Install
 
-2. You'll want to setup a protocol.json file in your repository by running `protocol init` which will create the file based off of your repositories current state. You can then edit this file. Commit the protocol.json file into your remote repo.
-
-3. You're now free to run `protocol start` from inside the local repo. (a) This command will update the local repo to match the remote. (b) place the current local repo into slave mode. (c) pull down the latest docker image. (d) run docker-compose rebuild in the local dir.
-
-    At this point your node should be fully operational.
-
-4. Recovering your repo when it reboots. `protocol restart <local>` should be run anytime the server is rebooted. This command can be run from any location, making it ideal to run from a cron job. You can do that by installing the command into your crontab. `@reboot protocol restart <local>`
-
-4. When you're ready to boot down the server you can do so by running `protocol stop` from within the repo.
-
-## ./protocol list
-
-```
-Protocol 0.3.0
-
-Usage:
-  command [options] [arguments]
-
-Options:
-  -h, --help            Display help for the given command. When no command is given display help for the list command
-  -q, --quiet           Do not output any message
-  -V, --version         Display this application version
-      --ansi|--no-ansi  Force (or disable --no-ansi) ANSI output
-  -n, --no-interaction  Do not ask any interactive question
-  -v|vv|vvv, --verbose  Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
-
-Available commands:
-  exec                    Enters the container
-  help                    Display help for a command
-  init                    Creates the protocol.json file
-  list                    List commands
-  restart                 Used within a crontab to restart a node
-  start                   Starts a node so that the repo and docker image stay up to date and are running
-  stop                    Stops running slave modes
- config
-  config:cp               Copy a file into the configurations repo.
-  config:env              Set the global environment for the server
-  config:init             Initialize the configuration repository
-  config:link             Create symlinks for the configurations into the application dir
-  config:mv               Move a file into the config repo, delete it from the app repo and create a symlink back.
-  config:new              Create a new environment
-  config:refresh          Clears all links and rebuilds them
-  config:save             Saves the current environment to the remote
-  config:slave            Keep the config repo updated with the remote changes
-  config:slave:stop       Stops the config repo slave mode when its running
-  config:switch           Switch to a different environment
-  config:unlink           Remove symlinks for the configurations in the application dir
- docker
-  docker:build            Builds the docker image from source
-  docker:compose          Run docker compose on the repository to boot up any container
-  docker:compose:down     shuts down docker
-  docker:compose:rebuild  Pulls down a new copy and rebuilds the image
-  docker:logs             Show the docker container logs
-  docker:pull             Docker pull and update an image
-  docker:push             Pushes the docker image to the remote repository
- git
-  git:pull                Pull from github and update the local repo
-  git:slave               Continuous deployment keeps the local repo updated with the remote changes
-  git:slave:stop          Stops the slave mode when its running
- key
-  key:generate            Generate an openssl key
- nginx
-  nginx:logs              Show the nginx logs within the container
-
+```bash
+curl -L "https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install" | sudo bash
 ```
 
-Run --help on any of the specific commands to see how to use the command.
+Supports macOS (Homebrew), Ubuntu/Debian (apt), and Amazon Linux (yum). See [Installation Guide](docs/installation.md) for manual install and platform notes.
 
-#### Sample json file
+### Initialize a Project
+
+```bash
+cd /path/to/your/repo
+
+# Create protocol.json
+protocol init
+
+# Set your environment
+protocol config:env production
+
+# Initialize config repo (stores .env, nginx configs, etc. separately)
+protocol config:init
+```
+
+### Deploy
+
+```bash
+# Start everything: pull code, link config, start Docker, enable auto-deploy
+protocol start
+
+# Check system state
+protocol status
+
+# Stop everything
+protocol stop
+```
+
+### Manage Configuration
+
+```bash
+# Move a config file into the config repo (creates symlink back)
+protocol config:mv .env
+
+# Switch environments
+protocol config:switch staging
+
+# Create a new environment
+protocol config:new
+
+# Save and push config changes
+protocol config:save
+```
+
+## How It Works
+
+```
+┌──────────────────┐          ┌──────────────────┐
+│   GitHub/GitLab  │          │  Config Repo      │
+│                  │          │  (private)         │
+│  app repo        │          │  branch: prod      │
+│  branch: master  │          │  branch: staging   │
+│                  │          │  branch: local-dev  │
+└────────┬─────────┘          └────────┬───────────┘
+         │ polls every 10s              │ polls every 10s
+         ▼                              ▼
+┌─────────────────────────────────────────────────────┐
+│                  Production Node                     │
+│                                                      │
+│  protocol start                                      │
+│  ├── git:slave ─── watches app repo, auto-pulls      │
+│  ├── config:slave ─ watches config repo, auto-pulls  │
+│  ├── config:link ── symlinks .env, nginx.conf, etc.  │
+│  └── docker:compose ── runs containers               │
+│                                                      │
+│  ┌─────────────┐    ┌──────────────────┐             │
+│  │ myapp/      │    │ myapp-config/    │             │
+│  │ ├── src/    │    │ ├── .env         │             │
+│  │ ├── .env →──┼────┼─┘                │             │
+│  │ └── ...     │    │ └── nginx.conf   │             │
+│  └─────────────┘    └──────────────────┘             │
+└──────────────────────────────────────────────────────┘
+```
+
+**App Repo** contains your code and `protocol.json`. Commit, push, and every follower node updates automatically.
+
+**Config Repo** is a sibling directory (`myapp-config/`) with a branch per environment. Protocol symlinks config files into your app directory so they work seamlessly — including inside Docker containers.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `protocol init` | Initialize project, create `protocol.json` |
+| `protocol start` | Pull code, link config, start Docker, enable auto-deploy |
+| `protocol stop` | Stop auto-deploy, unlink config, stop Docker |
+| `protocol restart` | Stop and re-start (designed for `@reboot` crontab) |
+| `protocol status` | Show system health: slaves, Docker, config, cron |
+| `protocol exec [cmd]` | Run command inside Docker container (default: bash) |
+
+<details>
+<summary><strong>Configuration Commands</strong></summary>
+
+| Command | Description |
+|---|---|
+| `config:env <name>` | Set the global environment for this machine |
+| `config:init` | Initialize the configuration repository |
+| `config:cp <file>` | Copy a file into the config repo |
+| `config:mv <file>` | Move a file to config repo + symlink back |
+| `config:link` | Create symlinks for all config files |
+| `config:unlink` | Remove all config symlinks |
+| `config:switch <env>` | Switch to a different environment branch |
+| `config:new` | Create a new environment |
+| `config:save` | Commit and push config changes |
+| `config:refresh` | Rebuild all symlinks |
+| `config:slave` | Watch config repo for remote changes |
+| `config:slave:stop` | Stop config repo watcher |
+
+</details>
+
+<details>
+<summary><strong>Docker Commands</strong></summary>
+
+| Command | Description |
+|---|---|
+| `docker:compose` | Start containers (`docker-compose up -d`) |
+| `docker:compose:down` | Stop and remove containers |
+| `docker:compose:rebuild` | Rebuild and restart containers |
+| `docker:build` | Build image from Dockerfile |
+| `docker:pull` | Pull image from registry |
+| `docker:push` | Push image to registry |
+| `docker:logs` | Follow container logs |
+
+</details>
+
+<details>
+<summary><strong>Git Commands</strong></summary>
+
+| Command | Description |
+|---|---|
+| `git:pull` | Force-pull from remote (resets local) |
+| `git:slave` | Start continuous deployment watcher |
+| `git:slave:stop` | Stop the watcher |
+| `git:clean` | Clean `.git` folder bloat |
+
+</details>
+
+<details>
+<summary><strong>System Commands</strong></summary>
+
+| Command | Description |
+|---|---|
+| `self:update` | Update Protocol to latest version |
+| `self:global` | Install Protocol as global command |
+| `key:generate` | Generate SSH deploy key |
+| `cron:add` | Add `@reboot` restart to crontab |
+| `cron:remove` | Remove crontab entry |
+
+</details>
+
+Full reference: [docs/commands.md](docs/commands.md)
+
+## Configuration
+
+Protocol uses a `protocol.json` file in each project root:
 
 ```json
 {
-    "name": "Datamelt",
+    "name": "myapp",
+    "project_type": "php81",
     "git": {
-        "username": "jonathonbyrdziak",
-        "password": "",
-        "key": "",
-        "remote": "git@github.com/org/remote-repo.git"
+        "remote": "git@github.com:org/myapp.git",
+        "branch": "master"
     },
     "docker": {
-        "image" : "byrdziak/merchantprotocol-webserver-nginx-php7.4:initial",
-        "username" : "",
-        "password" : "",
-        "local" : "../docker-webserver-nginx-php7.4-fpm/"
+        "image": "registry/myapp:latest",
+        "container_name": "myapp-web"
+    },
+    "configuration": {
+        "local": "../myapp-config",
+        "remote": "git@github.com:org/myapp-config.git"
     }
 }
 ```
+
+Full schema and configuration patterns: [docs/configuration.md](docs/configuration.md)
+
+## Production Deployment
+
+### Single Node
+
+```bash
+# 1. Clone your app
+git clone git@github.com:org/myapp.git /opt/myapp && cd /opt/myapp
+
+# 2. Set environment and start
+protocol config:env production
+protocol start
+
+# 3. Survive reboots
+protocol cron:add
+```
+
+### Multi-Node Cluster
+
+Repeat the same steps on every node. Each node independently watches the remote and pulls changes. No coordination required — push once, deploy everywhere.
+
+```bash
+# Node 1, Node 2, Node 3, ... Node N — all identical:
+git clone git@github.com:org/myapp.git /opt/myapp && cd /opt/myapp
+protocol config:env production
+protocol start
+protocol cron:add
+```
+
+Scale up by launching new nodes with the same setup. Scale down by running `protocol stop`. Auto-scaling groups can use the `@reboot` crontab entry to self-configure on launch.
+
+## Security & Compliance
+
+Protocol is designed with SOC2 Type II compliance in mind:
+
+- **Git-based audit trail** — Every code and config change is tracked in git history
+- **Secrets isolation** — Configuration files live in a separate, access-controlled repository
+- **Environment separation** — Branch-based isolation between production, staging, and development
+- **Automated security scanning** — CI pipeline includes dependency audits, secret scanning, and static analysis
+- **Vulnerability disclosure** — Responsible disclosure process documented in [SECURITY.md](SECURITY.md)
+
+See [docs/security.md](docs/security.md) for the full SOC2 mapping, hardening checklist, and audit logging guidance.
+
+## System Requirements
+
+| Requirement | Version |
+|---|---|
+| PHP | 8.1+ |
+| Git | 2.x+ |
+| Docker | 20.x+ |
+| Docker Compose | v2+ |
+
+Composer is bundled with Protocol — no separate installation needed.
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Architecture](docs/architecture.md) | System design, components, data flow, known issues |
+| [Installation](docs/installation.md) | Install guide, platform notes, production setup |
+| [Commands](docs/commands.md) | Complete CLI reference |
+| [Configuration](docs/configuration.md) | `protocol.json` schema, config repos, environments |
+| [Security & SOC2](docs/security.md) | Compliance mapping, hardening, audit logging |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Contributing](CONTRIBUTING.md) | Development setup, coding standards, PR process |
+
+## Contributing
+
+We welcome contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request. For security issues, follow the disclosure process in [SECURITY.md](SECURITY.md).
+
+## License
+
+Protocol is open-source software licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2019 [Merchant Protocol, LLC](https://merchantprotocol.com/)
