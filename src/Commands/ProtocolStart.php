@@ -3,19 +3,19 @@
  * NOTICE OF LICENSE
  *
  * MIT License
- * 
+ *
  * Copyright (c) 2019 Merchant Protocol
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- * 
+ *
  * @category   merchantprotocol
  * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
@@ -33,21 +33,26 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Command\LockableTrait;
 use Symfony\Component\Console\Question\Question;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\StageRunner;
+use Gitcd\Helpers\SecurityAudit;
+use Gitcd\Helpers\Soc2Check;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
 Class ProtocolStart extends Command {
 
@@ -75,10 +80,6 @@ Class ProtocolStart extends Command {
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
-     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -88,13 +89,11 @@ Class ProtocolStart extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        $output->writeln('<comment>Starting up the protocol node</comment>');
         $helper = $this->getHelper('question');
 
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
@@ -109,106 +108,145 @@ Class ProtocolStart extends Command {
         $devEnvs = ['localhost', 'local', 'dev', 'development'];
         $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost') !== false);
 
-        $arrInput = (new ArrayInput([
-                '--dir' => $repo_dir
-            ]));
-        $arrInput1 = (new ArrayInput([
-                '--dir' => $repo_dir,
-                'environment' => $environment
-            ]));
-
-        // Detect deployment strategy: "release" (new) or "branch" (legacy/default)
         $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
 
-        if ($strategy === 'release') {
-            // Release-based deployment mode
-            $output->writeln('<info>Deployment strategy: release</info>');
+        // Prepare sub-command inputs
+        $arrInput = new ArrayInput(['--dir' => $repo_dir]);
+        $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment]);
+        $nullOutput = new NullOutput();
+        $app = $this->getApplication();
 
-            // Initialize config repo if configured
-            if (Json::read('configuration.remote', false, $repo_dir)) {
-                $command = $this->getApplication()->find('config:init');
-                $returnCode = $command->run($arrInput1, $output);
+        $output->writeln('');
 
-                $command = $this->getApplication()->find('config:slave');
-                $returnCode = $command->run($arrInput, $output);
+        $runner = new StageRunner($output);
 
-                $command = $this->getApplication()->find('config:link');
-                $returnCode = $command->run($arrInput, $output);
+        // ── Stage 1: Scanning codebase ──────────────────────────
+        $runner->run('Scanning codebase', function() use ($repo_dir, $environment, $strategy) {
+            // Validate the repo is initialized
+            if (!Git::isInitializedRepo($repo_dir)) {
+                throw new \RuntimeException('Not an initialized Protocol project');
             }
 
-            // Start the release watcher daemon (replaces git:slave for release mode)
-            $command = $this->getApplication()->find('deploy:slave');
-            $returnCode = $command->run($arrInput, $output);
-
-        } else {
-            // Legacy branch-based deployment mode
-            $output->writeln('<info>Deployment strategy: branch</info>');
-
-            if (!$isDev) {
-                // run update
-                $command = $this->getApplication()->find('git:pull');
-                $returnCode = $command->run($arrInput, $output);
-
-                // run repo slave
-                $command = $this->getApplication()->find('git:slave');
-                $returnCode = $command->run($arrInput, $output);
+            // Validate docker-compose.yml exists
+            if (!Docker::isDockerInitialized($repo_dir)) {
+                throw new \RuntimeException('No docker-compose.yml found');
             }
+        });
 
-            if (Json::read('configuration.remote', false, $repo_dir)) {
-                $command = $this->getApplication()->find('config:init');
-                $returnCode = $command->run($arrInput1, $output);
+        // ── Stage 2: Infrastructure provisioning ────────────────
+        $runner->run('Infrastructure provisioning', function() use ($app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev) {
 
-                if (!$isDev) {
-                    $command = $this->getApplication()->find('config:slave');
-                    $returnCode = $command->run($arrInput, $output);
+            if ($strategy === 'release') {
+                // Release-based deployment mode
+                if (Json::read('configuration.remote', false, $repo_dir)) {
+                    $app->find('config:init')->run($arrInput1, $nullOutput);
+                    $app->find('config:slave')->run($arrInput, $nullOutput);
+                    $app->find('config:link')->run($arrInput, $nullOutput);
                 }
 
-                $command = $this->getApplication()->find('config:link');
-                $returnCode = $command->run($arrInput, $output);
+                // Start the release watcher daemon
+                $app->find('deploy:slave')->run($arrInput, $nullOutput);
+
+            } else {
+                // Legacy branch-based deployment mode
+                if (!$isDev) {
+                    $app->find('git:pull')->run($arrInput, $nullOutput);
+                    $app->find('git:slave')->run($arrInput, $nullOutput);
+                }
+
+                if (Json::read('configuration.remote', false, $repo_dir)) {
+                    $app->find('config:init')->run($arrInput1, $nullOutput);
+
+                    if (!$isDev) {
+                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                    }
+
+                    $app->find('config:link')->run($arrInput, $nullOutput);
+                }
             }
-        }
 
-        // add crontab restart command
-        Crontab::addCrontabRestart( $repo_dir );
+            // Add crontab restart command
+            Crontab::addCrontabRestart($repo_dir);
+        });
 
-        // Update docker image
-        $command = $this->getApplication()->find('docker:pull');
-        $returnCode = $command->run($arrInput, $output);
+        // ── Stage 3: Container build & push ─────────────────────
+        $runner->run('Container build & push', function() use ($repo_dir) {
+            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
 
-        // run docker compose
-        $command = $this->getApplication()->find('docker:compose:rebuild');
-        $returnCode = $command->run($arrInput, $output);
+            if (!file_exists($composePath)) {
+                return; // No docker-compose.yml, nothing to do
+            }
 
-        // run composer install inside docker container (only if composer.json exists)
-        if (file_exists(rtrim($repo_dir, '/') . '/composer.json')) {
-            $command = $this->getApplication()->find('docker:exec');
-            $arrInputComposer = new ArrayInput([
-                '--dir' => $repo_dir,
-                'cmd' => 'composer install'
-            ]);
-            $returnCode = $command->run($arrInputComposer, $output);
-        }
+            // Pull or build the Docker image
+            $usesBuild = false;
+            $content = file_get_contents($composePath);
+            $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
-        // Warn if secrets are not encrypted
-        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
-        if ($secretsMode !== 'encrypted' || !Secrets::hasKey()) {
-            $output->writeln('');
-            $output->writeln('<error>  ⚠  NOT PRODUCTION READY — secrets are plaintext  </error>');
-            $output->writeln('');
-            $output->writeln('  Your configuration files (.env, credentials) are not encrypted.');
-            $output->writeln('  Plaintext secrets in git are a security risk.');
-            $output->writeln('');
-            $output->writeln('  To fix this, run:');
-            $output->writeln('');
-            $output->writeln('    <fg=cyan>protocol config:init</>    Set up the configuration repository');
-            $output->writeln('    <fg=cyan>protocol secrets:setup</>  Generate an encryption key');
-            $output->writeln('    <fg=cyan>protocol secrets:encrypt</> Encrypt your .env files');
-            $output->writeln('');
-        }
+            if ($usesBuild) {
+                Shell::run("docker compose -f " . escapeshellarg($composePath) . " build 2>&1");
+            } else {
+                $image = Json::read('docker.image', false, $repo_dir);
+                if ($image) {
+                    Shell::run("docker pull " . escapeshellarg($image) . " 2>&1");
+                }
+            }
 
-        // end with status
-        $command = $this->getApplication()->find('status');
-        $returnCode = $command->run($arrInput, $output);
+            // Rebuild containers
+            $dockerCommand = Docker::getDockerCommand();
+            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
+
+            // Run composer install inside container if needed
+            if (file_exists(rtrim($repo_dir, '/') . '/composer.json')) {
+                $containerName = Json::read('docker.container_name', '', $repo_dir);
+                if ($containerName) {
+                    Shell::run("docker exec {$containerName} composer install --no-interaction 2>&1");
+                }
+            }
+        });
+
+        // ── Stage 4: Security audit ─────────────────────────────
+        $runner->run('Running security audit', function() use ($repo_dir) {
+            $audit = new SecurityAudit($repo_dir);
+            $audit->runAll();
+            if (!$audit->passed()) {
+                $failures = array_filter($audit->getResults(), fn($r) => $r['status'] === 'fail');
+                $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
+                throw new \RuntimeException(implode("\n", $messages));
+            }
+        }, 'PASS');
+
+        // ── Stage 5: SOC 2 compliance check ─────────────────────
+        $runner->run('SOC 2 compliance check', function() use ($repo_dir) {
+            $check = new Soc2Check($repo_dir);
+            $check->runAll();
+            if (!$check->passed()) {
+                $failures = array_filter($check->getResults(), fn($r) => $r['status'] === 'fail');
+                $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
+                throw new \RuntimeException(implode("\n", $messages));
+            }
+        }, 'PASS');
+
+        // ── Stage 6: Health checks ──────────────────────────────
+        $runner->run('Health checks', function() use ($repo_dir, $strategy) {
+            // Check Docker containers are running
+            $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            foreach ($containerNames as $name) {
+                if (!Docker::isDockerContainerRunning($name)) {
+                    throw new \RuntimeException("Container '{$name}' is not running");
+                }
+            }
+
+            // Check watcher is running
+            if ($strategy === 'release') {
+                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
+                if ($pid && !Shell::isRunning($pid)) {
+                    throw new \RuntimeException('Release watcher is not running');
+                }
+            }
+        }, 'PASS');
+
+        // ── Summary ─────────────────────────────────────────────
+        $runner->writeSummary();
 
         return Command::SUCCESS;
     }

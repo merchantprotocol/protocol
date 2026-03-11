@@ -75,19 +75,49 @@ The key is a 256-bit (64-character hex) string. You generate it once and copy it
 
 ## What `protocol start` Actually Does
 
-Here's the full sequence when you run `protocol start` in release mode:
+When you run `protocol start`, it works through six stages. Each stage shows its progress and collapses to a single status line — OK, PASS, or FAIL — before moving to the next:
 
-1. **Config repo** — Makes sure the config repo exists and is up to date
-2. **Symlinks** — Links config files (nginx.conf, php.ini, etc.) into your project
-3. **Config watcher** — Starts a background process that polls for config changes
-4. **Release watcher** — Starts a background process that polls for new releases
-5. **Secrets** — Decrypts `.env.enc` files
-6. **Docker** — Rebuilds and starts your containers
-7. **Composer** — Installs PHP dependencies
-8. **Crontab** — Adds a `@reboot` entry so everything survives server restarts
-9. **Status** — Shows you what's running
+```
+[protocol] Scanning codebase.............. OK
+[protocol] Infrastructure provisioning.... OK
+[protocol] Container build & push......... OK
+[protocol] Running security audit......... PASS
+[protocol] SOC 2 compliance check......... PASS
+[protocol] Health checks.................. PASS
 
-`protocol stop` reverses all of that — kills watchers, removes symlinks, stops containers, removes the crontab entry.
+✓ Deployment complete. All systems operational.
+  Completed in 12.3s
+```
+
+Here's what each stage does:
+
+1. **Scanning codebase** — Validates this is an initialized Protocol project with a `docker-compose.yml`
+2. **Infrastructure provisioning** — Initializes the config repo, starts watchers (release watcher in release mode, git watcher in branch mode), links config files into your project, adds a `@reboot` crontab entry
+3. **Container build & push** — Pulls or builds your Docker image, starts containers with `docker compose up --build -d`, runs `composer install` inside the container if needed
+4. **Running security audit** — Scans for malicious code, checks file permissions, audits dependencies, looks for suspicious processes, validates Docker security, flags unauthorized file changes
+5. **SOC 2 compliance check** — Verifies encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions
+6. **Health checks** — Confirms Docker containers are actually running and watchers are alive
+
+If a stage fails, it shows FAIL with the error detail and continues to the next stage. The final summary tells you whether everything passed or if there were issues.
+
+In CI/CD environments (where there's no terminal), the output drops the ANSI animations and prints plain text lines instead.
+
+### What `protocol stop` Does
+
+`protocol stop` runs the same staged pattern in reverse — five stages that shut everything down and verify the shutdown was clean:
+
+```
+[protocol] Stopping watchers.............. OK
+[protocol] Unlinking configuration........ OK
+[protocol] Stopping containers............ OK
+[protocol] Removing crontab entry......... OK
+[protocol] Verifying shutdown............. PASS
+
+✓ Shutdown complete. All services stopped.
+  Completed in 3.1s
+```
+
+The verification stage checks that containers are actually stopped and watchers are no longer running — it doesn't just trust that the stop commands worked.
 
 ## The Audit Trail
 

@@ -2,6 +2,44 @@
 
 If you're running Protocol in a production environment — especially one that needs to pass a SOC2 audit — this page covers what Protocol gives you, what you need to add, and how to lock everything down.
 
+## Automated Checks on Every Start
+
+Every time you run `protocol start`, two sets of checks run automatically as part of the staged startup:
+
+### Security Audit
+
+Six checks run against your codebase and server:
+
+| Check | What it looks for |
+|---|---|
+| **Malicious code** | Scans PHP files for dangerous patterns — `eval(`, `base64_decode(`, `shell_exec(`, `proc_open(`, and other common backdoor signatures |
+| **File permissions** | Verifies `~/.protocol/key` is `0600` and `~/.protocol/` is `0700`. Flags world-writable files in your config repo |
+| **Dependencies** | Runs `composer audit` to check for known vulnerabilities in your PHP packages |
+| **Suspicious processes** | Scans running processes for known bad actors — cryptominers (`xmrig`, `kinsing`), reverse shells (`nc`, `ncat`, `socat`) |
+| **Docker security** | Parses your `docker-compose.yml` for risky settings — `privileged: true`, `user: root`, dangerous capability additions |
+| **Recent changes** | Flags files modified in the last 24 hours that aren't tracked by git — on a production node, unexpected changes are suspicious |
+
+If any check fails, the startup stage shows FAIL with the details. The deployment continues (security issues are warnings, not blockers) but the final summary reports issues.
+
+Run it standalone anytime: `protocol security:audit`
+
+### SOC2 Compliance Check
+
+Six checks validate your setup against SOC2 Type II requirements:
+
+| Check | What it verifies |
+|---|---|
+| **Encrypted secrets** | `deployment.secrets` is set to `"encrypted"` and an encryption key exists on this machine |
+| **Audit logging** | The deployment log file exists at `~/.protocol/deployments.log` and isn't world-readable |
+| **Deploy strategy** | `deployment.strategy` is set to `"release"` — immutable tags with audit trails, not mutable branches |
+| **Git integrity** | A remote is configured and HEAD is reachable from the remote — no orphaned or detached states |
+| **Reboot recovery** | A `@reboot` crontab entry exists so Protocol restarts after server reboots |
+| **Key permissions** | The encryption key has `0600` permissions and the Protocol directory has `0700` |
+
+Run it standalone anytime: `protocol soc2:check`
+
+---
+
 ## What Protocol Already Handles
 
 Protocol was built with security in mind. Here's what you get out of the box:
@@ -118,6 +156,8 @@ Before running Protocol in a SOC2-audited environment, go through this list:
 
 ### Nice to Have
 
+- [ ] Run `protocol security:audit` in your CI pipeline to catch issues before they reach production
+- [ ] Run `protocol soc2:check` in CI to enforce compliance gates
 - [ ] Use `security:trojansearch` in your CI pipeline to scan for suspicious code patterns
 - [ ] Set up `security:changedfiles` alerts to review files modified in the last 15 days
 - [ ] Use GitHub's CODEOWNERS feature for sensitive files

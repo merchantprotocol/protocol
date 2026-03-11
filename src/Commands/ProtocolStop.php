@@ -3,19 +3,19 @@
  * NOTICE OF LICENSE
  *
  * MIT License
- * 
+ *
  * Copyright (c) 2019 Merchant Protocol
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- * 
+ *
  * @category   merchantprotocol
  * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
@@ -33,19 +33,20 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
+use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
 Class ProtocolStop extends Command {
 
@@ -72,10 +73,6 @@ Class ProtocolStop extends Command {
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
-     * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
-     * 
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -85,52 +82,94 @@ Class ProtocolStop extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        $output->writeln('<comment>Stopping this protocol node</comment>');
-
         // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
-
             return Command::SUCCESS;
         }
 
-        $arrInput = new ArrayInput([
-                '--dir' => $repo_dir
-            ]);
-
-        // Stop watchers based on deployment strategy
+        $arrInput = new ArrayInput(['--dir' => $repo_dir]);
+        $nullOutput = new NullOutput();
+        $app = $this->getApplication();
         $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
 
-        if ($strategy === 'release') {
-            // Stop the release watcher
-            $command = $this->getApplication()->find('deploy:slave:stop');
-            $returnCode = $command->run($arrInput, $output);
+        $output->writeln('');
+
+        $runner = new StageRunner($output);
+
+        // ── Stage 1: Stopping watchers ──────────────────────────
+        $runner->run('Stopping watchers', function() use ($app, $arrInput, $nullOutput, $strategy) {
+            if ($strategy === 'release') {
+                $app->find('deploy:slave:stop')->run($arrInput, $nullOutput);
+            } else {
+                $app->find('git:slave:stop')->run($arrInput, $nullOutput);
+            }
+
+            // Always stop config watcher
+            $app->find('config:slave:stop')->run($arrInput, $nullOutput);
+        });
+
+        // ── Stage 2: Unlinking configuration ────────────────────
+        $runner->run('Unlinking configuration', function() use ($app, $arrInput, $nullOutput, $repo_dir) {
+            if (Json::read('configuration.remote', false, $repo_dir)) {
+                $app->find('config:unlink')->run($arrInput, $nullOutput);
+            }
+        });
+
+        // ── Stage 3: Stopping containers ────────────────────────
+        $runner->run('Stopping containers', function() use ($repo_dir) {
+            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+            if (!file_exists($composePath)) return;
+
+            $dockerCommand = Docker::getDockerCommand();
+            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} down 2>&1");
+        });
+
+        // ── Stage 4: Removing crontab ───────────────────────────
+        $runner->run('Removing crontab entry', function() use ($repo_dir) {
+            Crontab::removeCrontabRestart($repo_dir);
+        });
+
+        // ── Stage 5: Verifying shutdown ─────────────────────────
+        $runner->run('Verifying shutdown', function() use ($repo_dir, $strategy) {
+            // Verify containers are stopped
+            $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            foreach ($containerNames as $name) {
+                if (Docker::isDockerContainerRunning($name)) {
+                    throw new \RuntimeException("Container '{$name}' is still running");
+                }
+            }
+
+            // Verify watchers are stopped
+            if ($strategy === 'release') {
+                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
+                if ($pid && Shell::isRunning($pid)) {
+                    throw new \RuntimeException('Release watcher is still running');
+                }
+            }
+        }, 'PASS');
+
+        // ── Summary ─────────────────────────────────────────────
+        $allPassed = empty(array_filter($runner->getResults(), fn($s) => !$s['success']));
+        $totalTime = round(array_sum(array_column($runner->getResults(), 'duration')), 1);
+
+        if (StageRunner::isTty()) {
+            fwrite(STDOUT, "\n");
+            if ($allPassed) {
+                fwrite(STDOUT, "\033[32m✓\033[0m \033[1mShutdown complete.\033[0m All services stopped.\n");
+            } else {
+                fwrite(STDOUT, "\033[31m✗\033[0m \033[1mShutdown completed with issues.\033[0m\n");
+            }
+            fwrite(STDOUT, "  \033[90mCompleted in {$totalTime}s\033[0m\n");
         } else {
-            // Stop the legacy git watcher
-            $command = $this->getApplication()->find('git:slave:stop');
-            $returnCode = $command->run($arrInput, $output);
+            $output->writeln('');
+            if ($allPassed) {
+                $output->writeln('✓ Shutdown complete. All services stopped.');
+            } else {
+                $output->writeln('✗ Shutdown completed with issues.');
+            }
+            $output->writeln("  Completed in {$totalTime}s");
         }
-
-        // Always try to stop config watcher — it may be running even without
-        // configuration.remote set (e.g. started by a previous session)
-        $command = $this->getApplication()->find('config:slave:stop');
-        $returnCode = $command->run($arrInput, $output);
-
-        if (Json::read('configuration.remote', false, $repo_dir)) {
-            $command = $this->getApplication()->find('config:unlink');
-            $returnCode = $command->run($arrInput, $output);
-        }
-
-        // run update
-        $command = $this->getApplication()->find('docker:compose:down');
-        $returnCode = $command->run($arrInput, $output);
-
-        // remove the job from crontab
-        Crontab::removeCrontabRestart( $repo_dir );
-
-        // end with status
-        $command = $this->getApplication()->find('status');
-        $returnCode = $command->run($arrInput, $output);
 
         return Command::SUCCESS;
     }

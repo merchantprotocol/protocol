@@ -113,9 +113,23 @@ Class SecurityTrojanSearch extends Command {
 
             $progressBar->advance();
         }
-        foreach ($trojanCommandsEgrep as $trojan) {break;
-            $command = "$find | xargs egrep -i \"{$trojan} *(\" --color";
+        foreach ($trojanCommandsEgrep as $trojan) {
+            $command = "$find | xargs egrep -i \"{$trojan} *(\" --color 2>/dev/null";
             $response = Shell::run($command);
+
+            if ($response) {
+                $lines = explode(PHP_EOL, $response);
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (!$line) continue;
+                    if (array_key_exists($line, $files)) {
+                        $files[$line]++;
+                    } else {
+                        $files[$line] = 1;
+                    }
+                }
+            }
+
             $progressBar->advance();
         }
 

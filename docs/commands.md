@@ -26,7 +26,21 @@ Start everything. This is the one command that makes it all work.
 protocol start
 ```
 
-Pulls your code, links your configs, decrypts your secrets, boots Docker, starts the watchers. On a fresh production node, this is the last command you run during setup.
+Runs through six stages — scanning your codebase, provisioning infrastructure, building containers, running a security audit, checking SOC2 compliance, and verifying health. Each stage shows its progress and collapses to OK, PASS, or FAIL:
+
+```
+[protocol] Scanning codebase.............. OK
+[protocol] Infrastructure provisioning.... OK
+[protocol] Container build & push......... OK
+[protocol] Running security audit......... PASS
+[protocol] SOC 2 compliance check......... PASS
+[protocol] Health checks.................. PASS
+
+✓ Deployment complete. All systems operational.
+  Completed in 12.3s
+```
+
+If a stage fails, it shows the error detail below the FAIL line and continues to the next stage. In CI/CD environments (non-TTY), the output drops the ANSI formatting automatically.
 
 ### `protocol stop`
 
@@ -34,6 +48,19 @@ Stop everything. Kills watchers, unlinks configs, stops Docker containers, remov
 
 ```bash
 protocol stop
+```
+
+Same staged output as `protocol start` — five stages with verification at the end:
+
+```
+[protocol] Stopping watchers.............. OK
+[protocol] Unlinking configuration........ OK
+[protocol] Stopping containers............ OK
+[protocol] Removing crontab entry......... OK
+[protocol] Verifying shutdown............. PASS
+
+✓ Shutdown complete. All services stopped.
+  Completed in 3.1s
 ```
 
 ### `protocol status`
@@ -300,6 +327,49 @@ protocol docker:logs
 
 ---
 
+## Security & Compliance
+
+Commands for auditing your codebase and verifying compliance posture.
+
+### `protocol security:audit`
+
+Run a security scan against your codebase and server. Checks for malicious code patterns, file permission issues, dependency vulnerabilities, suspicious processes, Docker misconfigurations, and unauthorized file changes.
+
+```bash
+protocol security:audit
+```
+
+Results are displayed in a table with PASS/WARN/FAIL for each check. This runs automatically during `protocol start`, but you can run it anytime on its own.
+
+### `protocol soc2:check`
+
+Validate your setup against SOC2 Type II requirements. Checks that secrets are encrypted, audit logging is active, you're using release-based deployment, git integrity is maintained, reboot recovery is configured, and key permissions are correct.
+
+```bash
+protocol soc2:check
+```
+
+Same table format as the security audit. Also runs automatically during `protocol start`.
+
+### `protocol security:trojansearch`
+
+Deep scan for trojan patterns in PHP files. Looks for obfuscated code, backdoors, and known malicious patterns like `eval(base64_decode(...))`.
+
+```bash
+protocol security:trojansearch
+```
+
+### `protocol security:changedfiles`
+
+List files that have been modified recently. Useful for spotting unauthorized changes on production nodes.
+
+```bash
+protocol security:changedfiles
+protocol security:changedfiles --days=7    # look back 7 days
+```
+
+---
+
 ## System
 
 Housekeeping and setup commands.
@@ -330,4 +400,6 @@ Housekeeping and setup commands.
 | Set up configs & secrets | `protocol config:init` |
 | Run a command in Docker | `protocol docker:exec "your command"` |
 | View your encryption key | `protocol secrets:key` |
+| Run a security scan | `protocol security:audit` |
+| Check SOC2 compliance | `protocol soc2:check` |
 | Update Protocol itself | `protocol self:update` |
