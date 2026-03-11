@@ -47,7 +47,7 @@ For low-severity issues or suggestions, you may open a [GitHub issue](https://gi
 - Use SSH key authentication exclusively
 - Regularly rotate SSH keys and access tokens
 - Monitor `protocol status` for unexpected state changes
-- Review the [Security & SOC2 Compliance](docs/security.md) documentation
+- Review the [Security & SOC 2 Ready](docs/security.md) documentation
 
 ### For Contributors
 
@@ -59,4 +59,4 @@ For low-severity issues or suggestions, you may open a [GitHub issue](https://gi
 
 ## Known Issues
 
-See [docs/security.md](docs/security.md) for a current inventory of known security considerations and the SOC2 compliance hardening checklist.
+See [docs/security.md](docs/security.md) for a current inventory of known security considerations and the SOC 2 readiness hardening checklist.

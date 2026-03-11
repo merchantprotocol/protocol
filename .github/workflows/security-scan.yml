@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [master]
   schedule:
-    # Run weekly on Monday at 9am UTC for SOC2 continuous monitoring
+    # Run weekly on Monday at 9am UTC for SOC 2 continuous monitoring
     - cron: '0 9 * * 1'
 
 jobs:

@@ -456,8 +456,12 @@ class BlueGreen
                     $releaseDir = self::getReleaseDir($repo_dir, $version);
                     $containerName = self::getContainerName($releaseDir);
 
-                    if ($containerName) {
-                        Shell::run("docker exec " . escapeshellarg($containerName) . " {$command} 2>&1", $returnVar);
+                    if ($containerName && $command) {
+                        // Validate command contains only safe characters (alphanumeric, spaces, dashes, slashes, dots, colons)
+                        if (!preg_match('/^[a-zA-Z0-9\s\-_\/.:=]+$/', $command)) {
+                            continue;
+                        }
+                        Shell::run("docker exec " . escapeshellarg($containerName) . " sh -c " . escapeshellarg($command) . " 2>&1", $returnVar);
                         if ($returnVar === $expectExit) {
                             $passed = true;
                             break;

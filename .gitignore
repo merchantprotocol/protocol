@@ -9,3 +9,8 @@ protocol.lock
 protocol.lock
 vendor/
 .phpunit.cache/
+.env
+.env.*
+!.env.example
+*.key
+*.pem

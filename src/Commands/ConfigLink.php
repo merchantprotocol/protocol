@@ -143,9 +143,9 @@ Class ConfigLink extends Command {
             $relpath = Dir::dirDepthToElipsis( $dirpath ).$dirpath.$filename;
 
             if (!is_dir($linkdir)) {
-                Shell::run("mkdir -p '$linkdir'");
+                Shell::run("mkdir -p " . escapeshellarg($linkdir));
             }
-            $linkcmd = "cd '$linkdir' && ln -s '$relpath' '$filename' && cd '$working_dir'";
+            $linkcmd = "cd " . escapeshellarg($linkdir) . " && ln -s " . escapeshellarg($relpath) . " " . escapeshellarg($filename) . " && cd " . escapeshellarg($working_dir);
             Shell::run($linkcmd);
         }
         JsonLock::write('configuration.symlinks', $configfiles, $repo_dir);

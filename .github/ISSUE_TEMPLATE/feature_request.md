@@ -22,7 +22,7 @@ Describe any alternative approaches you've considered.
 
 - **Breaking changes:** Yes / No
 - **Affected commands:** (list any existing commands this would change)
-- **Security implications:** (any SOC2/security considerations)
+- **Security implications:** (any SOC 2/security considerations)
 
 ## Additional Context
 

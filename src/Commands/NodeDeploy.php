@@ -92,7 +92,7 @@ Class NodeDeploy extends Command {
 
         // Fetch latest tags
         $remote = Git::remoteName($repo_dir) ?: 'origin';
-        Shell::run("git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+        Shell::run("git -C " . escapeshellarg($repo_dir) . " fetch " . escapeshellarg($remote) . " --tags 2>/dev/null");
 
         // Verify tag exists
         if (!\Gitcd\Helpers\GitHub::tagExists($version, $repo_dir)) {

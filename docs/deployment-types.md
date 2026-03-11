@@ -82,7 +82,7 @@ The pointer is the single source of truth. Nodes don't care about individual com
 protocol deploy:push v1.1.0   # every node rolls back to v1.1.0
 ```
 
-**Good for:** Production environments, teams with multiple developers, anything where you need versioning, rollback, and an audit trail. Required for SOC 2 compliance.
+**Good for:** Production environments, teams with multiple developers, anything where you need versioning, rollback, and an audit trail. Required for SOC 2 readiness.
 
 ### Setup
 

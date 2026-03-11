@@ -82,7 +82,7 @@ When you run `protocol start`, it works through six stages. Each stage shows its
 [protocol] Infrastructure provisioning.... OK
 [protocol] Container build & push......... OK
 [protocol] Running security audit......... PASS
-[protocol] SOC 2 compliance check......... PASS
+[protocol] SOC 2 readiness check.......... PASS
 [protocol] Health checks.................. PASS
 
 ✓ Deployment complete. All systems operational.
@@ -101,7 +101,7 @@ Here's what each stage does:
 2. **Infrastructure provisioning** — Initializes the config repo, starts watchers (release watcher in release mode, git watcher in branch mode), links config files into your project, adds a `@reboot` crontab entry
 3. **Container build & push** — Pulls or builds your Docker image, starts containers with `docker compose up --build -d`, runs `composer install` inside the container if needed
 4. **Running security audit** — Scans for malicious code, checks file permissions, audits dependencies, looks for suspicious processes, validates Docker security, flags unauthorized file changes
-5. **SOC 2 compliance check** — Verifies encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions
+5. **SOC 2 readiness check** — Verifies encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions
 6. **Health checks** — Confirms Docker containers are actually running and watchers are alive
 
 If a stage fails, it shows FAIL with the error detail and continues to the next stage. The summary at the end confirms your operational state — which environment you're on, whether secrets were decrypted, container and watcher status, and crontab recovery.
@@ -138,7 +138,7 @@ Every deployment writes a line to `~/.protocol/deployments.log`:
 2024-03-01T14:22:00Z rollback repo=/opt/myapp from=v1.3.0 to=v1.2.0 status=success
 ```
 
-Timestamped. Versioned. What was running before, what's running now, did it work. SOC2 auditors love this.
+Timestamped. Versioned. What was running before, what's running now, did it work. SOC 2 auditors love this.
 
 View it anytime with `protocol deploy:log`.
 

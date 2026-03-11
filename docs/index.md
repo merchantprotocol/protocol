@@ -13,7 +13,8 @@ Protocol is a CLI tool for continuous deployment and configuration management of
 | [Command Reference](commands.md) | Complete reference for all CLI commands with arguments, options, and behavior |
 | [Configuration Reference](configuration.md) | `protocol.json` schema, config repo pattern, environment branching, symlink mechanics |
 | [Secrets Management](secrets.md) | Encrypting secrets, transferring keys, auto-decryption on deploy, GitHub Actions integration |
-| [Security & SOC2 Compliance](security.md) | SOC2 Type II mapping, vulnerability inventory, hardening checklist, audit logging guidance |
+| [SOC 2 Ready](soc2.md) | Trust Service Criteria mapping, automated checks, hardening checklist, auditor-ready documentation |
+| [Security & Hardening](security.md) | Security controls, encryption internals, audit log format, vulnerability scanning |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes for config, slave mode, Docker, git, and permissions |
 
 ## Quick Start

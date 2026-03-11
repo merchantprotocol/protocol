@@ -143,6 +143,76 @@ class GitHub
     }
 
     /**
+     * Get merged PRs associated with a release tag by finding commits between
+     * the previous tag and this one, then querying for associated PRs.
+     *
+     * Returns an array of PR metadata including approvers.
+     */
+    public static function getMergedPRsForTag(string $tag, ?string $repo_dir = null): array
+    {
+        $slug = self::getRepoSlug($repo_dir);
+        if (!$slug) return [];
+
+        // Find the previous tag to determine the commit range
+        $dir = $repo_dir ?: WORKING_DIR;
+        $tags = self::getTags($dir);
+        $prevTag = null;
+        $found = false;
+        foreach ($tags as $t) {
+            if ($found) {
+                $prevTag = $t;
+                break;
+            }
+            if ($t === $tag) {
+                $found = true;
+            }
+        }
+
+        // Get PRs merged into the default branch between tags
+        $range = $prevTag ? escapeshellarg($prevTag) . ".." . escapeshellarg($tag) : escapeshellarg($tag);
+        $commitJson = Shell::run(
+            "git -C " . escapeshellarg($dir) . " log {$range} --merges --format=%H 2>/dev/null"
+        );
+
+        // Use gh to find PRs associated with the release
+        $json = Shell::run(
+            "gh pr list --repo " . escapeshellarg($slug)
+            . " --state merged --limit 50"
+            . " --json number,title,author,mergedBy,mergedAt,reviews,url"
+            . " --jq " . escapeshellarg('[.[] | select(.mergedAt != null)]')
+            . " 2>/dev/null"
+        );
+
+        if (!$json) return [];
+
+        $prs = json_decode($json, true);
+        if (!is_array($prs)) return [];
+
+        $result = [];
+        foreach ($prs as $pr) {
+            $approvers = [];
+            if (!empty($pr['reviews'])) {
+                foreach ($pr['reviews'] as $review) {
+                    if (($review['state'] ?? '') === 'APPROVED') {
+                        $approvers[] = $review['author']['login'] ?? 'unknown';
+                    }
+                }
+            }
+            $result[] = [
+                'number' => (string) ($pr['number'] ?? ''),
+                'title' => $pr['title'] ?? '',
+                'author' => $pr['author']['login'] ?? '',
+                'approvers' => implode(',', array_unique($approvers)),
+                'merged_by' => $pr['mergedBy']['login'] ?? '',
+                'merged_at' => $pr['mergedAt'] ?? '',
+                'url' => $pr['url'] ?? '',
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Check if a tag exists locally or remotely.
      */
     public static function tagExists(string $tag, ?string $repo_dir = null): bool

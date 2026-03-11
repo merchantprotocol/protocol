@@ -18,7 +18,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/php-8.1%2B-8892BF.svg" alt="PHP 8.1+">
-  <img src="https://img.shields.io/badge/SOC2-Type%20II%20Ready-green.svg" alt="SOC2 Type II Ready">
+  <img src="https://img.shields.io/badge/SOC2-Type%20II%20Ready-green.svg" alt="SOC 2 Type II Ready">
 </p>
 
 ---
@@ -44,7 +44,7 @@ No Jenkins. No GitHub Actions workflows. No webhook endpoints. No deploy scripts
 - **Blue-green shadow deploys** — build in the background, swap in one second
 - **Auto-restart** after server reboots
 - **Zero coordination** between nodes — they all figure it out independently
-- **SOC2 Type II ready** with audit logging and encrypted credentials
+- **SOC 2 Type II ready** with audit logging and encrypted credentials
 
 ---
 
@@ -356,7 +356,8 @@ Composer is bundled — no separate install needed.
 | [Commands](docs/commands.md) | Every command with options and examples |
 | [Configuration](docs/configuration.md) | protocol.json, config repos, environments |
 | [Architecture](docs/architecture.md) | System design and data flow |
-| [Security & SOC2](docs/security.md) | Compliance mapping and hardening |
+| [SOC 2 Ready](docs/soc2.md) | Trust Service Criteria mapping, readiness checks, auditor guide |
+| [Security & Hardening](docs/security.md) | Security controls, encryption internals, vulnerability scanning |
 | [Blue-Green Deploys](docs/blue-green.md) | Shadow deployments with instant rollback |
 | [Migration](docs/migration.md) | Upgrade from branch-based to release-based |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |

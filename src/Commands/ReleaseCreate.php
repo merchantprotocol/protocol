@@ -150,8 +150,8 @@ Class ReleaseCreate extends Command {
             $remote = Git::remoteName($repo_dir) ?: 'origin';
             $branch = Git::branch($repo_dir);
 
-            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push {$remote} {$branch}");
-            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push {$remote} " . escapeshellarg($version));
+            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($branch));
+            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($version));
             $output->writeln(" - Pushed to {$remote}");
 
             // Create GitHub Release

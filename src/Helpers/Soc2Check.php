@@ -1,6 +1,6 @@
 <?php
 /**
- * SOC2 Type II compliance checks.
+ * SOC 2 Type II readiness checks.
  */
 namespace Gitcd\Helpers;
 
@@ -17,7 +17,7 @@ class Soc2Check
     }
 
     /**
-     * Run all SOC2 compliance checks and return results.
+     * Run all SOC 2 readiness checks and return results.
      */
     public function runAll(): array
     {
@@ -27,6 +27,7 @@ class Soc2Check
         $this->checkGitIntegrity();
         $this->checkCrontabRecovery();
         $this->checkKeyPermissions();
+        $this->checkKeyRotation();
 
         return $this->results;
     }
@@ -175,6 +176,28 @@ class Soc2Check
             $this->addResult('Key permissions', 'pass', 'Encryption key has correct permissions (0600)');
         } else {
             $this->addResult('Key permissions', 'fail', implode('; ', $issues));
+        }
+    }
+
+    /**
+     * CC6: Verify encryption key is not older than 90 days.
+     */
+    private function checkKeyRotation(): void
+    {
+        $keyPath = Secrets::keyPath();
+
+        if (!is_file($keyPath)) {
+            return; // No key to check — handled by other checks
+        }
+
+        $mtime = filemtime($keyPath);
+        $ageDays = (int) ((time() - $mtime) / 86400);
+        $maxAgeDays = 90;
+
+        if ($ageDays <= $maxAgeDays) {
+            $this->addResult('Key rotation', 'pass', "Encryption key is {$ageDays} days old (limit: {$maxAgeDays})");
+        } else {
+            $this->addResult('Key rotation', 'warn', "Encryption key is {$ageDays} days old — rotate quarterly (every {$maxAgeDays} days). See: protocol docs/key-rotation.md");
         }
     }
 

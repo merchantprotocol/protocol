@@ -1,6 +1,6 @@
-# Security & SOC2 Compliance
+# Security & SOC 2 Ready
 
-If you're running Protocol in a production environment — especially one that needs to pass a SOC2 audit — this page covers what Protocol gives you, what you need to add, and how to lock everything down.
+If you're running Protocol in a production environment — especially one working toward SOC 2 readiness — this page covers what Protocol gives you, what you need to add, and how to lock everything down.
 
 ## Automated Checks on Every Start
 
@@ -23,9 +23,9 @@ If any check fails, the startup stage shows FAIL with the details. The deploymen
 
 Run it standalone anytime: `protocol security:audit`
 
-### SOC2 Compliance Check
+### SOC 2 Readiness Check
 
-Six checks validate your setup against SOC2 Type II requirements:
+Seven checks validate your setup against SOC 2 Type II requirements:
 
 | Check | What it verifies |
 |---|---|
@@ -66,9 +66,9 @@ Each environment (production, staging, dev) has its own branch in the config rep
 
 ---
 
-## SOC2 Type II — What Auditors Want to See
+## SOC 2 Type II — What Auditors Want to See
 
-SOC2 Type II evaluates your controls over time. Here's how Protocol maps to the things auditors care about:
+SOC 2 Type II evaluates your controls over time. Here's how Protocol maps to the things auditors care about:
 
 ### Access Controls (CC6)
 
@@ -133,7 +133,7 @@ SOC2 Type II evaluates your controls over time. Here's how Protocol maps to the 
 
 ## The Hardening Checklist
 
-Before running Protocol in a SOC2-audited environment, go through this list:
+Before running Protocol in a SOC 2 environment, go through this list:
 
 ### Must Do
 
@@ -159,7 +159,7 @@ Before running Protocol in a SOC2-audited environment, go through this list:
 ### Nice to Have
 
 - [ ] Run `protocol security:audit` in your CI pipeline to catch issues before they reach production
-- [ ] Run `protocol soc2:check` in CI to enforce compliance gates
+- [ ] Run `protocol soc2:check` in CI to enforce readiness gates
 - [ ] Use `security:trojansearch` in your CI pipeline to scan for suspicious code patterns
 - [ ] Set up `security:changedfiles` alerts to review files modified in the last 15 days
 - [ ] Use GitHub's CODEOWNERS feature for sensitive files (already added at `.github/CODEOWNERS`)
@@ -219,7 +219,7 @@ Every deployment action writes to `~/.protocol/deployments.log`:
 - Docker rebuilds
 
 **What you should do with it:**
-- Keep logs for at least 12 months (SOC2 audits typically cover 6-12 months)
+- Keep logs for at least 12 months (SOC 2 audits typically cover 6-12 months)
 - Forward to a centralized, tamper-evident logging system
 - Set up alerts on `status=failure` entries
 

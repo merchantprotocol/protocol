@@ -47,9 +47,9 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $cRepoDir = " -C '$repo_dir' ";
+            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
-        $origin = self::remoteName( $repo_dir );
+        $origin = escapeshellarg(self::remoteName( $repo_dir ));
 
         Shell::passthru(<<<CMD
         git $cRepoDir remote prune $origin \
@@ -72,7 +72,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $cRepoDir = " -C '$repo_dir' ";
+            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         if (!$origin) {
             $origin = self::remoteName( $repo_dir );
@@ -80,7 +80,7 @@ Class Git
         if (!$branch) {
             $branch = self::branch( $repo_dir );
         }
-        Shell::passthru("git $cRepoDir push $origin $branch");
+        Shell::passthru("git $cRepoDir push " . escapeshellarg($origin) . " " . escapeshellarg($branch));
     }
 
     /**
@@ -94,7 +94,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         Shell::run("git $repo_dir add -A");
         Shell::run("git $repo_dir commit -m " . escapeshellarg($message));
@@ -109,7 +109,7 @@ Class Git
     {
         if ($repo_dir) {
             $repo_dir = Dir::realpath($repo_dir);
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         $response = Shell::run("git $repo_dir status");
         if (strpos($response, 'Untracked files')===false) {
@@ -129,12 +129,15 @@ Class Git
     {
         $ignorepath = rtrim($repo_dir, '/').DIRECTORY_SEPARATOR.'.gitignore';
 
-        // @todo make sure the entry doesn't already exist
-        $command = "echo '".<<<FILE
-        $file
-        FILE."' >> $ignorepath";
+        // Make sure the entry doesn't already exist
+        if (is_file($ignorepath)) {
+            $contents = file_get_contents($ignorepath);
+            if (strpos($contents, $file) !== false) {
+                return;
+            }
+        }
 
-        Shell::run($command);
+        file_put_contents($ignorepath, $file . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     /**
@@ -146,7 +149,7 @@ Class Git
     public static function remoteName( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         $remotes = Shell::run("git $repo_dir remote");
         $remotearray = explode(PHP_EOL, $remotes);
@@ -163,9 +166,9 @@ Class Git
     {
         $branch = Git::remoteName( $repo_dir );
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
-        $command = "git $repo_dir config --get remote.$branch.url";
+        $command = "git $repo_dir config --get remote." . escapeshellarg($branch) . ".url";
         return Shell::run( $command );
     }
 
@@ -179,10 +182,10 @@ Class Git
     public static function createBranch( $branch, $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
 
-        $command = "git $repo_dir checkout -b $branch";
+        $command = "git $repo_dir checkout -b " . escapeshellarg($branch);
         $branchstring = Shell::run( $command );
     }
 
@@ -196,10 +199,10 @@ Class Git
     public static function switchBranch( $branch, $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
 
-        $command = "git $repo_dir checkout $branch";
+        $command = "git $repo_dir checkout " . escapeshellarg($branch);
         $branchstring = Shell::run( $command );
     }
 
@@ -212,7 +215,7 @@ Class Git
     public static function branches( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         $command = "git $repo_dir branch";
         $branchstring = Shell::run( $command );
@@ -231,7 +234,7 @@ Class Git
     public static function branch( $repo_dir = false )
     {
         if ($repo_dir) {
-            $repo_dir = " -C '$repo_dir' ";
+            $repo_dir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         $command = "git $repo_dir branch | sed -n -e 's/^\* \(.*\)/\\1/p'";
         return Shell::run( $command );
@@ -246,14 +249,14 @@ Class Git
     public static function truncateBranch( $repo_dir = false, $ignore = [] )
     {
         if ($repo_dir) {
-            $cRepoDir = " -C '$repo_dir' ";
+            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         $files = Dir::dirToArray( $repo_dir, $ignore );
         $files = array_reverse($files); // directories are handled last
         foreach ($files as $file) {
             $absoluteFilePath = Dir::realpath($repo_dir).$file;
             if (is_file($absoluteFilePath)) {
-                Shell::run("rm -f '$absoluteFilePath'");
+                Shell::run("rm -f " . escapeshellarg($absoluteFilePath));
             } elseif (is_dir($file)) {
                 rmdir($file); // safe dir removal requires dir to be empty
             }
@@ -269,8 +272,9 @@ Class Git
      */
     public static function fetch( $repo_dir = false )
     {
+        $cRepoDir = '';
         if ($repo_dir) {
-            $cRepoDir = " -C '$repo_dir' ";
+            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         Shell::run("git $cRepoDir fetch --all");
     }
@@ -326,7 +330,7 @@ Class Git
             if (!is_dir($repo_dir)) {
                 return false;
             }
-            $cd = "cd $repo_dir &&";
+            $cd = "cd " . escapeshellarg($repo_dir) . " &&";
         }
         $command = "$cd git log";
         $response = Shell::run($command);
@@ -349,10 +353,10 @@ Class Git
             if (!$repo_dir) {
                 return false;
             }
-            $cRepoDir = " -C '$repo_dir' ";
+            $cRepoDir = " -C " . escapeshellarg($repo_dir) . " ";
         }
         if (!is_dir($repo_dir)) {
-            Shell::run("mkdir -p '$repo_dir'");
+            Shell::run("mkdir -p " . escapeshellarg($repo_dir));
         }
         Shell::run("git $cRepoDir init");
         Shell::run("git $cRepoDir config core.mergeoptions --no-edit");

@@ -113,11 +113,21 @@ Class Deploy extends Command {
         $output->writeln(" - Setting {$pointerName} = {$version}");
 
         if (!GitHub::setVariable($pointerName, $version, $repo_dir)) {
+            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $version, 'failure', 'global');
             $output->writeln('<error>Failed to set GitHub variable. Check gh auth status.</error>');
             return Command::FAILURE;
         }
 
         AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $version, 'success', 'global');
+
+        // Capture PR approval chain for SOC 2 audit trail
+        $prs = GitHub::getMergedPRsForTag($version, $repo_dir);
+        if (!empty($prs)) {
+            foreach ($prs as $prData) {
+                AuditLog::logApproval($repo_dir, $version, $prData);
+            }
+            $output->writeln(" - Captured approval chain for " . count($prs) . " PR(s)");
+        }
 
         $output->writeln('');
         $output->writeln("<info>Deployed {$version} globally.</info>");

@@ -44,7 +44,7 @@ class Php82 extends BaseInitializer
 
     public function getDescription(): string
     {
-        return 'Nginx + PHP 8.2 FPM — SOC2 compliant, ModSecurity WAF';
+        return 'Nginx + PHP 8.2 FPM — SOC 2 ready, ModSecurity WAF';
     }
 
     public function getDockerImage(): string

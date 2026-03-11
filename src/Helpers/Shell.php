@@ -117,7 +117,7 @@ Class Shell
     {
         $filter = "";
         if ($process) {
-            $filter = "| grep $process";
+            $filter = "| grep " . escapeshellarg($process);
         }
 
         $cmd = "ps aux $filter";
@@ -125,7 +125,7 @@ Class Shell
         $processes = explode(PHP_EOL, $processes);
 
         foreach ($processes as $key => $_ps) {
-            if (strpos($_ps, "0:00.00 grep $process")!==false) {
+            if (strpos($_ps, "grep")!==false && strpos($_ps, $process)!==false) {
                 unset($processes[$key]);
             }
             if (strpos($_ps, $cmd)!==false) {
@@ -210,7 +210,7 @@ Class Shell
         if (!file_exists($outputfile)) {
             $dir = dirname($outputfile);
             if (!is_dir($dir)) {
-                self::run("mkdir -p $dir");
+                self::run("mkdir -p " . escapeshellarg($dir));
             }
             if (is_dir($dir)) {
                 touch($outputfile);
@@ -255,7 +255,9 @@ Class Shell
             if( count(preg_split("/\n/", $result)) > 2){
                 return true;
             }
-        } catch(Exception $e) {}
+        } catch(\Exception $e) {
+            error_log('Shell::isRunning() failed for PID ' . $pid . ': ' . $e->getMessage());
+        }
 
         return false;
     }

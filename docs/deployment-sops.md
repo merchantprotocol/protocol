@@ -1,6 +1,6 @@
 # Deployment Standard Operating Procedures
 
-This document defines the standard procedures for deploying, rolling back, and managing production systems with Protocol. Follow these procedures to maintain SOC 2 compliance and operational reliability.
+This document defines the standard procedures for deploying, rolling back, and managing production systems with Protocol. Follow these procedures to maintain SOC 2 readiness and operational reliability.
 
 ---
 

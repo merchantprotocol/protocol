@@ -20,7 +20,7 @@ This document defines the incident response process for systems managed by Proto
 Incidents may be detected through:
 
 - **Protocol security audit** — `protocol security:audit` flags malicious code, suspicious processes, permission issues
-- **Protocol SOC 2 check** — `protocol soc2:check` detects compliance drift
+- **Protocol SOC 2 check** — `protocol soc2:check` detects readiness drift
 - **Wazuh SIEM alerts** — Real-time file integrity, rootkit detection, log anomalies
 - **Deployment audit log** — Unexpected entries in `protocol deploy:log`
 - **External monitoring** — Uptime checks, health endpoint failures
@@ -32,7 +32,7 @@ Incidents may be detected through:
 # Run security audit
 protocol security:audit
 
-# Run SOC 2 compliance check
+# Run SOC 2 readiness check
 protocol soc2:check
 
 # Check recent deployment activity
@@ -181,7 +181,7 @@ Within 48 hours of resolution, conduct a post-incident review:
 - File tickets for any security improvements identified
 - Update monitoring/alerting rules to catch similar incidents earlier
 - Update this runbook if the process was inadequate
-- If SOC 2 relevant, add the incident to the compliance evidence log
+- If SOC 2 relevant, add the incident to the readiness evidence log
 
 ### Template
 

@@ -439,4 +439,4 @@ All shadow operations are logged to `~/.protocol/deployments.log`:
 2026-03-10T21:05:00+00:00 DEPLOY repo='/opt/myapp' from='v1.2.0' to='v1.3.0' status='success' scope='shadow-promote' user='deploy'
 ```
 
-SOC 2 Type II compliant — every build, promotion, and rollback is tracked with timestamps, versions, and user identity.
+SOC 2 ready — every build, promotion, and rollback is tracked with timestamps, versions, and user identity.

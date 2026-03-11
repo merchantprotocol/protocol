@@ -1,6 +1,6 @@
 <?php
 /**
- * Standalone SOC2 compliance check command.
+ * Standalone SOC 2 readiness check command.
  */
 namespace Gitcd\Commands;
 
@@ -16,12 +16,12 @@ use Gitcd\Helpers\Soc2Check;
 class Soc2CheckCommand extends Command
 {
     protected static $defaultName = 'soc2:check';
-    protected static $defaultDescription = 'Run SOC2 Type II compliance checks';
+    protected static $defaultDescription = 'Run SOC 2 Type II readiness checks';
 
     protected function configure(): void
     {
         $this
-            ->setHelp('Validates encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions against SOC2 Type II requirements.')
+            ->setHelp('Validates encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions against SOC 2 Type II requirements.')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder());
     }
 
@@ -31,7 +31,7 @@ class Soc2CheckCommand extends Command
         Git::checkInitializedRepo($output, $repo_dir);
 
         $output->writeln('');
-        $output->writeln('<fg=white;options=bold>  SOC2 Type II Compliance Check</>');
+        $output->writeln('<fg=white;options=bold>  SOC 2 Type II Readiness Check</>');
         $output->writeln('');
 
         $check = new Soc2Check($repo_dir);
@@ -58,9 +58,9 @@ class Soc2CheckCommand extends Command
         $output->writeln('');
 
         if ($check->passed()) {
-            $output->writeln('  <fg=green>✓</> All SOC2 compliance checks passed.');
+            $output->writeln('  <fg=green>✓</> All SOC 2 readiness checks passed.');
         } else {
-            $output->writeln('  <fg=red>✗</> Compliance issues detected. Review the results above.');
+            $output->writeln('  <fg=red>✗</> Readiness issues detected. Review the results above.');
         }
 
         $output->writeln('');

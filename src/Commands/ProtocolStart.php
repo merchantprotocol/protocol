@@ -249,8 +249,8 @@ Class ProtocolStart extends Command {
             }
         }, 'PASS');
 
-        // ── Stage 5: SOC 2 compliance check ─────────────────────
-        $runner->run('SOC 2 compliance check', function() use ($repo_dir) {
+        // ── Stage 5: SOC 2 readiness check ───────────────────────
+        $runner->run('SOC 2 readiness check', function() use ($repo_dir) {
             $check = new Soc2Check($repo_dir);
             $check->runAll();
             if (!$check->passed()) {

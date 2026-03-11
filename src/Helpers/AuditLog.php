@@ -1,6 +1,6 @@
 <?php
 /**
- * Deployment audit log for SOC 2 compliance.
+ * Deployment audit log for SOC 2 readiness.
  */
 namespace Gitcd\Helpers;
 
@@ -29,7 +29,11 @@ class AuditLog
         }
         $entry .= "\n";
 
-        file_put_contents(self::logPath(), $entry, FILE_APPEND | LOCK_EX);
+        $path = self::logPath();
+        file_put_contents($path, $entry, FILE_APPEND | LOCK_EX);
+
+        // Auto-rotate if log exceeds 5 MB
+        self::rotate();
     }
 
     /**
@@ -99,6 +103,24 @@ class AuditLog
     }
 
     /**
+     * Log a change-approval event capturing PR metadata.
+     */
+    public static function logApproval(string $repo_dir, string $version, array $prData): void
+    {
+        self::write('APPROVAL', $repo_dir, [
+            'version' => $version,
+            'pr_number' => $prData['number'] ?? '',
+            'pr_title' => $prData['title'] ?? '',
+            'pr_author' => $prData['author'] ?? '',
+            'pr_approvers' => $prData['approvers'] ?? '',
+            'pr_merged_by' => $prData['merged_by'] ?? '',
+            'pr_merged_at' => $prData['merged_at'] ?? '',
+            'pr_url' => $prData['url'] ?? '',
+            'user' => get_current_user(),
+        ]);
+    }
+
+    /**
      * Read log entries (returns array of lines).
      */
     public static function read(int $limit = 50): array
@@ -110,5 +132,48 @@ class AuditLog
         if (!$lines) return [];
 
         return array_slice($lines, -$limit);
+    }
+
+    /**
+     * Rotate the audit log if it exceeds the size threshold.
+     *
+     * Archives the current log with a date-stamped suffix and starts a fresh
+     * file. Keeps up to 12 months of archives (52 weekly files).
+     */
+    public static function rotate(int $maxBytes = 5242880, int $maxArchives = 52): void
+    {
+        $path = self::logPath();
+        if (!is_file($path)) return;
+
+        if (filesize($path) < $maxBytes) return;
+
+        $archivePath = $path . '.' . date('Y-m-d') . '.gz';
+
+        // Don't rotate if today's archive already exists
+        if (is_file($archivePath)) return;
+
+        // Compress the current log into a gzipped archive
+        $contents = file_get_contents($path);
+        $gz = gzopen($archivePath, 'w9');
+        if ($gz) {
+            gzwrite($gz, $contents);
+            gzclose($gz);
+            chmod($archivePath, 0600);
+
+            // Truncate the live log
+            file_put_contents($path, '', LOCK_EX);
+        }
+
+        // Prune old archives beyond retention limit
+        $dir = dirname($path);
+        $base = basename($path);
+        $archives = glob($dir . '/' . $base . '.*.gz');
+        if ($archives && count($archives) > $maxArchives) {
+            sort($archives); // oldest first
+            $toRemove = array_slice($archives, 0, count($archives) - $maxArchives);
+            foreach ($toRemove as $old) {
+                unlink($old);
+            }
+        }
     }
 }

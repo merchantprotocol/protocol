@@ -112,8 +112,9 @@ Class Crontab
      */
     public static function appendCrontab( $toappend )
     {
-        $cmd = "(crontab -l ; echo \"$toappend\") | crontab";
-        return Shell::run($cmd);
+        $existing = Shell::run("crontab -l 2>/dev/null") ?: '';
+        $newCrontab = rtrim($existing) . PHP_EOL . $toappend;
+        return self::overwriteCrontab($newCrontab);
     }
 
     /**
@@ -124,8 +125,11 @@ Class Crontab
      */
     public static function overwriteCrontab( $tooverwrite )
     {
-        $cmd = "(echo \"$tooverwrite\") | crontab";
-        return Shell::run($cmd);
+        $tmpFile = tempnam(sys_get_temp_dir(), 'crontab_');
+        file_put_contents($tmpFile, $tooverwrite);
+        $result = Shell::run("crontab " . escapeshellarg($tmpFile));
+        unlink($tmpFile);
+        return $result;
     }
 
     /**

@@ -36,13 +36,13 @@ Brief description of what this PR does.
 - [ ] File operations validate paths stay within expected boundaries
 - [ ] No debug code (`var_dump`, `die`, `print_r`) is included
 
-## SOC2 Compliance
+## SOC 2 Readiness
 
 - [ ] Changes maintain audit trail (git history)
 - [ ] Changes do not weaken access controls
 - [ ] Changes do not expose confidential data
 - [ ] Changes are documented (code comments, docs updates)
-- [ ] N/A - Changes do not affect compliance
+- [ ] N/A - Changes do not affect SOC 2 readiness
 
 ## Related Issues
 

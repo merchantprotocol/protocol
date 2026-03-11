@@ -26,14 +26,14 @@ Start everything. This is the one command that makes it all work.
 protocol start
 ```
 
-Runs through six stages — scanning your codebase, provisioning infrastructure, building containers, running a security audit, checking SOC2 compliance, and verifying health. Each stage shows its progress and collapses to OK, PASS, or FAIL:
+Runs through six stages — scanning your codebase, provisioning infrastructure, building containers, running a security audit, checking SOC 2 readiness, and verifying health. Each stage shows its progress and collapses to OK, PASS, or FAIL:
 
 ```
 [protocol] Scanning codebase.............. OK
 [protocol] Infrastructure provisioning.... OK
 [protocol] Container build & push......... OK
 [protocol] Running security audit......... PASS
-[protocol] SOC 2 compliance check......... PASS
+[protocol] SOC 2 readiness check.......... PASS
 [protocol] Health checks.................. PASS
 
 ✓ Deployment complete. All systems operational.
@@ -337,9 +337,9 @@ protocol docker:logs
 
 ---
 
-## Security & Compliance
+## Security & Readiness
 
-Commands for auditing your codebase and verifying compliance posture.
+Commands for auditing your codebase and verifying SOC 2 readiness.
 
 ### `protocol security:audit`
 
@@ -353,7 +353,7 @@ Results are displayed in a table with PASS/WARN/FAIL for each check. This runs a
 
 ### `protocol soc2:check`
 
-Validate your setup against SOC2 Type II requirements. Checks that secrets are encrypted, audit logging is active, you're using release-based deployment, git integrity is maintained, reboot recovery is configured, and key permissions are correct.
+Validate your setup against SOC 2 Type II requirements. Checks that secrets are encrypted, audit logging is active, you're using release-based deployment, git integrity is maintained, reboot recovery is configured, and key permissions are correct.
 
 ```bash
 protocol soc2:check
@@ -411,5 +411,5 @@ Housekeeping and setup commands.
 | Run a command in Docker | `protocol docker:exec "your command"` |
 | View your encryption key | `protocol secrets:key` |
 | Run a security scan | `protocol security:audit` |
-| Check SOC2 compliance | `protocol soc2:check` |
+| Check SOC 2 readiness | `protocol soc2:check` |
 | Update Protocol itself | `protocol self:update` |
