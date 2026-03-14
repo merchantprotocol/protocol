@@ -1,0 +1,14 @@
+{
+    "name": "Cloudflare",
+    "description": "Cloudflare Pages deployment with backup, verification, and diff review",
+    "version": "1.0.0",
+    "commands": {
+        "cf:deploy": "Verify, diff, backup, and deploy to Cloudflare Pages",
+        "cf:verify": "Verify static output is complete and ready to deploy",
+        "cf:status": "Compare local static files against last deployed backup",
+        "cf:backup": "Create a backup of current static output",
+        "cf:backups": "List or clean up deployment backups"
+    },
+    "config_keys": {},
+    "verify_command": "npx wrangler whoami"
+}

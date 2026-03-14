@@ -27,6 +27,9 @@ if (!defined('TEMPLATES_DIR')) {
 if (!defined('COMMANDS_DIR')) {
     define('COMMANDS_DIR', SRC_DIR . 'Commands' . DIRECTORY_SEPARATOR);
 }
+if (!defined('PLUGINS_DIR')) {
+    define('PLUGINS_DIR', SRC_DIR . 'Plugins' . DIRECTORY_SEPARATOR);
+}
 if (!defined('PROTOCOL_VERSION')) {
     define('PROTOCOL_VERSION', '2.0.0');
 }

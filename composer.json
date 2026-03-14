@@ -4,7 +4,8 @@
     "type": "project",
     "autoload": {
         "psr-4": {
-            "Gitcd\\": "src/"
+            "Gitcd\\": "src/",
+            "Gitcd\\Plugins\\": "src/Plugins/"
         }
     },
     "authors": [

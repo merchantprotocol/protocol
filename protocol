@@ -41,7 +41,7 @@ require __DIR__ . '/src/bootstrap.php';
 use Gitcd\ProtocolApplication;
 $application = new ProtocolApplication();
 
-// ... register commands
+// ... register core commands
 $files = glob(COMMANDS_DIR."*.{php}", GLOB_BRACE);
 foreach($files as $file) {
     $filename = str_replace('.php', '', basename($file));
@@ -50,6 +50,23 @@ foreach($files as $file) {
     if ($ref->isAbstract()) continue;
     $command = new $class();
     $application->add( $command );
+}
+
+// ... register enabled plugin commands
+$enabledPlugins = \Gitcd\Helpers\PluginManager::enabled();
+foreach ($enabledPlugins as $pluginSlug) {
+    $pluginCommandsDir = \Gitcd\Helpers\PluginManager::commandsDir($pluginSlug);
+    if (!is_dir($pluginCommandsDir)) continue;
+    $pluginFiles = glob($pluginCommandsDir . "*.{php}", GLOB_BRACE);
+    foreach ($pluginFiles as $file) {
+        $filename = str_replace('.php', '', basename($file));
+        $class = "\Gitcd\Plugins\\{$pluginSlug}\Commands\\{$filename}";
+        if (!class_exists($class)) continue;
+        $ref = new \ReflectionClass($class);
+        if ($ref->isAbstract()) continue;
+        $command = new $class();
+        $application->add($command);
+    }
 }
 $application->setName('Protocol');
 $application->setVersion(PROTOCOL_VERSION);
