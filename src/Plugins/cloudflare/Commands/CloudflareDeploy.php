@@ -30,8 +30,18 @@ class CloudflareDeploy extends Command
         $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
         $output->writeln('');
 
-        // ── Step 1: Verify ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [1/4] Verify ──────────────────────────────────────────</>');
+        // ── Step 1: Prepare ─────────────────────────────────────────
+        $output->writeln('<fg=cyan>  ── [1/5] Prepare ─────────────────────────────────────────</>');
+        $output->writeln('');
+
+        $prepareCommand = $this->getApplication()->find('cf:prepare');
+        $prepareResult = $prepareCommand->run(new ArrayInput([]), $output);
+        if ($prepareResult !== Command::SUCCESS) {
+            return Command::FAILURE;
+        }
+
+        // ── Step 2: Verify ──────────────────────────────────────────
+        $output->writeln('<fg=cyan>  ── [2/5] Verify ──────────────────────────────────────────</>');
         $output->writeln('');
 
         if (!is_dir($staticDir)) {
@@ -48,13 +58,6 @@ class CloudflareDeploy extends Command
             return Command::FAILURE;
         }
 
-        // Handle 404.html
-        $fourOhFour = $staticDir . '/404.html';
-        if (!file_exists($fourOhFour) && file_exists($staticDir . '/404/index.html')) {
-            copy($staticDir . '/404/index.html', $fourOhFour);
-            $output->writeln("    <fg=green>✓</> Copied 404/index.html → 404.html");
-        }
-
         if (!file_exists($staticDir . '/index.html')) {
             $output->writeln("    <fg=red>FAIL:</> Missing index.html");
             $output->writeln('');
@@ -64,8 +67,8 @@ class CloudflareDeploy extends Command
         $output->writeln("    <fg=green>✓</> Verified: {$fileCount} files, key pages present");
         $output->writeln('');
 
-        // ── Step 2: Compare / Confirm ───────────────────────────────
-        $output->writeln('<fg=cyan>  ── [2/4] Review Changes ──────────────────────────────────</>');
+        // ── Step 3: Compare / Confirm ───────────────────────────────
+        $output->writeln('<fg=cyan>  ── [3/5] Review Changes ──────────────────────────────────</>');
         $output->writeln('');
 
         $backup = CloudflareHelper::latestBackup($repoDir);
@@ -175,8 +178,8 @@ class CloudflareDeploy extends Command
 
         $output->writeln('');
 
-        // ── Step 3: Backup ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [3/4] Backup ──────────────────────────────────────────</>');
+        // ── Step 4: Backup ──────────────────────────────────────────
+        $output->writeln('<fg=cyan>  ── [4/5] Backup ──────────────────────────────────────────</>');
         $output->writeln('');
 
         $backupDir = CloudflareHelper::backupDir($repoDir);
@@ -191,8 +194,8 @@ class CloudflareDeploy extends Command
         $output->writeln("    <fg=green>✓</> Backup created ({$backedUpCount} files)");
         $output->writeln('');
 
-        // ── Step 4: Deploy ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [4/4] Deploy ──────────────────────────────────────────</>');
+        // ── Step 5: Deploy ──────────────────────────────────────────
+        $output->writeln('<fg=cyan>  ── [5/5] Deploy ──────────────────────────────────────────</>');
         $output->writeln('');
 
         $output->writeln("    Deploying {$fileCount} files to Cloudflare Pages: <fg=white>{$projectName}</>");

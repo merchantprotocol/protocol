@@ -122,6 +122,14 @@ class CloudflareHelper
     }
 
     /**
+     * Get the local origin URL that should be replaced during prepare.
+     */
+    public static function localOrigin($repoDir = false): string
+    {
+        return self::config('local_origin', 'https://localhost', $repoDir);
+    }
+
+    /**
      * Build MD5 checksum map for all files in a directory.
      * Returns array keyed by relative path => md5 hash.
      */
