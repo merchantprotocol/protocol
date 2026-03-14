@@ -51,7 +51,7 @@ Class DockerExec extends Command {
     use LockableTrait;
 
     // the name of the command (the part after "bin/console")
-    protected static $defaultName = 'docker:exec';
+    protected static $defaultName = 'docker:exec|exec';
     protected static $defaultDescription = 'Enters the container';
 
     protected function configure(): void

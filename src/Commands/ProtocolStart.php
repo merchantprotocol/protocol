@@ -53,6 +53,7 @@ use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\Webhook;
+use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -60,7 +61,7 @@ Class ProtocolStart extends Command {
 
     use LockableTrait;
 
-    protected static $defaultName = 'start';
+    protected static $defaultName = 'docker:start|start';
     protected static $defaultDescription = 'Starts a node so that the repo and docker image stay up to date and are running';
 
     protected function configure(): void
@@ -282,6 +283,17 @@ Class ProtocolStart extends Command {
             }
         }, 'PASS');
 
+        // ── Stage 7: Disk space check ──────────────────────────
+        $diskWarnings = [];
+        $runner->run('Disk space check', function() use (&$diskWarnings) {
+            $check = DiskCheck::check();
+            $diskWarnings = DiskCheck::formatWarnings($check);
+
+            if ($check['level'] === 'alert') {
+                throw new \RuntimeException("Disk {$check['percent']}% full — cleanup recommended");
+            }
+        }, 'PASS');
+
         // ── Summary ─────────────────────────────────────────────
         $version = JsonLock::read('release.current', null, $repo_dir)
             ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
@@ -303,14 +315,36 @@ Class ProtocolStart extends Command {
             ? "{$runningCount}/{$containerTotal} running"
             : 'none configured';
 
-        $runner->writeSummary([
+        $cleanupCron = Crontab::hasDockerCleanup($repo_dir) ? 'scheduled' : 'not scheduled';
+
+        $summaryInfo = [
             'Environment' => $environment,
             'Strategy'    => $strategy . ($version !== 'unknown' ? " ({$version})" : ''),
             'Secrets'     => $secretsStatus,
             'Containers'  => $containerStatus,
             'Watchers'    => "{$watcherType} watcher {$watcherStatus}",
             'Crontab'     => $cronStatus,
-        ]);
+            'Cleanup'     => $cleanupCron,
+        ];
+
+        $runner->writeSummary($summaryInfo);
+
+        // Show disk warnings after summary if any
+        if (!empty($diskWarnings)) {
+            $output->writeln('');
+            $output->writeln('  <fg=yellow;options=bold>Disk Space Warning</>');
+            foreach ($diskWarnings as $warning) {
+                $output->writeln("    {$warning}");
+            }
+            $output->writeln('');
+        }
+
+        // Suggest cleanup schedule for production blue-green without it
+        if (!$isDev && !Crontab::hasDockerCleanup($repo_dir) && BlueGreen::isEnabled($repo_dir)) {
+            $output->writeln('  <fg=yellow>!</> Blue-green deployment detected without scheduled Docker cleanup.');
+            $output->writeln('    <fg=gray>Old images will accumulate. Enable with:</> <fg=white>protocol docker:cleanup:schedule on</>');
+            $output->writeln('');
+        }
 
         return Command::SUCCESS;
     }

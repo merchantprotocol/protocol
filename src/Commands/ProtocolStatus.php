@@ -45,6 +45,7 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -332,6 +333,27 @@ Class ProtocolStatus extends Command {
             $this->writeLine($output, 'Audit log', "<fg=green>{$logDetail}</>");
         } else {
             $this->writeLine($output, 'Audit log', '<fg=yellow>no entries yet</>');
+        }
+
+        // ── Disk ─────────────────────────────────────────────────
+        $diskCheck = DiskCheck::check();
+        $output->writeln('');
+        $this->writeSection($output, 'Disk');
+
+        $diskColor = match($diskCheck['level']) {
+            'alert' => 'red',
+            'warn' => 'yellow',
+            default => 'green',
+        };
+        $this->writeLine($output, 'Usage', "<fg={$diskColor}>{$diskCheck['percent']}%</> — {$diskCheck['used']} of {$diskCheck['total']} used, {$diskCheck['available']} available");
+
+        if ($diskCheck['docker']) {
+            $d = $diskCheck['docker'];
+            $this->writeLine($output, 'Docker', "images {$d['images']}, containers {$d['containers']}, volumes {$d['volumes']}, cache {$d['buildcache']}");
+            if ($d['reclaimable'] && $d['reclaimable'] !== '0B') {
+                $this->writeLine($output, 'Reclaimable', "<fg={$diskColor}>{$d['reclaimable']}</> <fg=gray>run: protocol docker:cleanup</>");
+                $issues[] = "Docker has {$d['reclaimable']} reclaimable disk space";
+            }
         }
 
         // ── Summary ──────────────────────────────────────────────

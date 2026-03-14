@@ -144,4 +144,72 @@ Class Crontab
 
         self::overwriteCrontab( trim($crontabl).PHP_EOL.PHP_EOL );
     }
+
+    /**
+     * Generate the docker cleanup cron command for the given repo.
+     *
+     * @param string $repo_dir
+     * @param string $schedule Cron schedule expression (default: daily at 3am)
+     * @return string
+     */
+    public static function dockerCleanupCommand( $repo_dir, $schedule = '0 3 * * *' )
+    {
+        $realpath = Dir::realpath( $repo_dir );
+        $protocolpath = Dir::realpath( WEBROOT_DIR."protocol" );
+
+        return <<<SETTINGS
+            #~ PROTOCOL DOCKER CLEANUP START ~
+            {$schedule} php '$protocolpath' docker:cleanup --dir='$realpath'
+            #~ PROTOCOL DOCKER CLEANUP END ~
+            SETTINGS;
+    }
+
+    /**
+     * Add a scheduled docker cleanup cron job.
+     *
+     * @param string $repo_dir
+     * @param string $schedule Cron schedule expression
+     * @return bool
+     */
+    public static function addDockerCleanup( $repo_dir, $schedule = '0 3 * * *' )
+    {
+        // Remove existing first to avoid duplicates
+        if (self::hasDockerCleanup($repo_dir)) {
+            self::removeDockerCleanup($repo_dir);
+        }
+
+        $body = self::dockerCleanupCommand( $repo_dir, $schedule ).PHP_EOL;
+        self::appendCrontab( $body );
+        return true;
+    }
+
+    /**
+     * Remove the docker cleanup cron job.
+     *
+     * @param string $repo_dir
+     * @return void
+     */
+    public static function removeDockerCleanup( $repo_dir )
+    {
+        // We need to remove any docker cleanup block regardless of schedule
+        $crontab = Shell::run("crontab -l");
+        $cleaned = preg_replace(
+            '/#~ PROTOCOL DOCKER CLEANUP START ~.*?#~ PROTOCOL DOCKER CLEANUP END ~/s',
+            '',
+            $crontab
+        );
+        self::overwriteCrontab( trim($cleaned).PHP_EOL.PHP_EOL );
+    }
+
+    /**
+     * Check if a docker cleanup cron job exists.
+     *
+     * @param string $repo_dir
+     * @return bool
+     */
+    public static function hasDockerCleanup( $repo_dir )
+    {
+        $crontab = Shell::run("crontab -l");
+        return strpos($crontab, '#~ PROTOCOL DOCKER CLEANUP START ~') !== false;
+    }
 }
