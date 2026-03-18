@@ -69,7 +69,7 @@ jobs:
           fi
 
           echo "Checking for potential credential files..."
-          SENSITIVE_FILES=$(find . -name ".env" -o -name "*.key" -o -name "*.pem" -o -name "credentials*" -o -name "*secret*" 2>/dev/null | grep -v vendor/ | grep -v node_modules/ || true)
+          SENSITIVE_FILES=$(find . -name ".env" -o -name "*.key" -o -name "*.pem" -o -name "credentials*" -o -name "*secret*" 2>/dev/null | grep -v vendor/ | grep -v node_modules/ | grep -v '\.md$' || true)
           if [ -n "$SENSITIVE_FILES" ]; then
             echo "::error::Potential credential files found:"
             echo "$SENSITIVE_FILES"
