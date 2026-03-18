@@ -1,14 +1,18 @@
 {
     "name": "Cloudflare",
-    "description": "Cloudflare Pages deployment with backup, verification, and diff review",
+    "description": "Cloudflare Pages deployment with verification, rollback, and diff review",
     "version": "1.0.0",
     "commands": {
+        "cf:login": "Authenticate with Cloudflare via wrangler OAuth login",
+        "cf:init": "Setup wizard — connect to Cloudflare, configure project, generate .cfignore",
         "cf:prepare": "Prepare static output for deployment (404 handling, localhost URL replacement)",
-        "cf:deploy": "Prepare, verify, diff, backup, and deploy to Cloudflare Pages",
+        "cf:deploy": "Prepare, verify, diff against live, and deploy to Cloudflare Pages",
         "cf:verify": "Verify static output is complete and ready to deploy",
-        "cf:status": "Compare local static files against last deployed backup",
-        "cf:backup": "Create a backup of current static output",
-        "cf:backups": "List or clean up deployment backups"
+        "cf:status": "Compare local static files against live Cloudflare deployment",
+        "cf:cache-purge": "Purge the Cloudflare CDN cache for specific URLs or the entire zone",
+        "cf:purge": "Delete old deployments to clean up stale files from the project pool",
+        "cf:rollback": "Rollback to a previous Cloudflare Pages deployment",
+        "cf:rollback:list": "List Cloudflare Pages deployments available for rollback"
     },
     "config_keys": {},
     "verify_command": "npx wrangler whoami"
