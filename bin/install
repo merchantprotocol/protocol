@@ -639,15 +639,11 @@ else
   # Make executable and install globally
   sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
-  start_spinner "Setting up global 'protocol' command..."
-  SYMLINK_TARGET="/usr/local/bin/protocol"
-  if [ -L "$SYMLINK_TARGET" ] || [ -e "$SYMLINK_TARGET" ]; then
-    sudo rm -f "$SYMLINK_TARGET"
-  fi
-  if sudo ln -s "$INSTALL_DIR/$BINARY_NAME" "$SYMLINK_TARGET" 2>/dev/null; then
-    step_ok "Protocol installed globally ($SYMLINK_TARGET)"
+  start_spinner "Installing globally..."
+  if run_silent "self:global" sudo "$INSTALL_DIR/$BINARY_NAME" self:global; then
+    step_ok "Protocol installed globally"
   else
-    step_warn "Global install failed — run 'sudo ln -s $INSTALL_DIR/$BINARY_NAME $SYMLINK_TARGET' manually"
+    step_warn "Global install skipped — run 'sudo $INSTALL_DIR/$BINARY_NAME self:global' manually"
   fi
 fi
 
@@ -657,12 +653,19 @@ fi
 echo ""
 if command_exists protocol; then
   printf "  ${GREEN}${BOLD}Protocol is ready!${RESET}\n"
-  printf "  ${DIM}Run 'protocol' to get started.${RESET}\n"
+  echo ""
+  printf "  ${DIM}Next step — set up this node:${RESET}\n"
+  echo ""
+  printf "    ${CYAN}protocol init${RESET}\n"
+  echo ""
 else
   printf "  ${GREEN}${BOLD}Installation complete!${RESET}\n"
   SHELL_NAME="$(basename "${SHELL:-/bin/bash}")"
   SHELL_RC=".${SHELL_NAME}rc"
-  printf "  ${DIM}Restart your shell or run 'source ~/${SHELL_RC}' to use 'protocol'.${RESET}\n"
+  echo ""
+  printf "  ${DIM}Next steps:${RESET}\n"
+  printf "    ${DIM}1.${RESET} source ~/${SHELL_RC}\n"
+  printf "    ${DIM}2.${RESET} ${CYAN}protocol init${RESET}\n"
+  echo ""
 fi
-echo ""
 show_cursor
