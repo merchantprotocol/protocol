@@ -639,11 +639,15 @@ else
   # Make executable and install globally
   sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
-  start_spinner "Installing globally..."
-  if run_silent "self:global" sudo "$INSTALL_DIR/$BINARY_NAME" self:global; then
-    step_ok "Protocol installed globally"
+  start_spinner "Setting up global 'protocol' command..."
+  SYMLINK_TARGET="/usr/local/bin/protocol"
+  if [ -L "$SYMLINK_TARGET" ] || [ -e "$SYMLINK_TARGET" ]; then
+    sudo rm -f "$SYMLINK_TARGET"
+  fi
+  if sudo ln -s "$INSTALL_DIR/$BINARY_NAME" "$SYMLINK_TARGET" 2>/dev/null; then
+    step_ok "Protocol installed globally ($SYMLINK_TARGET)"
   else
-    step_warn "Global install skipped — run 'sudo $INSTALL_DIR/$BINARY_NAME self:global' manually"
+    step_warn "Global install failed — run 'sudo ln -s $INSTALL_DIR/$BINARY_NAME $SYMLINK_TARGET' manually"
   fi
 fi
 
@@ -656,7 +660,9 @@ if command_exists protocol; then
   printf "  ${DIM}Run 'protocol' to get started.${RESET}\n"
 else
   printf "  ${GREEN}${BOLD}Installation complete!${RESET}\n"
-  printf "  ${DIM}Restart your shell or run 'source ~/.zshrc' to use 'protocol'.${RESET}\n"
+  SHELL_NAME="$(basename "${SHELL:-/bin/bash}")"
+  SHELL_RC=".${SHELL_NAME}rc"
+  printf "  ${DIM}Restart your shell or run 'source ~/${SHELL_RC}' to use 'protocol'.${RESET}\n"
 fi
 echo ""
 show_cursor
