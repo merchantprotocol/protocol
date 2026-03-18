@@ -16,7 +16,7 @@ class CloudflareVerify extends Command
     {
         $repoDir = Git::getGitLocalFolder() ?: WORKING_DIR;
         $staticDir = CloudflareHelper::staticDir($repoDir);
-        $minFiles = CloudflareHelper::MIN_FILES;
+        $minFiles = CloudflareHelper::minFiles($repoDir);
 
         $output->writeln('');
         $output->writeln('<fg=cyan>  ── Cloudflare · Verify Static Output ──────────────────────</>');
