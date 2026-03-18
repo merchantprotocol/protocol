@@ -26,6 +26,7 @@ REPO_OWNER="merchantprotocol"
 REPO_NAME="protocol"
 BINARY_NAME="protocol"
 INSTALL_DIR="$HOME/protocol"
+MIN_PHP_VERSION="8.4"
 USE_NIGHTLY=false
 
 # ---------------------------------------------------------------------------
@@ -174,6 +175,28 @@ require_sudo() {
 # Check if a command exists
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Check if installed PHP meets minimum version requirement
+# Returns 0 if PHP >= MIN_PHP_VERSION, 1 otherwise
+php_version_ok() {
+  if ! command_exists php; then
+    return 1
+  fi
+  local current
+  current="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)" || return 1
+  # Compare versions: split on dot, compare major then minor
+  local cur_major cur_minor min_major min_minor
+  cur_major="${current%%.*}"
+  cur_minor="${current#*.}"
+  min_major="${MIN_PHP_VERSION%%.*}"
+  min_minor="${MIN_PHP_VERSION#*.}"
+  if [ "$cur_major" -gt "$min_major" ] 2>/dev/null; then
+    return 0
+  elif [ "$cur_major" -eq "$min_major" ] && [ "$cur_minor" -ge "$min_minor" ] 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 # Install a package via the appropriate package manager (Linux only)
 install_pkg() {
   local pkg="$1"
@@ -249,14 +272,23 @@ if [ "$OS" = "Darwin" ]; then
   fi
 
   # PHP
-  if command_exists php; then
+  if php_version_ok; then
     step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
   else
-    start_spinner "Installing PHP..."
-    if run_silent "PHP" brew install php; then
-      step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+    if command_exists php; then
+      step_warn "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}') — too old, need >=${MIN_PHP_VERSION}"
+    fi
+    start_spinner "Installing PHP >=${MIN_PHP_VERSION}..."
+    if run_silent "PHP" brew install php@8.4; then
+      # Homebrew doesn't always link versioned PHP
+      run_silent "PHP link" brew link --overwrite --force php@8.4 2>/dev/null
+      if php_version_ok; then
+        step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+      else
+        step_fail "PHP installed but version check failed — restart your shell and try again"
+      fi
     else
-      step_fail "Failed to install PHP"
+      step_fail "Failed to install PHP >=${MIN_PHP_VERSION}"
     fi
   fi
 
@@ -410,13 +442,38 @@ else
 
       section "Dependencies"
 
-      if command_exists php; then
+      if php_version_ok; then
         step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
       else
-        start_spinner "Installing PHP..."
-        run_silent "PHP" bash -c "sudo amazon-linux-extras disable php7.1 2>/dev/null; sudo yum remove php-common -y 2>/dev/null; sudo amazon-linux-extras enable php8.1 && sudo yum install -y php-cli php-pdo php-fpm php-json php-mysqlnd" \
-          && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
-          || step_fail "Failed to install PHP"
+        if command_exists php; then
+          step_warn "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}') — too old, need >=${MIN_PHP_VERSION}"
+        fi
+        start_spinner "Installing PHP >=${MIN_PHP_VERSION}..."
+        # Detect AL2 vs AL2023
+        if command_exists amazon-linux-extras; then
+          # Amazon Linux 2 — use Remi repo for modern PHP
+          run_silent "PHP" bash -c "
+            sudo yum remove -y php-common php-cli php-fpm 2>/dev/null || true
+            sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm 2>/dev/null || true
+            sudo yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm 2>/dev/null || true
+            sudo yum-config-manager --enable remi-php84
+            sudo yum install -y php84-php-cli php84-php-pdo php84-php-fpm php84-php-json php84-php-mysqlnd php84-php-mbstring php84-php-xml
+            # Link remi php into PATH
+            if [ -f /opt/remi/php84/root/usr/bin/php ]; then
+              sudo ln -sf /opt/remi/php84/root/usr/bin/php /usr/local/bin/php
+            fi
+          " && php_version_ok \
+            && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
+            || step_fail "Failed to install PHP >=${MIN_PHP_VERSION}. Amazon Linux 2 may require Amazon Linux 2023 for native PHP ${MIN_PHP_VERSION} support."
+        else
+          # Amazon Linux 2023 — PHP 8.4 available from amazonlinux repo
+          run_silent "PHP" bash -c "
+            sudo yum remove -y php-common php-cli php-fpm 2>/dev/null || true
+            sudo dnf install -y php8.4-cli php8.4-pdo php8.4-fpm php8.4-mysqlnd php8.4-mbstring php8.4-xml
+          " && php_version_ok \
+            && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
+            || step_fail "Failed to install PHP >=${MIN_PHP_VERSION}"
+        fi
       fi
 
       if command_exists git; then
@@ -490,10 +547,22 @@ else
         install_pkg git "Git"
       fi
 
-      if command_exists php; then
+      if php_version_ok; then
         step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
       else
-        install_pkg php "PHP"
+        if command_exists php; then
+          step_warn "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}') — too old, need >=${MIN_PHP_VERSION}"
+        fi
+        start_spinner "Installing PHP >=${MIN_PHP_VERSION}..."
+        run_silent "PHP" bash -c "
+          sudo apt-get remove -y php-common php-cli 2>/dev/null || true
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update -y
+          sudo apt-get install -y php8.4-cli php8.4-xml php8.4-mbstring php8.4-curl php8.4-mysql
+        " && php_version_ok \
+          && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
+          || step_fail "Failed to install PHP >=${MIN_PHP_VERSION}"
       fi
 
       if command_exists composer; then
