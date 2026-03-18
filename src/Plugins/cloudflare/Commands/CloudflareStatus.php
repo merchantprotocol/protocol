@@ -10,7 +10,7 @@ use Gitcd\Helpers\Git;
 class CloudflareStatus extends Command
 {
     protected static $defaultName = 'cf:status';
-    protected static $defaultDescription = 'Compare local static files against last deployed backup';
+    protected static $defaultDescription = 'Compare local static files against live Cloudflare deployment';
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
@@ -20,7 +20,7 @@ class CloudflareStatus extends Command
 
         $output->writeln('');
         $output->writeln('<fg=cyan>  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</>');
-        $output->writeln("  <fg=white;options=bold>Cloudflare Pages · Static Output Status</>");
+        $output->writeln("  <fg=white;options=bold>Cloudflare Pages · Status</>");
         $output->writeln("  <fg=gray>Project:</> <fg=white>{$projectName}</>");
         $output->writeln('<fg=cyan>  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</>');
         $output->writeln('');
@@ -32,66 +32,59 @@ class CloudflareStatus extends Command
         }
 
         $localCount = CloudflareHelper::countFiles($staticDir);
-        $output->writeln("    Local files:   <fg=white>{$localCount}</>");
+        $output->writeln("    Local files: <fg=white>{$localCount}</>");
+        $output->writeln('');
 
-        $backup = CloudflareHelper::latestBackup($repoDir);
-        if (!$backup) {
-            $output->writeln("    Last backup:   <fg=gray>none found</>");
-            $output->writeln('');
-            $output->writeln("    <fg=gray>Run</> <fg=cyan>protocol cf:deploy</> <fg=gray>to create a backup and deploy.</>");
+        $output->writeln("    <fg=gray>Fetching deployed file manifest from Cloudflare...</>");
+
+        $deployments = CloudflareHelper::getDeployments($projectName, null, 1);
+        if (empty($deployments)) {
+            $output->writeln("    <fg=gray>No deployments found on Cloudflare.</>");
             $output->writeln('');
             return Command::SUCCESS;
         }
 
-        $backupCount = CloudflareHelper::countFiles($backup);
-        $backupDate = CloudflareHelper::backupDate($backup);
-        $output->writeln("    Backup files:  <fg=white>{$backupCount}</> <fg=gray>(deployed {$backupDate})</>");
+        $latest = $deployments[0];
+        $deployedSums = CloudflareHelper::getDeployedFiles($projectName, $latest['id']);
+        $deployedCount = count($deployedSums);
+        $shortId = $latest['short_id'] ?? substr($latest['id'], 0, 8);
+        $when = $this->timeAgo($latest['created_on'] ?? '');
+
+        $output->writeln("    Deployed:    <fg=white>{$deployedCount}</> files <fg=gray>({$shortId}, {$when})</>");
         $output->writeln('');
 
-        // Build checksum maps and compare
+        if (empty($deployedSums)) {
+            $output->writeln("    <fg=yellow>Could not fetch deployed file manifest.</>");
+            $output->writeln('');
+            return Command::FAILURE;
+        }
+
         $localSums = CloudflareHelper::checksumMap($staticDir);
-        $backupSums = CloudflareHelper::checksumMap($backup);
+        $diff = CloudflareHelper::diffAgainstDeployed($localSums, $deployedSums);
 
-        $added = [];
-        $modified = [];
-        $deleted = [];
+        $addedCount = count($diff['added']);
+        $modifiedCount = count($diff['modified']);
+        $removedCount = count($diff['removed']);
 
-        foreach ($localSums as $rel => $hash) {
-            if (!isset($backupSums[$rel])) {
-                $added[] = $rel;
-            } elseif ($backupSums[$rel] !== $hash) {
-                $modified[] = $rel;
-            }
-        }
-        foreach ($backupSums as $rel => $hash) {
-            if (!isset($localSums[$rel])) {
-                $deleted[] = $rel;
-            }
-        }
-
-        $addedCount = count($added);
-        $modifiedCount = count($modified);
-        $deletedCount = count($deleted);
-
-        if ($addedCount === 0 && $modifiedCount === 0 && $deletedCount === 0) {
-            $output->writeln("    <fg=green>Local files match the last deployed backup. No changes.</>");
+        if ($addedCount === 0 && $modifiedCount === 0 && $removedCount === 0) {
+            $output->writeln("    <fg=green>Local files match the live deployment. No changes.</>");
             $output->writeln('');
             return Command::SUCCESS;
         }
 
         $output->writeln('    <fg=cyan>┌────────────────────────────────────────┐</>');
-        $output->writeln('    <fg=cyan>│</>  <fg=white;options=bold>Changes Since Last Deploy</>             <fg=cyan>│</>');
+        $output->writeln('    <fg=cyan>│</>  <fg=white;options=bold>Changes vs Live Deployment</>           <fg=cyan>│</>');
         $output->writeln('    <fg=cyan>├────────────────────────────────────────┤</>');
         $output->writeln(sprintf('    <fg=cyan>│</>  Added:    <fg=green>%-28s</><fg=cyan>│</>', "{$addedCount} files"));
         $output->writeln(sprintf('    <fg=cyan>│</>  Modified: <fg=yellow>%-28s</><fg=cyan>│</>', "{$modifiedCount} files"));
-        $output->writeln(sprintf('    <fg=cyan>│</>  Deleted:  <fg=red>%-28s</><fg=cyan>│</>', "{$deletedCount} files"));
+        $output->writeln(sprintf('    <fg=cyan>│</>  Deleted:  <fg=red>%-28s</><fg=cyan>│</>', "{$removedCount} files"));
         $output->writeln('    <fg=cyan>└────────────────────────────────────────┘</>');
         $output->writeln('');
 
         if ($modifiedCount > 0) {
-            sort($modified);
+            sort($diff['modified']);
             $output->writeln('    <fg=yellow>Modified files:</>');
-            foreach (array_slice($modified, 0, 15) as $f) {
+            foreach (array_slice($diff['modified'], 0, 15) as $f) {
                 $output->writeln("      <fg=yellow>~</> {$f}");
             }
             if ($modifiedCount > 15) {
@@ -101,9 +94,9 @@ class CloudflareStatus extends Command
         }
 
         if ($addedCount > 0) {
-            sort($added);
+            sort($diff['added']);
             $output->writeln('    <fg=green>New files:</>');
-            foreach (array_slice($added, 0, 15) as $f) {
+            foreach (array_slice($diff['added'], 0, 15) as $f) {
                 $output->writeln("      <fg=green>+</> {$f}");
             }
             if ($addedCount > 15) {
@@ -112,18 +105,31 @@ class CloudflareStatus extends Command
             $output->writeln('');
         }
 
-        if ($deletedCount > 0) {
-            sort($deleted);
-            $output->writeln('    <fg=red>Deleted files:</>');
-            foreach (array_slice($deleted, 0, 15) as $f) {
+        if ($removedCount > 0) {
+            sort($diff['removed']);
+            $output->writeln('    <fg=red>Deleted from live:</>');
+            foreach (array_slice($diff['removed'], 0, 15) as $f) {
                 $output->writeln("      <fg=red>-</> {$f}");
             }
-            if ($deletedCount > 15) {
-                $output->writeln("      <fg=gray>... and " . ($deletedCount - 15) . " more</>");
+            if ($removedCount > 15) {
+                $output->writeln("      <fg=gray>... and " . ($removedCount - 15) . " more</>");
             }
             $output->writeln('');
         }
 
         return Command::SUCCESS;
+    }
+
+    private function timeAgo(string $iso): string
+    {
+        if (!$iso) return 'unknown';
+        $ts = strtotime($iso);
+        if (!$ts) return 'unknown';
+        $diff = time() - $ts;
+        if ($diff < 60) return 'just now';
+        if ($diff < 3600) return intval($diff / 60) . 'm ago';
+        if ($diff < 86400) return intval($diff / 3600) . 'h ago';
+        if ($diff < 604800) return intval($diff / 86400) . 'd ago';
+        return date('Y-m-d', $ts);
     }
 }
