@@ -81,8 +81,8 @@ Class ProtocolGlobal extends Command {
         $datameltpath = WEBROOT_DIR.$this->commandName;
 
         // Is there a conflicting command already in the namespace
-        $which = trim(Shell::run("which {$this->commandName} 2>/dev/null") ?: '');
-        if ($which) {
+        $which = trim(Shell::run("command -v {$this->commandName} 2>/dev/null") ?: '');
+        if ($which && $which[0] === '/') {
             if (!$force) {
                 $output->writeln("<error>Conflicting '{$this->commandName}' command already exists at: {$which}</error>");
                 $output->writeln("<comment>To replace it, run: protocol self:global --force</comment>");
