@@ -3,6 +3,7 @@ namespace Gitcd\Plugins\cloudflare\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
@@ -13,7 +14,12 @@ use Gitcd\Helpers\Shell;
 class CloudflareDeploy extends Command
 {
     protected static $defaultName = 'cf:deploy';
-    protected static $defaultDescription = 'Verify, diff, backup, and deploy to Cloudflare Pages';
+    protected static $defaultDescription = 'Prepare, verify, review, and deploy to Cloudflare Pages';
+
+    protected function configure(): void
+    {
+        $this->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show what would happen without making changes or deploying');
+    }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
@@ -22,26 +28,29 @@ class CloudflareDeploy extends Command
         $projectName = CloudflareHelper::projectName($repoDir);
         $productionUrl = CloudflareHelper::productionUrl($repoDir);
         $helper = $this->getHelper('question');
+        $dryRun = $input->getOption('dry-run');
 
         $output->writeln('');
+        $modeLabel = $dryRun ? 'Deploy (dry run)' : 'Deploy';
         $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>CLOUDFLARE PAGES</> <fg=gray>·</> <fg=yellow>Deploy</>                           <fg=cyan>│</>');
+        $output->writeln("<fg=cyan>  │</>   <fg=white;options=bold>CLOUDFLARE PAGES</> <fg=gray>·</> <fg=yellow>{$modeLabel}</>                      <fg=cyan>│</>");
         $output->writeln("<fg=cyan>  │</>   <fg=gray>Project:</> <fg=white>{$projectName}</>                                  <fg=cyan>│</>");
         $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
         $output->writeln('');
 
         // ── Step 1: Prepare ─────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [1/5] Prepare ─────────────────────────────────────────</>');
+        $output->writeln('<fg=cyan>  ── [1/4] Prepare ─────────────────────────────────────────</>');
         $output->writeln('');
 
         $prepareCommand = $this->getApplication()->find('cf:prepare');
-        $prepareResult = $prepareCommand->run(new ArrayInput([]), $output);
+        $prepareArgs = $dryRun ? new ArrayInput(['--dry-run' => true]) : new ArrayInput([]);
+        $prepareResult = $prepareCommand->run($prepareArgs, $output);
         if ($prepareResult !== Command::SUCCESS) {
             return Command::FAILURE;
         }
 
         // ── Step 2: Verify ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [2/5] Verify ──────────────────────────────────────────</>');
+        $output->writeln('<fg=cyan>  ── [2/4] Verify ──────────────────────────────────────────</>');
         $output->writeln('');
 
         if (!is_dir($staticDir)) {
@@ -52,8 +61,9 @@ class CloudflareDeploy extends Command
         }
 
         $fileCount = CloudflareHelper::countFiles($staticDir);
-        if ($fileCount < CloudflareHelper::MIN_FILES) {
-            $output->writeln("    <fg=red>FAIL:</> Only {$fileCount} files found (expected at least " . CloudflareHelper::MIN_FILES . ")");
+        $minFiles = CloudflareHelper::minFiles($repoDir);
+        if ($fileCount < $minFiles) {
+            $output->writeln("    <fg=red>FAIL:</> Only {$fileCount} files found (expected at least {$minFiles})");
             $output->writeln('');
             return Command::FAILURE;
         }
@@ -67,69 +77,94 @@ class CloudflareDeploy extends Command
         $output->writeln("    <fg=green>✓</> Verified: {$fileCount} files, key pages present");
         $output->writeln('');
 
-        // ── Step 3: Compare / Confirm ───────────────────────────────
-        $output->writeln('<fg=cyan>  ── [3/5] Review Changes ──────────────────────────────────</>');
+        // ── Step 3: Review Changes (compare against Cloudflare) ─────
+        $output->writeln('<fg=cyan>  ── [3/4] Review Changes ──────────────────────────────────</>');
         $output->writeln('');
 
-        $backup = CloudflareHelper::latestBackup($repoDir);
+        $output->writeln("    <fg=gray>Comparing local files against live deployment...</>");
 
-        if (!$backup) {
-            $output->writeln("    <fg=gray>No previous backup found. This appears to be the first deploy.</>");
+        $localSums = CloudflareHelper::checksumMap($staticDir);
+
+        $accountId = CloudflareHelper::getAccountId();
+        if (!$accountId) {
+            $output->writeln("    <fg=yellow>!</> Could not authenticate with Cloudflare API.");
+            $output->writeln("    <fg=gray>Run:</> <fg=white>npx wrangler login</> <fg=gray>to refresh your token.</>");
+            $output->writeln("    <fg=gray>Check ~/.protocol/cloudflare-deploy.log for details.</>");
             $output->writeln('');
-            $question = new ConfirmationQuestion(
-                '    Deploy without comparison? [y/<fg=green>N</>] ', false
-            );
-            if (!$helper->ask($input, $output, $question)) {
-                $output->writeln('    <fg=gray>Deploy cancelled.</>');
-                $output->writeln('');
-                return Command::SUCCESS;
-            }
-        } else {
-            // Diff against backup
-            $localSums = CloudflareHelper::checksumMap($staticDir);
-            $backupSums = CloudflareHelper::checksumMap($backup);
-
-            $added = [];
-            $modified = [];
-            $removed = [];
-
-            foreach ($localSums as $rel => $hash) {
-                if (!isset($backupSums[$rel])) {
-                    $added[] = $rel;
-                } elseif ($backupSums[$rel] !== $hash) {
-                    $modified[] = $rel;
-                }
-            }
-            foreach ($backupSums as $rel => $hash) {
-                if (!isset($localSums[$rel])) {
-                    $removed[] = $rel;
-                }
-            }
-
-            $addedCount = count($added);
-            $modifiedCount = count($modified);
-            $removedCount = count($removed);
-
-            if ($addedCount === 0 && $modifiedCount === 0 && $removedCount === 0) {
-                $output->writeln("    <fg=gray>No changes detected. Output is identical to last deploy.</>");
-                $output->writeln('');
+            if (!$dryRun) {
                 $question = new ConfirmationQuestion(
-                    '    Deploy anyway? [y/<fg=green>N</>] ', false
+                    '    Deploy without comparison? [y/<fg=green>N</>] ', false
+                );
+                if (!$helper->ask($input, $output, $question)) {
+                    $output->writeln('    <fg=gray>Deploy cancelled.</>');
+                    $output->writeln('');
+                    return Command::FAILURE;
+                }
+            }
+            $deployedSums = [];
+        } else {
+            $deployedSums = CloudflareHelper::getLatestDeployedFiles($projectName, $accountId);
+        }
+
+        if (empty($deployedSums)) {
+            $output->writeln("    <fg=gray>No previous deployment found on Cloudflare. This appears to be the first deploy.</>");
+            $output->writeln('');
+            if (!$dryRun) {
+                $question = new ConfirmationQuestion(
+                    '    Deploy without comparison? [y/<fg=green>N</>] ', false
                 );
                 if (!$helper->ask($input, $output, $question)) {
                     $output->writeln('    <fg=gray>Deploy cancelled.</>');
                     $output->writeln('');
                     return Command::SUCCESS;
                 }
+            }
+        } else {
+            $diff = CloudflareHelper::diffAgainstDeployed($localSums, $deployedSums);
+            $added = $diff['added'];
+            $modified = $diff['modified'];
+            $removed = $diff['removed'];
+
+            $addedCount = count($added);
+            $modifiedCount = count($modified);
+            $removedCount = count($removed);
+
+            if ($addedCount === 0 && $modifiedCount === 0 && $removedCount === 0) {
+                $output->writeln('');
+                $output->writeln("    <fg=gray>No changes detected. Local files match what's deployed on Cloudflare.</>");
+                $output->writeln('');
+                if (!$dryRun) {
+                    $question = new ConfirmationQuestion(
+                        '    Deploy anyway? [y/<fg=green>N</>] ', false
+                    );
+                    if (!$helper->ask($input, $output, $question)) {
+                        $output->writeln('    <fg=gray>Deploy cancelled.</>');
+                        $output->writeln('');
+                        return Command::SUCCESS;
+                    }
+                }
             } else {
+                $output->writeln('');
                 $output->writeln('    <fg=cyan>┌────────────────────────────────────────┐</>');
                 $output->writeln('    <fg=cyan>│</>  <fg=white;options=bold>Deploy Change Summary</>                 <fg=cyan>│</>');
                 $output->writeln('    <fg=cyan>├────────────────────────────────────────┤</>');
-                $output->writeln(sprintf('    <fg=cyan>│</>  Added:    <fg=green>%-28s</><fg=cyan>│</>', "{$addedCount} files"));
-                $output->writeln(sprintf('    <fg=cyan>│</>  Removed:  <fg=red>%-28s</><fg=cyan>│</>', "{$removedCount} files"));
-                $output->writeln(sprintf('    <fg=cyan>│</>  Modified: <fg=yellow>%-28s</><fg=cyan>│</>', "{$modifiedCount} files"));
+                $output->writeln(sprintf('    <fg=cyan>│</>  Added:      <fg=green>%-26s</><fg=cyan>│</>', "{$addedCount} files"));
+                $output->writeln(sprintf('    <fg=cyan>│</>  Modified:   <fg=yellow>%-26s</><fg=cyan>│</>', "{$modifiedCount} files"));
+                $output->writeln(sprintf('    <fg=cyan>│</>  Untouched:  <fg=gray>%-26s</><fg=cyan>│</>', "{$removedCount} files"));
                 $output->writeln('    <fg=cyan>└────────────────────────────────────────┘</>');
                 $output->writeln('');
+
+                if ($addedCount > 0) {
+                    sort($added);
+                    $output->writeln('    <fg=green>Added:</>');
+                    foreach (array_slice($added, 0, 20) as $f) {
+                        $output->writeln("      <fg=green>+</> {$f}");
+                    }
+                    if ($addedCount > 20) {
+                        $output->writeln("      <fg=gray>... and " . ($addedCount - 20) . " more</>");
+                    }
+                    $output->writeln('');
+                }
 
                 if ($modifiedCount > 0) {
                     sort($modified);
@@ -145,72 +180,61 @@ class CloudflareDeploy extends Command
 
                 if ($removedCount > 0) {
                     sort($removed);
-                    $output->writeln('    <fg=red>Will be removed from live site:</>');
-                    foreach (array_slice($removed, 0, 20) as $f) {
-                        $output->writeln("      <fg=red>-</> {$f}");
+                    $output->writeln('    <fg=gray>Untouched (remain in project pool):</>');
+                    foreach (array_slice($removed, 0, 5) as $f) {
+                        $output->writeln("      <fg=gray>·</> {$f}");
                     }
-                    if ($removedCount > 20) {
-                        $output->writeln("      <fg=gray>... and " . ($removedCount - 20) . " more</>");
+                    if ($removedCount > 5) {
+                        $output->writeln("      <fg=gray>... and " . ($removedCount - 5) . " more</>");
                     }
                     $output->writeln('');
-
-                    // Warn if removing a large percentage
-                    $oldCount = count($backupSums);
-                    if ($oldCount > 0) {
-                        $removedPct = intval($removedCount * 100 / $oldCount);
-                        if ($removedPct > 20) {
-                            $output->writeln("    <fg=red;options=bold>WARNING:</> {$removedPct}% of files would be removed!");
-                            $output->writeln('');
-                        }
-                    }
                 }
 
-                $question = new ConfirmationQuestion(
-                    '    Proceed with deploy? [y/<fg=green>N</>] ', false
-                );
-                if (!$helper->ask($input, $output, $question)) {
-                    $output->writeln('    <fg=gray>Deploy cancelled.</>');
-                    $output->writeln('');
-                    return Command::SUCCESS;
+                if (!$dryRun) {
+                    $question = new ConfirmationQuestion(
+                        '    Proceed with deploy? [y/<fg=green>N</>] ', false
+                    );
+                    if (!$helper->ask($input, $output, $question)) {
+                        $output->writeln('    <fg=gray>Deploy cancelled.</>');
+                        $output->writeln('');
+                        return Command::SUCCESS;
+                    }
                 }
             }
         }
 
         $output->writeln('');
 
-        // ── Step 4: Backup ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [4/5] Backup ──────────────────────────────────────────</>');
+        // ── Step 4: Deploy ──────────────────────────────────────────
+        $output->writeln('<fg=cyan>  ── [4/4] Deploy ──────────────────────────────────────────</>');
         $output->writeln('');
 
-        $backupDir = CloudflareHelper::backupDir($repoDir);
-        if (!is_dir($backupDir)) {
-            mkdir($backupDir, 0755, true);
+        if ($dryRun) {
+            $output->writeln("    <fg=yellow>→</> Would deploy {$fileCount} files to Cloudflare Pages: <fg=white>{$projectName}</>");
+            $output->writeln('');
+            $output->writeln('<fg=cyan>  ┌──────────────────────────────────────────────────────────┐</>');
+            $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=yellow;options=bold>Dry run complete</> — no changes were made              <fg=cyan>│</>');
+            $output->writeln("<fg=cyan>  │</>   <fg=gray>Target:</> <fg=white>{$productionUrl}</>                       <fg=cyan>│</>");
+            $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  └──────────────────────────────────────────────────────────┘</>');
+            $output->writeln('');
+        } else {
+            $output->writeln("    Deploying {$fileCount} files to Cloudflare Pages: <fg=white>{$projectName}</>");
+            $output->writeln('');
+
+            Shell::passthru("npx wrangler pages deploy " . escapeshellarg($staticDir) . " --project-name=" . escapeshellarg($projectName));
+
+            $output->writeln('');
+            $output->writeln('<fg=cyan>  ┌──────────────────────────────────────────────────────────┐</>');
+            $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Deploy complete!</>                                   <fg=cyan>│</>');
+            $output->writeln("<fg=cyan>  │</>   <fg=gray>Live at:</> <fg=white>{$productionUrl}</>                      <fg=cyan>│</>");
+            $output->writeln("<fg=cyan>  │</>   <fg=gray>Rollback:</> <fg=white>protocol cf:rollback</>                  <fg=cyan>│</>");
+            $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  └──────────────────────────────────────────────────────────┘</>');
+            $output->writeln('');
         }
-        $timestamp = date('Ymd-His');
-        $backupPath = $backupDir . '/' . CloudflareHelper::BACKUP_PREFIX . '-' . $timestamp;
-
-        Shell::run("cp -r " . escapeshellarg($staticDir) . " " . escapeshellarg($backupPath));
-        $backedUpCount = CloudflareHelper::countFiles($backupPath);
-        $output->writeln("    <fg=green>✓</> Backup created ({$backedUpCount} files)");
-        $output->writeln('');
-
-        // ── Step 5: Deploy ──────────────────────────────────────────
-        $output->writeln('<fg=cyan>  ── [5/5] Deploy ──────────────────────────────────────────</>');
-        $output->writeln('');
-
-        $output->writeln("    Deploying {$fileCount} files to Cloudflare Pages: <fg=white>{$projectName}</>");
-        $output->writeln('');
-
-        Shell::passthru("npx wrangler pages deploy " . escapeshellarg($staticDir) . " --project-name=" . escapeshellarg($projectName));
-
-        $output->writeln('');
-        $output->writeln('<fg=cyan>  ┌──────────────────────────────────────────────────────────┐</>');
-        $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Deploy complete!</>                                   <fg=cyan>│</>');
-        $output->writeln("<fg=cyan>  │</>   <fg=gray>Live at:</> <fg=white>{$productionUrl}</>                      <fg=cyan>│</>");
-        $output->writeln('<fg=cyan>  │</>                                                          <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  └──────────────────────────────────────────────────────────┘</>');
-        $output->writeln('');
 
         return Command::SUCCESS;
     }
