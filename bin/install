@@ -1,312 +1,591 @@
 #!/bin/bash
+# ============================================================================
+# Protocol — One-Line Installer
+# ============================================================================
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install | bash
+#
+# Install nightly (latest from master, may be unstable):
+#   curl -fsSL https://raw.githubusercontent.com/merchantprotocol/protocol/master/bin/install | bash -s -- --nightly
+#
+# Options:
+#   --nightly   Install from the latest master branch instead of the latest release tag.
+#               Use this if you want bleeding-edge features (may be unstable).
+#
+# Idempotent — safe to run multiple times.
+# Supports macOS (Homebrew) and Linux (Amazon Linux, Ubuntu).
+# ============================================================================
 
-set +x
+set -euo pipefail
 
-# macOS detection
-if [[ "$(uname)" == "Darwin" ]]; then
-    echo "Detected macOS (Darwin)"
-    # Check for Homebrew
-    if ! command -v brew >/dev/null 2>&1; then
-        echo "Homebrew is not installed. Please install Homebrew from https://brew.sh/ before proceeding."
-        exit 1
-    fi
-    
-    # Function to prompt and install via brew
-    prompt_install() {
-        local pkg="$1"
-        local brew_pkg="${2:-$1}"
-        if command -v $pkg >/dev/null 2>&1; then
-            echo "$pkg is already installed: $($pkg --version | head -n1)"
-        else
-            read -p "Do you want to install $pkg using Homebrew? (y/N): " yn
-            case $yn in
-                [Yy]*)
-                    brew install $brew_pkg
-                    if command -v $pkg >/dev/null 2>&1; then
-                        echo "$pkg installed: $($pkg --version | head -n1)"
-                    else
-                        echo "Failed to install $pkg. Please check for errors."
-                    fi
-                    ;;
-                *)
-                    echo "Skipping $pkg installation."
-                    ;;
-            esac
-        fi
-    }
-    
-    # Docker or OrbStack
-    if command -v docker >/dev/null 2>&1; then
-        echo "docker is available: $(docker --version | head -n1)"
-    elif command -v orbstack >/dev/null 2>&1; then
-        echo "OrbStack is installed. OrbStack provides Docker compatibility."
-        echo "You can use 'docker' commands via OrbStack."
-    else
-        read -p "Neither Docker nor OrbStack is installed. Do you want to install Docker Desktop using Homebrew? (y/N): " yn
-        case $yn in
-            [Yy]*)
-                brew install --cask docker
-                echo "Please launch Docker Desktop manually after installation."
-                ;;
-            *)
-                echo "Skipping Docker installation."
-                ;;
-        esac
-    fi
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+REPO_URL="https://github.com/merchantprotocol/protocol.git"
+REPO_OWNER="merchantprotocol"
+REPO_NAME="protocol"
+BINARY_NAME="protocol"
+INSTALL_DIR="$HOME/protocol"
+USE_NIGHTLY=false
 
-    # Docker Compose (prefer 'docker compose' if OrbStack or modern Docker is present)
-    if command -v docker >/dev/null 2>&1; then
-        if docker compose version >/dev/null 2>&1; then
-            echo "'docker compose' is available: $(docker compose version | head -n1)"
-        elif command -v docker-compose >/dev/null 2>&1; then
-            echo "docker-compose is available: $(docker-compose --version | head -n1)"
-        else
-            read -p "'docker compose' is not available. Do you want to install Docker Compose as a standalone package? (y/N): " yn
-            case $yn in
-                [Yy]*)
-                    brew install docker-compose
-                    if command -v docker-compose >/dev/null 2>&1; then
-                        echo "docker-compose installed: $(docker-compose --version | head -n1)"
-                    else
-                        echo "Failed to install docker-compose."
-                    fi
-                    ;;
-                *)
-                    echo "Skipping docker-compose installation."
-                    ;;
-            esac
-        fi
-    elif command -v orbstack >/dev/null 2>&1; then
-        echo "OrbStack provides 'docker compose' support."
-    else
-        echo "Docker is not available, so Docker Compose is not needed."
-    fi
-    # PHP
-    prompt_install php
-    # Git
-    prompt_install git
-    # Composer
-    if command -v composer >/dev/null 2>&1; then
-        echo "composer is already installed: $(composer --version | head -n1)"
-    else
-        read -p "Do you want to install Composer (PHP dependency manager) using Homebrew? (y/N): " yn
-        case $yn in
-            [Yy]*)
-                brew install composer
-                if command -v composer >/dev/null 2>&1; then
-                    echo "composer installed: $(composer --version | head -n1)"
-                else
-                    echo "Failed to install composer."
-                fi
-                ;;
-            *)
-                echo "Skipping composer installation."
-                ;;
-        esac
-    fi
-    # --- Installing Protocol on macOS ---
-    echo "\nInstalling Protocol"
-    BINARY_NAME="protocol"
-    USER_BIN="$HOME/bin"
-    USR_LOCAL_BIN="/usr/local/bin"
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
+for arg in "$@"; do
+  case "$arg" in
+    --nightly) USE_NIGHTLY=true ;;
+  esac
+done
 
-    # Step 1: Attempt to auto-detect protocol directory as parent of script
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-    PROTOCOL_DIR="$PARENT_DIR"
-    # Check if protocol binary exists in detected dir
-    if [ -f "$PROTOCOL_DIR/$BINARY_NAME" ]; then
-        echo "Auto-detected protocol directory: $PROTOCOL_DIR"
-    else
-        echo "Could not auto-detect protocol directory or binary not found at $PROTOCOL_DIR/$BINARY_NAME."
-        # Fallback: search common locations
-        CANDIDATES=("$PWD/protocol" "$HOME/protocol")
-        PROTOCOL_DIR=""
-        for dir in "${CANDIDATES[@]}"; do
-            if [ -d "$dir" ]; then
-                read -p "Found protocol directory at $dir. Use this directory? (y/N): " yn
-                case $yn in
-                    [Yy]*)
-                        PROTOCOL_DIR="$dir"
-                        break
-                        ;;
-                    *)
-                        ;;
-                esac
-            fi
-        done
-        # If not found, prompt user to specify or clone
-        if [ -z "$PROTOCOL_DIR" ]; then
-            read -p "No protocol directory found. Would you like to clone the repo? (y/N): " yn
-            if [[ "$yn" =~ ^[Yy]$ ]]; then
-                read -p "Where should protocol be cloned? (default: $HOME/protocol): " input_dir
-                if [ -z "$input_dir" ]; then
-                    input_dir="$HOME/protocol"
-                fi
-                git clone https://github.com/merchantprotocol/protocol.git "$input_dir"
-                PROTOCOL_DIR="$input_dir"
-            else
-                read -p "Please specify the path to your protocol directory: " input_dir
-                if [ -d "$input_dir" ]; then
-                    PROTOCOL_DIR="$input_dir"
-                else
-                    echo "Directory $input_dir does not exist. Aborting."
-                    exit 1
-                fi
-            fi
-        fi
-    fi
-    # Step 2: Make binary executable
-    if [ -f "$PROTOCOL_DIR/$BINARY_NAME" ]; then
-        chmod +x "$PROTOCOL_DIR/$BINARY_NAME"
-    fi
+# ---------------------------------------------------------------------------
+# Terminal UI — Colors & Symbols
+# ---------------------------------------------------------------------------
+BOLD="\033[1m"
+DIM="\033[2m"
+RESET="\033[0m"
+GREEN="\033[1;32m"
+RED="\033[1;31m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+CYAN="\033[1;36m"
+WHITE="\033[1;37m"
 
-    # Step 3: Check if $PROTOCOL_DIR is already in PATH config files before prompting
-    EXPORT_LINE="export PATH=\"$PROTOCOL_DIR:\$PATH\""
-    FOUND=0
-    for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
-        if [ -f "$file" ] && grep -Fxq "$EXPORT_LINE" "$file"; then
-            echo "$PROTOCOL_DIR already present in PATH in $(basename $file)"
-            FOUND=1
-        fi
+CHECK="${GREEN}✔${RESET}"
+CROSS="${RED}✖${RESET}"
+WARN_SYM="${YELLOW}⚠${RESET}"
+ARROW="${BLUE}›${RESET}"
+
+# Spinner frames
+SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+SPINNER_PID=""
+
+# Log file for suppressed output
+INSTALL_LOG="/tmp/protocol-install.log"
+: > "$INSTALL_LOG"
+
+# ---------------------------------------------------------------------------
+# Terminal UI — Primitives
+# ---------------------------------------------------------------------------
+hide_cursor() { printf "\033[?25l"; }
+show_cursor() { printf "\033[?25h"; }
+
+cleanup() {
+  stop_spinner 2>/dev/null
+  show_cursor
+  if [ "${INSTALL_FAILED:-false}" = true ]; then
+    echo ""
+    printf "  ${DIM}Full log: %s${RESET}\n" "$INSTALL_LOG"
+  fi
+}
+trap cleanup EXIT
+
+clear_line() { printf "\r\033[2K"; }
+
+start_spinner() {
+  local msg="$1"
+  stop_spinner 2>/dev/null
+  (
+    local i=0
+    while true; do
+      local frame="${SPINNER_FRAMES[$((i % ${#SPINNER_FRAMES[@]}))]}"
+      printf "\r  ${CYAN}%s${RESET} %s" "$frame" "$msg"
+      sleep 0.08
+      i=$((i + 1))
     done
-    if [[ ":$PATH:" == *":$PROTOCOL_DIR:"* ]] || [ $FOUND -eq 1 ]; then
-        echo "$PROTOCOL_DIR is already in your PATH."
-    else
-        read -p "Would you like to add $PROTOCOL_DIR to your PATH? (y/N): " yn
-        case $yn in
-            [Yy]*)
-                for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
-                    if [ ! -f "$file" ]; then
-                        touch "$file"
-                    fi
-                    if ! grep -Fxq "$EXPORT_LINE" "$file"; then
-                        echo "$EXPORT_LINE" >> "$file"
-                        echo "Added $PROTOCOL_DIR to PATH in $(basename $file)"
-                    fi
-                done
-                # Update current session
-                export PATH="$PROTOCOL_DIR:$PATH"
-                ;;
-            *)
-                echo "You can add $PROTOCOL_DIR to your PATH manually if you wish to run 'protocol' from anywhere."
-                ;;
-        esac
-    fi
-    TARGET_BIN="$PROTOCOL_DIR/$BINARY_NAME"
+  ) &
+  SPINNER_PID=$!
+  disown "$SPINNER_PID" 2>/dev/null
+}
 
-    # Step 4: (macOS) Skip self:global for local safety
-    # Not running self:global on macOS to avoid global install issues.
-    # If you want a global install, run: $TARGET_BIN self:global manually (may require sudo).
-    exit 0
+stop_spinner() {
+  if [ -n "${SPINNER_PID:-}" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null || true
+  fi
+  SPINNER_PID=""
+  clear_line
+}
+
+step_ok() {
+  stop_spinner
+  printf "  ${CHECK}  %s\n" "$1"
+}
+
+step_fail() {
+  stop_spinner
+  printf "  ${CROSS}  %s\n" "$1"
+  INSTALL_FAILED=true
+  show_cursor
+  printf "\n  ${RED}${BOLD}Installation failed.${RESET}\n"
+  printf "  ${DIM}Check the log for details: %s${RESET}\n\n" "$INSTALL_LOG"
+  exit 1
+}
+
+step_warn() {
+  stop_spinner
+  printf "  ${WARN_SYM}  %s\n" "$1"
+}
+
+section() {
+  echo ""
+  printf "  ${WHITE}${BOLD}%s${RESET}\n" "$1"
+  printf "  ${DIM}%s${RESET}\n" "$(printf '%.0s─' $(seq 1 ${#1}))"
+}
+
+# Run a command silently, capturing output to log
+run_silent() {
+  local desc="$1"
+  shift
+  echo "=== [$desc] $(date) ===" >> "$INSTALL_LOG"
+  echo "CMD: $*" >> "$INSTALL_LOG"
+  if "$@" >> "$INSTALL_LOG" 2>&1; then
+    return 0
+  else
+    local rc=$?
+    echo "EXIT CODE: $rc" >> "$INSTALL_LOG"
+    return $rc
+  fi
+}
+
+# Prompt the user for sudo access
+require_sudo() {
+  local package="$1"
+  local reason="$2"
+  if sudo -n true 2>/dev/null; then
+    return 0
+  fi
+  stop_spinner
+  echo ""
+  printf "  ${ARROW}  ${BOLD}%s${RESET} %s\n" "$package" "$reason"
+  printf "     ${DIM}Enter your password to continue:${RESET}\n"
+  echo ""
+  if sudo -v 2>/dev/null; then
+    echo ""
+    return 0
+  else
+    step_fail "sudo authentication failed"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Dependency helpers
+# ---------------------------------------------------------------------------
+
+# Check if a command exists
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# Install a package via the appropriate package manager (Linux only)
+install_pkg() {
+  local pkg="$1"
+  local display_name="${2:-$1}"
+
+  start_spinner "Installing ${display_name}..."
+
+  if command_exists yum; then
+    run_silent "$display_name" sudo yum install -y "$pkg" \
+      && step_ok "$display_name" \
+      || step_fail "Failed to install ${display_name}"
+  elif command_exists apt-get; then
+    run_silent "$display_name" sudo apt-get install -y "$pkg" \
+      && step_ok "$display_name" \
+      || step_fail "Failed to install ${display_name}"
+  else
+    step_fail "No supported package manager found (yum or apt-get)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
+hide_cursor
+echo ""
+printf "  ${BOLD}Protocol Installer${RESET}\n"
+if [ "$USE_NIGHTLY" = true ]; then
+  printf "  ${DIM}channel: nightly (latest master)${RESET}\n"
+else
+  printf "  ${DIM}channel: stable (latest release)${RESET}\n"
 fi
 
-PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-echo "Platform is $PLATFORM"
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+OS="$(uname -s)"
 
-case "$PLATFORM" in
+if [ "$OS" = "Darwin" ]; then
+  # ==========================================================================
+  # macOS
+  # ==========================================================================
 
-    ("\"Amazon Linux\"")
-        echo "Updating the system"
-        sudo yum update -y
+  section "Prerequisites"
 
+  # Homebrew
+  if command_exists brew; then
+    step_ok "Homebrew $(brew --version 2>/dev/null | head -n1 | awk '{print $2}')"
+  else
+    step_fail "Homebrew is required — install from https://brew.sh/"
+  fi
 
-        echo "Installing Docker"
+  # Docker
+  if command_exists docker; then
+    step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
+  elif command_exists orbstack; then
+    step_ok "OrbStack (Docker-compatible)"
+  else
+    start_spinner "Installing Docker Desktop..."
+    if run_silent "Docker" brew install --cask docker; then
+      step_ok "Docker Desktop installed — launch it manually"
+    else
+      step_warn "Docker Desktop — skipped (install manually if needed)"
+    fi
+  fi
 
-        sudo amazon-linux-extras enable docker
-        sudo yum install -y docker
-        sudo systemctl enable docker.service
-        sudo systemctl start docker.service
+  # Docker Compose
+  if command_exists docker && docker compose version >/dev/null 2>&1; then
+    step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
+  elif command_exists docker-compose; then
+    step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
+  else
+    step_warn "Docker Compose — not found (install if needed)"
+  fi
 
-        sudo groupadd docker
-        sudo usermod -aG docker $USER
+  # PHP
+  if command_exists php; then
+    step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+  else
+    start_spinner "Installing PHP..."
+    if run_silent "PHP" brew install php; then
+      step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+    else
+      step_fail "Failed to install PHP"
+    fi
+  fi
 
-        docker -v
+  # Git
+  if command_exists git; then
+    step_ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+  else
+    start_spinner "Installing Git..."
+    if run_silent "Git" brew install git; then
+      step_ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+    else
+      step_fail "Failed to install Git"
+    fi
+  fi
 
+  # Composer
+  if command_exists composer; then
+    step_ok "Composer $(composer --version 2>/dev/null | awk '{print $NF}' | head -n1)"
+  else
+    start_spinner "Installing Composer..."
+    if run_silent "Composer" brew install composer; then
+      step_ok "Composer $(composer --version 2>/dev/null | awk '{print $NF}' | head -n1)"
+    else
+      step_fail "Failed to install Composer"
+    fi
+  fi
 
-        echo "Installing Docker-Compose"
+  # ========================================================================
+  # Install Protocol (macOS)
+  # ========================================================================
+  section "Protocol"
 
-        wget https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) 
-        sudo mv docker-compose-$(uname -s)-$(uname -m) /usr/local/bin/docker-compose
-        sudo chmod -v +x /usr/local/bin/docker-compose
+  # Determine install source
+  if [ -f "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../$BINARY_NAME" ] 2>/dev/null; then
+    PROTOCOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    step_ok "Using local checkout at ${PROTOCOL_DIR}"
+  elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
+    PROTOCOL_DIR="$INSTALL_DIR"
+    step_ok "Found existing install at ${PROTOCOL_DIR}"
 
-        docker-compose -v
+    # Update to correct ref
+    start_spinner "Updating Protocol..."
+    cd "$PROTOCOL_DIR"
+    if [ "$USE_NIGHTLY" = true ]; then
+      run_silent "git pull" git pull origin master
+    else
+      run_silent "git fetch" git fetch --tags
+      LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+      if [ -n "$LATEST_TAG" ]; then
+        run_silent "checkout release" git checkout "$LATEST_TAG"
+      fi
+    fi
+    step_ok "Updated Protocol"
+  else
+    start_spinner "Cloning Protocol..."
+    if [ "$USE_NIGHTLY" = true ]; then
+      run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR" \
+        && step_ok "Cloned Protocol (nightly)" \
+        || step_fail "Failed to clone repository"
+    else
+      # Clone then checkout latest tag
+      if run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR"; then
+        cd "$INSTALL_DIR"
+        LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+        if [ -n "$LATEST_TAG" ]; then
+          run_silent "checkout release" git checkout "$LATEST_TAG"
+          step_ok "Cloned Protocol ${LATEST_TAG}"
+        else
+          step_warn "Cloned Protocol — no release tags found, using master"
+        fi
+      else
+        step_fail "Failed to clone repository"
+      fi
+    fi
+    PROTOCOL_DIR="$INSTALL_DIR"
+  fi
 
+  # Install dependencies
+  start_spinner "Installing dependencies..."
+  cd "$PROTOCOL_DIR"
+  if run_silent "composer install" composer install --no-interaction --no-dev; then
+    step_ok "Dependencies installed"
+  else
+    step_fail "Failed to install dependencies (composer install)"
+  fi
 
-        echo "Installing php8.1"
-        sudo amazon-linux-extras disable php7.1
-        sudo yum remove php-common -y
-        
-        sudo amazon-linux-extras enable php8.1
-        sudo yum install php-cli php-pdo php-fpm php-json php-mysqlnd -y
+  # Make binary executable
+  chmod +x "$PROTOCOL_DIR/$BINARY_NAME"
 
-        php -v
+  # Add to PATH
+  EXPORT_LINE="export PATH=\"$PROTOCOL_DIR:\$PATH\""
+  FOUND=0
+  for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+    if [ -f "$file" ] && grep -Fxq "$EXPORT_LINE" "$file" 2>/dev/null; then
+      FOUND=1
+    fi
+  done
+  if [[ ":$PATH:" == *":$PROTOCOL_DIR:"* ]] || [ $FOUND -eq 1 ]; then
+    step_ok "PATH already configured"
+  else
+    for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+      [ ! -f "$file" ] && touch "$file"
+      if ! grep -Fxq "$EXPORT_LINE" "$file" 2>/dev/null; then
+        echo "$EXPORT_LINE" >> "$file"
+      fi
+    done
+    export PATH="$PROTOCOL_DIR:$PATH"
+    step_ok "Added to PATH (.zprofile, .zshrc)"
+  fi
 
-        echo "Installing GIT"
-        sudo yum install -y git
+else
+  # ==========================================================================
+  # Linux
+  # ==========================================================================
+  PLATFORM=$(awk -F= '/^NAME/{print $2}' /etc/os-release 2>/dev/null || echo "unknown")
 
-        git --version
+  section "System Update"
 
-        echo "Installing composer"
-        sudo curl -sS https://getcomposer.org/installer | sudo php
-        sudo mv composer.phar /usr/local/bin/composer
-        sudo ln -s /usr/local/bin/composer /usr/bin/composer
+  case "$PLATFORM" in
+    *"Amazon Linux"*)
+      start_spinner "Updating system packages..."
+      run_silent "yum update" sudo yum update -y \
+        && step_ok "System packages updated" \
+        || step_fail "System update failed"
 
-        composer --version
+      section "Docker"
 
-    ;;
+      if command_exists docker; then
+        step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Docker..."
+        run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
+          && step_ok "Docker installed" \
+          || step_fail "Failed to install Docker"
+      fi
 
-    ("\"Ubuntu\"")
-        echo "Installing Docker"
+      start_spinner "Enabling Docker service..."
+      run_silent "docker service" bash -c "sudo systemctl enable docker.service && sudo systemctl start docker.service"
+      sudo groupadd docker 2>/dev/null || true
+      sudo usermod -aG docker "$USER" 2>/dev/null || true
+      step_ok "Docker service running"
 
-        sudo apt-get remove docker docker-engine docker.io containerd runc -y
-        sudo apt-get update -y
-        sudo apt-get install -y \
-            ca-certificates \
-            curl \
-            gnupg \
-            lsb-release
-        rm -f /usr/share/keyrings/docker-archive-keyring.gpg
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+      if command_exists docker-compose; then
+        step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Docker Compose..."
+        run_silent "docker-compose" bash -c "wget -q https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -O /tmp/docker-compose && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose" \
+          && step_ok "Docker Compose installed" \
+          || step_fail "Failed to install Docker Compose"
+      fi
 
-        echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        
-        sudo apt-get update -y
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io git
+      section "Dependencies"
 
-        sudo groupadd docker
-        sudo usermod -aG docker $USER
+      if command_exists php; then
+        step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+      else
+        start_spinner "Installing PHP..."
+        run_silent "PHP" bash -c "sudo amazon-linux-extras disable php7.1 2>/dev/null; sudo yum remove php-common -y 2>/dev/null; sudo amazon-linux-extras enable php8.1 && sudo yum install -y php-cli php-pdo php-fpm php-json php-mysqlnd" \
+          && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
+          || step_fail "Failed to install PHP"
+      fi
 
+      if command_exists git; then
+        step_ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+      else
+        install_pkg git "Git"
+      fi
+
+      if command_exists composer; then
+        step_ok "Composer $(composer --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Composer..."
+        run_silent "Composer" bash -c "curl -sS https://getcomposer.org/installer | php && sudo mv composer.phar /usr/local/bin/composer && sudo ln -sf /usr/local/bin/composer /usr/bin/composer" \
+          && step_ok "Composer $(composer --version 2>/dev/null | head -n1)" \
+          || step_fail "Failed to install Composer"
+      fi
+      ;;
+
+    *"Ubuntu"*)
+      start_spinner "Updating system packages..."
+      run_silent "apt update" sudo apt-get update -y \
+        && step_ok "System packages updated" \
+        || step_fail "System update failed"
+
+      section "Docker"
+
+      if command_exists docker; then
+        step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Docker..."
+        run_silent "docker" bash -c "
+          sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release
+          rm -f /usr/share/keyrings/docker-archive-keyring.gpg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update -y
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+        " && step_ok "Docker installed" \
+          || step_fail "Failed to install Docker"
+      fi
+
+      start_spinner "Enabling Docker service..."
+      run_silent "docker service" bash -c "
+        sudo groupadd docker 2>/dev/null || true
+        sudo usermod -aG docker $USER 2>/dev/null || true
         sudo systemctl enable docker.service
         sudo systemctl enable containerd.service
         sudo systemctl start docker.service
         sudo systemctl start containerd.service
+      "
+      step_ok "Docker service running"
 
+      if command_exists docker-compose; then
+        step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Docker Compose..."
+        run_silent "docker-compose" bash -c "
+          sudo curl -L \"https://github.com/docker/compose/releases/download/1.29.2/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+        " && step_ok "Docker Compose installed" \
+          || step_fail "Failed to install Docker Compose"
+      fi
 
+      section "Dependencies"
 
-        echo "Installing Docker-Compose"
+      if command_exists git; then
+        step_ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+      else
+        install_pkg git "Git"
+      fi
 
-        sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-        sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
-        docker-compose --version
+      if command_exists php; then
+        step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')"
+      else
+        install_pkg php "PHP"
+      fi
 
+      if command_exists composer; then
+        step_ok "Composer $(composer --version 2>/dev/null | head -n1)"
+      else
+        start_spinner "Installing Composer..."
+        run_silent "Composer" bash -c "curl -sS https://getcomposer.org/installer | php && sudo mv composer.phar /usr/local/bin/composer && sudo ln -sf /usr/local/bin/composer /usr/bin/composer" \
+          && step_ok "Composer $(composer --version 2>/dev/null | head -n1)" \
+          || step_fail "Failed to install Composer"
+      fi
+      ;;
 
+    *)
+      step_fail "Unsupported platform: ${PLATFORM}"
+      ;;
+  esac
 
-        echo "Installing GIT"
+  # ==========================================================================
+  # Install Protocol (Linux)
+  # ==========================================================================
+  section "Protocol"
 
-        sudo apt-get install git
-    ;;
+  if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
+    step_ok "Found existing install at ${INSTALL_DIR}"
 
-esac
+    start_spinner "Updating Protocol..."
+    cd "$INSTALL_DIR"
+    if [ "$USE_NIGHTLY" = true ]; then
+      run_silent "git pull" git pull origin master
+      step_ok "Updated Protocol (nightly)"
+    else
+      run_silent "git fetch" git fetch --tags
+      LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+      if [ -n "$LATEST_TAG" ]; then
+        run_silent "checkout release" git checkout "$LATEST_TAG"
+        step_ok "Updated Protocol ${LATEST_TAG}"
+      else
+        step_ok "Updated Protocol (no release tags, using master)"
+      fi
+    fi
+  else
+    start_spinner "Cloning Protocol..."
+    if [ "$USE_NIGHTLY" = true ]; then
+      run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR" \
+        && step_ok "Cloned Protocol (nightly)" \
+        || step_fail "Failed to clone repository"
+    else
+      if run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR"; then
+        cd "$INSTALL_DIR"
+        LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+        if [ -n "$LATEST_TAG" ]; then
+          run_silent "checkout release" git checkout "$LATEST_TAG"
+          step_ok "Cloned Protocol ${LATEST_TAG}"
+        else
+          step_warn "Cloned Protocol — no release tags found, using master"
+        fi
+      else
+        step_fail "Failed to clone repository"
+      fi
+    fi
+  fi
 
-echo "Installing Protocol"
+  # Install dependencies
+  start_spinner "Installing dependencies..."
+  cd "$INSTALL_DIR"
+  if run_silent "composer install" composer install --no-interaction --no-dev; then
+    step_ok "Dependencies installed"
+  else
+    step_fail "Failed to install dependencies (composer install)"
+  fi
 
-git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
-sudo chmod +x $HOME/protocol/protocol
-cd $HOME/protocol
-sudo ./protocol self:global
+  # Make executable and install globally
+  sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
-protocol
+  start_spinner "Installing globally..."
+  if run_silent "self:global" sudo "$INSTALL_DIR/$BINARY_NAME" self:global; then
+    step_ok "Protocol installed globally"
+  else
+    step_warn "Global install skipped — run 'sudo $INSTALL_DIR/$BINARY_NAME self:global' manually"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+echo ""
+if command_exists protocol; then
+  printf "  ${GREEN}${BOLD}Protocol is ready!${RESET}\n"
+  printf "  ${DIM}Run 'protocol' to get started.${RESET}\n"
+else
+  printf "  ${GREEN}${BOLD}Installation complete!${RESET}\n"
+  printf "  ${DIM}Restart your shell or run 'source ~/.zshrc' to use 'protocol'.${RESET}\n"
+fi
+echo ""
+show_cursor
