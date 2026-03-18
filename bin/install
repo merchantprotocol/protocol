@@ -366,9 +366,10 @@ if [ "$OS" = "Darwin" ]; then
     PROTOCOL_DIR="$INSTALL_DIR"
   fi
 
-  # Install dependencies
+  # Install dependencies (clean vendor to avoid stale/partial installs)
   start_spinner "Installing dependencies..."
   cd "$PROTOCOL_DIR"
+  rm -rf vendor
   if run_silent "composer install" composer install --no-interaction --no-dev; then
     step_ok "Dependencies installed"
   else
@@ -625,9 +626,10 @@ else
     fi
   fi
 
-  # Install dependencies
+  # Install dependencies (clean vendor to avoid stale/partial installs)
   start_spinner "Installing dependencies..."
   cd "$INSTALL_DIR"
+  rm -rf vendor
   if run_silent "composer install" composer install --no-interaction --no-dev; then
     step_ok "Dependencies installed"
   else
