@@ -675,7 +675,7 @@ Class ProtocolInit extends Command {
         $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
         $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
         $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
-        $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
+        $output->writeln("    <fg=yellow>3.</> Come back here with the App ID and .pem file path");
         $output->writeln('');
 
         // Ask for App ID
@@ -690,34 +690,66 @@ Class ProtocolInit extends Command {
         }
         $appId = trim($appId);
 
-        // Ask for private key
-        $output->writeln('');
-        $output->writeln("    <fg=gray>Paste the path to the .pem file, or paste the key contents</>");
-        $output->writeln("    <fg=gray>(end with a blank line):</>");
+        // Ask for private key file path
         $output->writeln('');
 
-        $question = new Question('    Private key (path or paste): ');
-        $keyInput = $helper->ask($input, $output, $question);
+        // Try to find the .pem automatically in common download locations
+        $HOME = rtrim(Shell::run('echo $HOME'));
+        $pemSearchPaths = [
+            "{$HOME}/Downloads",
+            "{$HOME}/Desktop",
+            "{$HOME}",
+            '/tmp',
+        ];
+        $foundPem = null;
+        foreach ($pemSearchPaths as $searchDir) {
+            $candidates = glob("{$searchDir}/*.pem");
+            if (!empty($candidates)) {
+                // Sort by modification time, newest first
+                usort($candidates, fn($a, $b) => filemtime($b) - filemtime($a));
+                $foundPem = $candidates[0];
+                break;
+            }
+        }
 
-        if (!$keyInput || empty(trim($keyInput))) {
+        if ($foundPem) {
+            $output->writeln("    <fg=gray>›</> Found: <fg=white>{$foundPem}</>");
+            $question = new Question(
+                "    Private key file [<fg=green>{$foundPem}</>]: ",
+                $foundPem
+            );
+        } else {
+            $question = new Question('    Path to .pem file: ');
+        }
+
+        $keyPath = $helper->ask($input, $output, $question);
+
+        if (!$keyPath || empty(trim($keyPath))) {
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> No private key provided.");
+            $output->writeln("    <fg=red>✗</> No private key file provided.");
             $output->writeln('');
             return null;
         }
 
-        $keyInput = trim($keyInput);
-        if (is_file($keyInput)) {
-            // It's a file path
-            $pemContents = file_get_contents($keyInput);
-        } else {
-            // Treat as pasted key content
-            $pemContents = $keyInput;
+        $keyPath = trim($keyPath);
+
+        // Expand ~ to home directory
+        if (str_starts_with($keyPath, '~/')) {
+            $keyPath = $HOME . substr($keyPath, 1);
         }
+
+        if (!is_file($keyPath)) {
+            $output->writeln('');
+            $output->writeln("    <fg=red>✗</> File not found: <fg=white>{$keyPath}</>");
+            $output->writeln('');
+            return null;
+        }
+
+        $pemContents = file_get_contents($keyPath);
 
         if (!str_contains($pemContents, 'BEGIN RSA PRIVATE KEY') && !str_contains($pemContents, 'BEGIN PRIVATE KEY')) {
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> Invalid private key format. Expected a PEM file.");
+            $output->writeln("    <fg=red>✗</> Not a valid PEM file: <fg=white>{$keyPath}</>");
             $output->writeln('');
             return null;
         }
