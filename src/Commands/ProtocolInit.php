@@ -563,22 +563,6 @@ Class ProtocolInit extends Command {
 
         NodeConfig::save($projectName, $nodeData);
 
-        // Also write protocol.json locally so existing commands work
-        if (!Git::isInitializedRepo($repo_dir)) {
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
-        }
-
-        Json::write('name', $projectName, $repo_dir);
-        Json::write('deployment.strategy', $nodeData['deployment']['strategy'], $repo_dir);
-        Json::write('deployment.pointer', $nodeData['deployment']['pointer'], $repo_dir);
-        Json::write('deployment.pointer_name', $nodeData['deployment']['pointer_name'], $repo_dir);
-        Json::write('git.remote', $gitRemote, $repo_dir);
-        Json::write('bluegreen.enabled', true, $repo_dir);
-        Json::write('bluegreen.git_remote', $gitRemote, $repo_dir);
-        Json::write('bluegreen.releases_dir', $releasesDir, $repo_dir);
-        Json::write('bluegreen.auto_promote', true, $repo_dir);
-        Json::save($repo_dir);
-
         // Set the environment globally
         \Gitcd\Helpers\Config::write('env', $environment);
 
