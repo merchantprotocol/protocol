@@ -190,7 +190,7 @@ Class ProtocolInit extends Command {
 
         // ── Production / Staging → slave node ────────────────────
         if ($envKey === 'production' || $envKey === 'staging') {
-            return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io);
+            return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io, $envKey);
         }
 
         // ── Development → auto-detect project state ──────────────
@@ -411,9 +411,10 @@ Class ProtocolInit extends Command {
         InputInterface $input,
         OutputInterface $output,
         $helper,
-        SymfonyStyle $io
+        SymfonyStyle $io,
+        string $environment = 'production'
     ): int {
-        $totalSteps = 3;
+        $totalSteps = 2;
 
         // Step 1: Repository URL
         $this->writeStep($output, 1, $totalSteps, 'Repository');
@@ -461,20 +462,10 @@ Class ProtocolInit extends Command {
             ];
         }
 
-        // Step 2: Environment
-        $this->writeStep($output, 2, $totalSteps, 'Environment');
-
-        $output->writeln("    <fg=gray>Choose what environment this node will be. This determines</>");
-        $output->writeln("    <fg=gray>which configuration branch gets used for secrets and settings.</>");
-        $output->writeln('');
-
-        $environment = $this->askEnvironment($gitRemote, $protocolData, $input, $output, $helper);
-
-        $output->writeln('');
         $output->writeln("    <fg=green>✓</> Environment: <fg=white;options=bold>{$environment}</>");
 
-        // Step 3: Releases directory
-        $this->writeStep($output, 3, $totalSteps, 'Code Location');
+        // Step 2: Releases directory
+        $this->writeStep($output, 2, $totalSteps, 'Code Location');
 
         $defaultReleasesDir = rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
 
