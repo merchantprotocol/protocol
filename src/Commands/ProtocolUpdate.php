@@ -110,6 +110,10 @@ Class ProtocolUpdate extends Command {
             Shell::passthru("git -C " . escapeshellarg($protocoldir) . " checkout " . escapeshellarg($latestTag));
         }
 
+        // Reinstall dependencies after updating code
+        $output->writeln('<comment>Installing dependencies...</comment>');
+        Shell::passthru("cd " . escapeshellarg($protocoldir) . " && rm -rf vendor && composer install --no-interaction --no-dev");
+
         $output->writeln('<info>Protocol updated successfully</info>');
 
         return Command::SUCCESS;
