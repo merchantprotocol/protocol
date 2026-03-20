@@ -12,38 +12,6 @@ namespace Gitcd\Helpers;
 class GitHubApp
 {
     /**
-     * Build the GitHub App manifest JSON for the given repo.
-     */
-    public static function buildManifest(string $repoName): array
-    {
-        return [
-            'name' => "Protocol Deploy ({$repoName})",
-            'url' => 'https://protocol.merchantprotocol.com',
-            'hook_attributes' => ['active' => false],
-            'redirect_url' => '',
-            'public' => false,
-            'default_permissions' => [
-                'contents' => 'read',
-                'metadata' => 'read',
-                'variables' => 'read',
-            ],
-            'default_events' => [],
-        ];
-    }
-
-    /**
-     * Build the manifest URL for creating a GitHub App under an org.
-     */
-    public static function manifestUrl(string $owner, string $repoName): string
-    {
-        $manifest = self::buildManifest($repoName);
-        $json = json_encode($manifest, JSON_UNESCAPED_SLASHES);
-        $encoded = urlencode($json);
-
-        return "https://github.com/organizations/{$owner}/settings/apps/new?manifest={$encoded}";
-    }
-
-    /**
      * Path where GitHub App credentials are stored.
      */
     public static function credentialsPath(): string
