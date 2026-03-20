@@ -180,14 +180,22 @@ Class ProtocolInit extends Command {
         $output->writeln('');
 
         // ── Step 1: What environment is this? ────────────────────
-        $output->writeln("    <fg=gray>What environment is this node?</>");
-        $output->writeln('');
+        // Check if environment was already set (idempotent re-entry)
+        $storedEnv = \Gitcd\Helpers\Config::read('env');
+        if ($storedEnv && in_array($storedEnv, ['production', 'staging'])) {
+            $output->writeln("    <fg=gray>Environment:</> <fg=white;options=bold>{$storedEnv}</> <fg=gray>(previously configured)</>");
+            $output->writeln('');
+            $envKey = $storedEnv;
+        } else {
+            $output->writeln("    <fg=gray>What environment is this node?</>");
+            $output->writeln('');
 
-        $envKey = $this->askWithDots($input, $output, $helper, [
-            'development' => 'Development — local machine',
-            'staging'     => 'Staging — pre-production testing',
-            'production'  => 'Production — live environment',
-        ], 'development');
+            $envKey = $this->askWithDots($input, $output, $helper, [
+                'development' => 'Development — local machine',
+                'staging'     => 'Staging — pre-production testing',
+                'production'  => 'Production — live environment',
+            ], 'development');
+        }
 
         // ── Production / Staging → slave node ────────────────────
         if ($envKey === 'production' || $envKey === 'staging') {
@@ -417,45 +425,70 @@ Class ProtocolInit extends Command {
     ): int {
         $totalSteps = 2;
 
+        // Check for existing node config (idempotent re-entry)
+        $existingProject = NodeConfig::findByRepoDir($repo_dir);
+        $existingData = $existingProject ? NodeConfig::load($existingProject) : [];
+        $storedRemote = $existingData['git']['remote'] ?? null;
+
         // Step 1: Repository URL
-        $this->writeStep($output, 1, $totalSteps, 'Repository');
+        if ($storedRemote) {
+            // Already configured — show and confirm
+            $this->writeStep($output, 1, $totalSteps, 'Repository');
+            $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$storedRemote}</> <fg=gray>(previously configured)</>");
+            $gitRemote = $storedRemote;
+        } else {
+            $this->writeStep($output, 1, $totalSteps, 'Repository');
 
-        $output->writeln("    <fg=gray>This node will watch a repository and automatically deploy</>");
-        $output->writeln("    <fg=gray>new releases. Tell us the repository to listen to.</>");
-        $output->writeln('');
-
-        $existingRemote = Git::RemoteUrl($repo_dir);
-        $defaultRemote = $existingRemote ?: '';
-
-        $question = new Question(
-            '    Repository URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
-            $defaultRemote
-        );
-        $gitRemote = $helper->ask($input, $output, $question);
-
-        if (!$gitRemote) {
+            $output->writeln("    <fg=gray>This node will watch a repository and automatically deploy</>");
+            $output->writeln("    <fg=gray>new releases. Tell us the repository to listen to.</>");
             $output->writeln('');
-            $output->writeln('    <error>A repository URL is required.</error>');
-            return Command::FAILURE;
+
+            $existingRemote = Git::RemoteUrl($repo_dir);
+            $defaultRemote = $existingRemote ?: '';
+
+            $question = new Question(
+                '    Repository URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
+                $defaultRemote
+            );
+            $gitRemote = $helper->ask($input, $output, $question);
+
+            if (!$gitRemote) {
+                $output->writeln('');
+                $output->writeln('    <error>A repository URL is required.</error>');
+                return Command::FAILURE;
+            }
+
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
         }
 
-        $output->writeln('');
-        $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
-
-        // Test repository access
+        // Test repository access (always verify, even on re-entry)
         $output->writeln('');
         $output->writeln("    <fg=gray>›</> Testing repository access...");
 
         $canAccess = $this->testRepoAccess($gitRemote);
 
         if (!$canAccess) {
-            $output->writeln("    <fg=red>✗</> Cannot access repository");
-            $output->writeln('');
+            // Check if GitHub App can refresh credentials
+            if (GitHubApp::isConfigured()) {
+                $owner = '';
+                if (preg_match('#github\.com[:/]([^/]+)/#', $gitRemote, $m)) {
+                    $owner = $m[1];
+                }
+                if ($owner && GitHubApp::refreshGitCredentials($owner)) {
+                    $output->writeln("    <fg=green>✓</> Credentials refreshed via GitHub App");
+                    $canAccess = $this->testRepoAccess($gitRemote);
+                }
+            }
 
-            // Offer to set up authentication
-            $gitRemote = $this->flowGitAuth($gitRemote, $input, $output, $helper);
-            if (!$gitRemote) {
-                return Command::FAILURE;
+            if (!$canAccess) {
+                $output->writeln("    <fg=red>✗</> Cannot access repository");
+                $output->writeln('');
+
+                $gitRemote = $this->flowGitAuth($gitRemote, $input, $output, $helper);
+                if (!$gitRemote) {
+                    return Command::FAILURE;
+                }
             }
         } else {
             $output->writeln("    <fg=green>✓</> Repository accessible");
@@ -589,6 +622,81 @@ Class ProtocolInit extends Command {
     }
 
     /**
+     * Ask the user whether to retry or exit. Returns true to retry.
+     */
+    protected function askRetryOrExit(
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
+    ): bool {
+        $output->writeln('');
+        $question = new ConfirmationQuestion(
+            '    Try again? [<fg=green>Y</>/n] ', true
+        );
+        return (bool) $helper->ask($input, $output, $question);
+    }
+
+    /**
+     * Read a private key from the user — accepts file path or pasted content.
+     * Returns the PEM contents or null if input was invalid.
+     */
+    protected function readPrivateKey(
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
+    ): ?string {
+        $question = new Question('    Private key: ');
+        $firstLine = trim($helper->ask($input, $output, $question) ?? '');
+
+        if (empty($firstLine)) {
+            $output->writeln("    <fg=yellow>!</> No private key entered.");
+            return null;
+        }
+
+        $pemContents = null;
+
+        if (is_file($firstLine)) {
+            $pemContents = file_get_contents($firstLine);
+        } elseif (str_contains($firstLine, 'BEGIN')) {
+            if (str_contains($firstLine, 'END')) {
+                // Entire key flattened onto one line
+                $pemContents = $this->reconstructPem($firstLine);
+            } else {
+                // Multi-line paste — read until END marker
+                $pemLines = [$firstLine];
+                $stdin = fopen('php://stdin', 'r');
+                while (($line = fgets($stdin)) !== false) {
+                    $line = rtrim($line, "\r\n");
+                    $pemLines[] = $line;
+                    if (str_contains($line, 'END')) {
+                        break;
+                    }
+                }
+                $pemContents = implode("\n", $pemLines) . "\n";
+            }
+        } else {
+            // Maybe a file path with ~ expansion
+            $HOME = rtrim(Shell::run('echo $HOME'));
+            if (str_starts_with($firstLine, '~/')) {
+                $firstLine = $HOME . substr($firstLine, 1);
+            }
+            if (is_file($firstLine)) {
+                $pemContents = file_get_contents($firstLine);
+            } else {
+                $output->writeln("    <fg=yellow>!</> Not a valid private key or file path.");
+                return null;
+            }
+        }
+
+        if (!$pemContents || (!str_contains($pemContents, 'BEGIN RSA PRIVATE KEY') && !str_contains($pemContents, 'BEGIN PRIVATE KEY'))) {
+            $output->writeln("    <fg=yellow>!</> Invalid private key format.");
+            return null;
+        }
+
+        return $pemContents;
+    }
+
+    /**
      * Reconstruct a proper PEM from a flattened single-line paste.
      *
      * When users paste a PEM key, terminals often flatten it to one line.
@@ -632,9 +740,23 @@ Class ProtocolInit extends Command {
 
         if (!$isGitHub) {
             $output->writeln("    <fg=yellow>!</> This server cannot access the repository.");
-            $output->writeln("    <fg=gray>Ensure SSH keys are configured for this remote.</>");
-            $output->writeln('');
+            $output->writeln("    <fg=gray>This doesn't appear to be a GitHub URL.</>");
             $output->writeln("    <fg=gray>You can generate an SSH key with:</> <fg=white>protocol key:generate</>");
+            $output->writeln('');
+
+            $question = new ConfirmationQuestion(
+                '    Try again after setting up SSH? [<fg=green>Y</>/n] ', true
+            );
+            if ($helper->ask($input, $output, $question)) {
+                // Re-test access — user may have configured SSH externally
+                if ($this->testRepoAccess($gitRemote)) {
+                    $output->writeln("    <fg=green>✓</> Repository accessible now");
+                    return $gitRemote;
+                }
+                $output->writeln("    <fg=red>✗</> Still cannot access repository.");
+            }
+            $output->writeln('');
+            $output->writeln("    <fg=gray>Run</> <fg=white>protocol init</> <fg=gray>again after configuring access.</>");
             $output->writeln('');
             return null;
         }
@@ -656,169 +778,162 @@ Class ProtocolInit extends Command {
             $output->writeln('');
         }
 
-        $appUrl = "https://github.com/organizations/{$owner}/settings/apps/new";
+        // Outer retry loop — user controls when to give up
+        while (true) {
+            $appUrl = "https://github.com/organizations/{$owner}/settings/apps/new";
 
-        $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
-        $output->writeln("    The app belongs to the org — not any individual — so access");
-        $output->writeln("    won't break when someone leaves the team.");
-        $output->writeln('');
-        $output->writeln("    <fg=cyan;options=bold>{$appUrl}</>");
-        $output->writeln('');
-        $output->writeln('    ┌──────────────────────────────────┬──────────────────────────────────────────┐');
-        $output->writeln('    │ <fg=white;options=bold>Field</>                            │ <fg=white;options=bold>Value</>                                    │');
-        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-        $output->writeln('    │ GitHub App name                  │ <fg=green>Protocol Deploy App</>                    │');
-        $output->writeln('    │ Homepage URL                     │ <fg=green>https://merchantprotocol.com</>            │');
-        $output->writeln('    │ Description                      │ <fg=green>Private internal app for production</>     │');
-        $output->writeln('    │                                  │ <fg=green>server repo pulls</>                       │');
-        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-        $output->writeln('    │ Webhook → Active                 │ <fg=yellow>☐  Unchecked</>                            │');
-        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-        $output->writeln('    │ Callback URL                     │ <fg=gray>Leave blank</>                              │');
-        $output->writeln('    │ Setup URL                        │ <fg=gray>Leave blank</>                              │');
-        $output->writeln('    │ Webhook URL                      │ <fg=gray>Leave blank</>                              │');
-        $output->writeln('    │ Webhook secret                   │ <fg=gray>Leave blank</>                              │');
-        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-        $output->writeln('    │ <fg=white;options=bold>Repository Permissions</>             │                                          │');
-        $output->writeln('    │   Contents                       │ <fg=green>Read-only</>                               │');
-        $output->writeln('    │   Metadata                       │ <fg=green>Read-only</>                               │');
-        $output->writeln('    │   Variables                      │ <fg=green>Read-only</>                               │');
-        $output->writeln('    │   <fg=gray>Everything else</>                 │ <fg=gray>No access</>                               │');
-        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-        $output->writeln('    │ Where can this app be installed? │ <fg=green>Only on this account</>                    │');
-        $output->writeln('    └──────────────────────────────────┴──────────────────────────────────────────┘');
-        $output->writeln('');
-        $output->writeln("    <fg=white>After creating the app:</>");
-        $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
-        $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
-        $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
-        $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
-        $output->writeln('');
-
-        // Ask for App ID
-        $question = new Question('    App ID: ');
-        $appId = $helper->ask($input, $output, $question);
-
-        if (!$appId || empty(trim($appId))) {
+            $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
+            $output->writeln("    The app belongs to the org — not any individual — so access");
+            $output->writeln("    won't break when someone leaves the team.");
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> No App ID provided.");
+            $output->writeln("    <fg=cyan;options=bold>{$appUrl}</>");
             $output->writeln('');
-            return null;
-        }
-        $appId = trim($appId);
-
-        // Ask for private key — accept file path or pasted content
-        $output->writeln('');
-        $output->writeln("    <fg=gray>Paste the private key or enter the path to the .pem file.</>");
-        $output->writeln("    <fg=gray>If pasting, just paste — we'll read until the END marker.</>");
-        $output->writeln('');
-
-        $question = new Question('    Private key: ');
-        $firstLine = trim($helper->ask($input, $output, $question) ?? '');
-
-        if (empty($firstLine)) {
+            $output->writeln('    ┌──────────────────────────────────┬──────────────────────────────────────────┐');
+            $output->writeln('    │ <fg=white;options=bold>Field</>                            │ <fg=white;options=bold>Value</>                                    │');
+            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+            $output->writeln('    │ GitHub App name                  │ <fg=green>Protocol Deploy App</>                    │');
+            $output->writeln('    │ Homepage URL                     │ <fg=green>https://merchantprotocol.com</>            │');
+            $output->writeln('    │ Description                      │ <fg=green>Private internal app for production</>     │');
+            $output->writeln('    │                                  │ <fg=green>server repo pulls</>                       │');
+            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+            $output->writeln('    │ Webhook → Active                 │ <fg=yellow>☐  Unchecked</>                            │');
+            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+            $output->writeln('    │ Callback URL                     │ <fg=gray>Leave blank</>                              │');
+            $output->writeln('    │ Setup URL                        │ <fg=gray>Leave blank</>                              │');
+            $output->writeln('    │ Webhook URL                      │ <fg=gray>Leave blank</>                              │');
+            $output->writeln('    │ Webhook secret                   │ <fg=gray>Leave blank</>                              │');
+            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+            $output->writeln('    │ <fg=white;options=bold>Repository Permissions</>             │                                          │');
+            $output->writeln('    │   Contents                       │ <fg=green>Read-only</>                               │');
+            $output->writeln('    │   Metadata                       │ <fg=green>Read-only</>                               │');
+            $output->writeln('    │   Variables                      │ <fg=green>Read-only</>                               │');
+            $output->writeln('    │   <fg=gray>Everything else</>                 │ <fg=gray>No access</>                               │');
+            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+            $output->writeln('    │ Where can this app be installed? │ <fg=green>Only on this account</>                    │');
+            $output->writeln('    └──────────────────────────────────┴──────────────────────────────────────────┘');
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> No private key provided.");
+            $output->writeln("    <fg=white>After creating the app:</>");
+            $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
+            $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
+            $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
+            $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
             $output->writeln('');
-            return null;
-        }
 
-        if (is_file($firstLine)) {
-            // File path provided
-            $pemContents = file_get_contents($firstLine);
-        } elseif (str_contains($firstLine, 'BEGIN')) {
-            if (str_contains($firstLine, 'END')) {
-                // Entire key flattened onto one line — reconstruct
-                $pemContents = $this->reconstructPem($firstLine);
-            } else {
-                // Multi-line paste — keep reading until END marker
-                $pemLines = [$firstLine];
-                $stdin = fopen('php://stdin', 'r');
-                while (($line = fgets($stdin)) !== false) {
-                    $line = rtrim($line, "\r\n");
-                    $pemLines[] = $line;
-                    if (str_contains($line, 'END')) {
-                        break;
-                    }
+            // ── Collect App ID ──
+            $question = new Question('    App ID: ');
+            $appId = trim($helper->ask($input, $output, $question) ?? '');
+
+            if (empty($appId)) {
+                $output->writeln("    <fg=yellow>!</> No App ID entered.");
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
                 }
-                $pemContents = implode("\n", $pemLines) . "\n";
-            }
-        } else {
-            // Maybe a file path with ~ expansion
-            $HOME = rtrim(Shell::run('echo $HOME'));
-            if (str_starts_with($firstLine, '~/')) {
-                $firstLine = $HOME . substr($firstLine, 1);
-            }
-            if (is_file($firstLine)) {
-                $pemContents = file_get_contents($firstLine);
-            } else {
-                $output->writeln('');
-                $output->writeln("    <fg=red>✗</> Not a valid private key or file path.");
-                $output->writeln('');
                 return null;
             }
-        }
 
-        if (!str_contains($pemContents, 'BEGIN RSA PRIVATE KEY') && !str_contains($pemContents, 'BEGIN PRIVATE KEY')) {
+            // ── Collect private key ──
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> Invalid private key format.");
+            $output->writeln("    <fg=gray>Paste the private key or enter the path to the .pem file.</>");
+            $output->writeln("    <fg=gray>If pasting, just paste — we'll read until the END marker.</>");
             $output->writeln('');
-            return null;
-        }
 
-        // Test JWT generation
-        $output->writeln('');
-        $output->writeln("    <fg=gray>›</> Generating JWT...");
+            $pemContents = $this->readPrivateKey($input, $output, $helper);
 
-        $jwt = GitHubApp::generateJwt($appId, $pemContents);
-        if (!$jwt) {
-            $output->writeln("    <fg=red>✗</> Failed to generate JWT. Check that the private key is valid.");
+            if (!$pemContents) {
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
+                }
+                return null;
+            }
+
+            // ── Test JWT ──
             $output->writeln('');
-            return null;
-        }
-        $output->writeln("    <fg=green>✓</> JWT generated");
+            $output->writeln("    <fg=gray>›</> Testing private key...");
 
-        // Find installation
-        $output->writeln("    <fg=gray>›</> Looking for app installation on <fg=white>{$owner}</>...");
+            $jwt = GitHubApp::generateJwt($appId, $pemContents);
+            if (!$jwt) {
+                $output->writeln("    <fg=red>✗</> Private key failed to generate a valid JWT.");
+                $output->writeln("    <fg=gray>This usually means the key doesn't match the App ID.</>");
+                $output->writeln('');
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
+                }
+                return null;
+            }
+            $output->writeln("    <fg=green>✓</> Private key verified");
 
-        $installationId = GitHubApp::getInstallationId($jwt, $owner);
-        if (!$installationId) {
-            $output->writeln("    <fg=red>✗</> App not installed on <fg=white>{$owner}</>");
-            $output->writeln("    <fg=gray>Go to the app settings and click</> <fg=white>Install App</> <fg=gray>→ select</> <fg=white>{$owner}</>");
+            // ── Find installation — wait for user to install if needed ──
+            $installationId = null;
+            while (!$installationId) {
+                $output->writeln("    <fg=gray>›</> Looking for app installation on <fg=white>{$owner}</>...");
+
+                // JWT expires after 10 min, regenerate each attempt
+                $jwt = GitHubApp::generateJwt($appId, $pemContents);
+                $installationId = $jwt ? GitHubApp::getInstallationId($jwt, $owner) : null;
+
+                if (!$installationId) {
+                    $output->writeln("    <fg=yellow>!</> App not yet installed on <fg=white>{$owner}</>");
+                    $output->writeln('');
+                    $output->writeln("    <fg=gray>Install it here:</>");
+                    $output->writeln("    <fg=cyan>https://github.com/organizations/{$owner}/settings/apps</>");
+                    $output->writeln("    <fg=gray>→ your app → Install → select</> <fg=white>{$owner}</>");
+                    $output->writeln('');
+
+                    $question = new ConfirmationQuestion(
+                        '    Retry after installing? [<fg=green>Y</>/n] ', true
+                    );
+                    if (!$helper->ask($input, $output, $question)) {
+                        break; // break inner loop, will hit askRetryOrExit below
+                    }
+                    $output->writeln('');
+                }
+            }
+
+            if (!$installationId) {
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
+                }
+                return null;
+            }
+            $output->writeln("    <fg=green>✓</> Found installation (ID: {$installationId})");
+
+            // ── Generate installation token ──
+            $output->writeln("    <fg=gray>›</> Generating access token...");
+
+            $token = GitHubApp::generateInstallationToken($jwt, $installationId);
+            if (!$token) {
+                $output->writeln("    <fg=red>✗</> Failed to generate installation token.");
+                $output->writeln("    <fg=gray>The app may not have the correct permissions.</>");
+                $output->writeln('');
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
+                }
+                return null;
+            }
+
+            // ── Test repo access ──
+            $httpsUrl = "https://x-access-token:{$token}@github.com/{$owner}/{$repo}.git";
+            if (!$this->testRepoAccess($httpsUrl)) {
+                $output->writeln("    <fg=red>✗</> Token doesn't have access to <fg=white>{$repo}</>");
+                $output->writeln("    <fg=gray>Make sure the app is installed with access to this specific repository.</>");
+                $output->writeln('');
+                if ($this->askRetryOrExit($input, $output, $helper)) {
+                    continue;
+                }
+                return null;
+            }
+
+            $output->writeln("    <fg=green>✓</> Access verified — read access to <fg=white>{$repo}</> confirmed");
+
+            // Save credentials and configure git
+            GitHubApp::saveCredentials($appId, $pemContents, $owner);
+            GitHubApp::writeGitCredentials($token);
+
+            $output->writeln("    <fg=green>✓</> Credentials stored in <fg=white>" . GitHubApp::credentialsPath() . "</>");
             $output->writeln('');
-            return null;
-        }
-        $output->writeln("    <fg=green>✓</> Found installation (ID: {$installationId})");
 
-        // Generate installation token
-        $output->writeln("    <fg=gray>›</> Generating access token...");
-
-        $token = GitHubApp::generateInstallationToken($jwt, $installationId);
-        if (!$token) {
-            $output->writeln("    <fg=red>✗</> Failed to generate installation token.");
-            $output->writeln('');
-            return null;
-        }
-
-        // Test repo access with the token
-        $httpsUrl = "https://x-access-token:{$token}@github.com/{$owner}/{$repo}.git";
-        if (!$this->testRepoAccess($httpsUrl)) {
-            $output->writeln("    <fg=red>✗</> Token doesn't have access to <fg=white>{$repo}</>");
-            $output->writeln("    <fg=gray>Make sure the app is installed with access to this repository.</>");
-            $output->writeln('');
-            return null;
-        }
-
-        $output->writeln("    <fg=green>✓</> Access verified — read access to <fg=white>{$repo}</> confirmed");
-
-        // Save credentials and configure git
-        GitHubApp::saveCredentials($appId, $pemContents, $owner);
-        GitHubApp::writeGitCredentials($token);
-
-        $output->writeln("    <fg=green>✓</> Credentials stored in <fg=white>" . GitHubApp::credentialsPath() . "</>");
-        $output->writeln('');
-
-        return "https://github.com/{$owner}/{$repo}.git";
+            return "https://github.com/{$owner}/{$repo}.git";
+        } // end while(true)
     }
 
     /**
