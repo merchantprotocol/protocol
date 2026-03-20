@@ -665,6 +665,7 @@ Class ProtocolInit extends Command {
         $output->writeln("       and choose <fg=white>{$repo}</>");
         $output->writeln("    <fg=yellow>5.</> Under <fg=white>Permissions → Repository permissions</>:");
         $output->writeln("       • <fg=white>Contents</> → <fg=green>Read-only</>");
+        $output->writeln("       • <fg=white>Variables</> → <fg=green>Read-only</> <fg=gray>(for release pointer)</>");
         $output->writeln("       • <fg=white>Metadata</> → <fg=green>Read-only</> <fg=gray>(auto-selected)</>");
         $output->writeln("    <fg=yellow>6.</> Click <fg=white>Generate token</> and paste it below");
         $output->writeln('');
