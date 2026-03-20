@@ -53,6 +53,7 @@ use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
 use Gitcd\Commands\Init\ProjectType;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\BlueGreen\ReleaseBuilder;
 use Gitcd\Utils\NodeConfig;
 use Gitcd\Commands\Init\DotMenuTrait;
 
@@ -423,7 +424,7 @@ Class ProtocolInit extends Command {
         SymfonyStyle $io,
         string $environment = 'production'
     ): int {
-        $totalSteps = 2;
+        $totalSteps = 3;
 
         // Check for existing node config (idempotent re-entry)
         $existingProject = NodeConfig::findByRepoDir($repo_dir);
@@ -518,7 +519,8 @@ Class ProtocolInit extends Command {
         // Step 2: Releases directory
         $this->writeStep($output, 2, $totalSteps, 'Code Location');
 
-        $defaultReleasesDir = rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
+        $storedReleasesDir = $existingData['bluegreen']['releases_dir'] ?? null;
+        $defaultReleasesDir = $storedReleasesDir ?: rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
 
         $output->writeln("    <fg=gray>Each release gets its own directory with a full git clone,</>");
         $output->writeln("    <fg=gray>Docker containers, and config files.</>");
@@ -545,6 +547,9 @@ Class ProtocolInit extends Command {
         $nodeData['git'] = $nodeData['git'] ?? [];
         $nodeData['git']['remote'] = $gitRemote;
         $nodeData['deployment'] = $nodeData['deployment'] ?? [];
+        // Merge stored deployment state from NodeConfig (preserves awaiting_release, strategy, branch on re-entry)
+        $storedDeployment = $existingData['deployment'] ?? [];
+        $nodeData['deployment'] = array_merge($nodeData['deployment'], $storedDeployment);
         $nodeData['deployment']['strategy'] = $nodeData['deployment']['strategy'] ?? 'release';
         $nodeData['deployment']['pointer'] = $nodeData['deployment']['pointer'] ?? 'github_variable';
         $nodeData['deployment']['pointer_name'] = $nodeData['deployment']['pointer_name'] ?? 'PROTOCOL_ACTIVE_RELEASE';
@@ -582,7 +587,196 @@ Class ProtocolInit extends Command {
         // Set the environment globally
         \Gitcd\Helpers\Config::write('env', $environment);
 
+        // Step 3: First release deployment
+        $this->writeStep($output, 3, $totalSteps, 'First Deploy');
+
+        // Check if already deployed (idempotent)
+        $currentRelease = Json::read('release.current', null, $repo_dir);
+        $currentStrategy = $nodeData['deployment']['strategy'] ?? 'release';
+        $currentBranch = $nodeData['deployment']['branch'] ?? null;
+
+        $alreadyDeployed = false;
+        if ($currentRelease) {
+            $releaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+            if (is_dir($releaseDir)) {
+                $alreadyDeployed = true;
+                $output->writeln("    <fg=white;options=bold>Current deployment:</>");
+                $output->writeln("    <fg=gray>Strategy:</> <fg=white>release</>");
+                $output->writeln("    <fg=gray>Release:</>  <fg=white>{$currentRelease}</>");
+                $output->writeln("    <fg=gray>Location:</> <fg=white>{$releaseDir}</>");
+            }
+        } elseif ($currentStrategy === 'branch' && $currentBranch) {
+            $nightlyDir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+            if (is_dir($nightlyDir)) {
+                $alreadyDeployed = true;
+                $awaitingRelease = ($nodeData['deployment']['awaiting_release'] ?? false);
+
+                $output->writeln("    <fg=white;options=bold>Current deployment:</>");
+                if ($awaitingRelease) {
+                    $output->writeln("    <fg=gray>Strategy:</> <fg=yellow>nightly</> <fg=gray>(waiting for first release tag)</>");
+                } else {
+                    $output->writeln("    <fg=gray>Strategy:</> <fg=white>nightly (branch tip)</>");
+                }
+                $output->writeln("    <fg=gray>Branch:</>   <fg=white>{$currentBranch}</>");
+                $output->writeln("    <fg=gray>Location:</> <fg=white>{$nightlyDir}</>");
+
+                // If awaiting release, check if tags have appeared
+                if ($awaitingRelease) {
+                    $output->writeln('');
+                    $output->writeln("    <fg=gray>›</> Checking for new release tags...");
+                    $tagsCheck = Shell::run("git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+                    $hasTags = false;
+                    if ($tagsCheck) {
+                        foreach (explode("\n", trim($tagsCheck)) as $line) {
+                            if (preg_match('#refs/tags/[^{]+$#', trim($line))) {
+                                $hasTags = true;
+                                break;
+                            }
+                        }
+                    }
+                    if ($hasTags) {
+                        $output->writeln("    <fg=green>✓</> Release tags found! You can switch to release-based deployment.");
+                        // Fall through to the release picker below
+                        $alreadyDeployed = false;
+                    } else {
+                        $output->writeln("    <fg=gray>No release tags yet. Still following branch tip.</>");
+                    }
+                }
+            }
+        }
+
+        if ($alreadyDeployed) {
+            $output->writeln('');
+            $question = new ConfirmationQuestion(
+                '    Change deployment? [y/<fg=green>N</>] ', false
+            );
+            if (!$helper->ask($input, $output, $question)) {
+                $output->writeln('');
+                goto completion;
+            }
+            $output->writeln('');
+        }
+
+        $pointerName = $nodeData['deployment']['pointer_name'] ?? 'PROTOCOL_ACTIVE_RELEASE';
+
+        // List available release tags from the remote
+        $output->writeln("    <fg=gray>›</> Checking for available releases...");
+        $tagsOutput = Shell::run("git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+
+        $tags = [];
+        if ($tagsOutput) {
+            foreach (explode("\n", trim($tagsOutput)) as $line) {
+                if (preg_match('#refs/tags/(.+)$#', trim($line), $m)) {
+                    $tag = $m[1];
+                    // Skip ^{} dereferenced entries
+                    if (!str_ends_with($tag, '^{}')) {
+                        $tags[] = $tag;
+                    }
+                }
+            }
+            // Sort by version, newest first
+            usort($tags, function ($a, $b) {
+                return version_compare(
+                    ltrim($b, 'v'),
+                    ltrim($a, 'v')
+                );
+            });
+        }
+
+        if (empty($tags)) {
+            // No releases — offer nightly (branch tip) strategy
+            $output->writeln("    <fg=yellow>!</> No release tags found in this repository.");
+            $output->writeln('');
+            $output->writeln("    <fg=gray>You can start with</> <fg=white>nightly</> <fg=gray>mode, which follows the branch");
+            $output->writeln("    tip. Once a release tag is created, Protocol will automatically");
+            $output->writeln("    switch to release-based deployments.</>");
+            $output->writeln('');
+
+            $question = new ConfirmationQuestion(
+                '    Start with nightly (branch tip) mode? [<fg=green>Y</>/n] ', true
+            );
+            if ($helper->ask($input, $output, $question)) {
+                // Determine branch
+                $branch = 'main';
+                $branchOutput = Shell::run("git ls-remote --symref " . escapeshellarg($gitRemote) . " HEAD 2>/dev/null");
+                if ($branchOutput && preg_match('#ref: refs/heads/(\S+)#', $branchOutput, $m)) {
+                    $branch = $m[1];
+                }
+
+                $output->writeln('');
+                $output->writeln("    <fg=gray>›</> Cloning <fg=white>{$branch}</> into releases directory...");
+
+                $nightlyDir = rtrim($releasesDir, '/') . '/' . $branch;
+                if (!is_dir($nightlyDir)) {
+                    Shell::passthru("git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($nightlyDir) . " --branch " . escapeshellarg($branch));
+                } else {
+                    Shell::passthru("git -C " . escapeshellarg($nightlyDir) . " pull");
+                }
+
+                // Update node config with nightly strategy (mark as fallback)
+                $nodeData['deployment']['strategy'] = 'branch';
+                $nodeData['deployment']['branch'] = $branch;
+                $nodeData['deployment']['awaiting_release'] = true;
+                NodeConfig::save($projectName, $nodeData);
+                Json::write('deployment.strategy', 'branch', $repo_dir);
+                Json::write('deployment.branch', $branch, $repo_dir);
+                Json::save($repo_dir);
+
+                $output->writeln('');
+                $output->writeln("    <fg=green>✓</> Nightly deploy: <fg=white>{$branch}</> → <fg=white>{$nightlyDir}</>");
+                $output->writeln("    <fg=gray>Will auto-switch to releases when the first tag is created.</>");
+            } else {
+                $output->writeln('');
+                $output->writeln("    <fg=gray>Skipped. Create a release with</> <fg=white>protocol release:create</> <fg=gray>when ready.</>");
+            }
+        } else {
+            // Releases available — let user pick one
+            $output->writeln("    <fg=green>✓</> Found " . count($tags) . " release(s)");
+            $output->writeln('');
+
+            // Build menu of releases (show up to 10)
+            $choices = [];
+            foreach (array_slice($tags, 0, 10) as $tag) {
+                $choices[$tag] = $tag;
+            }
+
+            $output->writeln("    <fg=gray>Choose which release to deploy:</>");
+            $output->writeln('');
+
+            $selectedTag = $this->askWithDots($input, $output, $helper, $choices, array_key_first($choices));
+
+            $output->writeln('');
+            $output->writeln("    <fg=gray>›</> Cloning release <fg=white>{$selectedTag}</>...");
+
+            $cloneSuccess = ReleaseBuilder::initReleaseDir($repo_dir, $selectedTag, $gitRemote);
+            if ($cloneSuccess) {
+                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $selectedTag);
+                ReleaseBuilder::checkoutVersion($releaseDir, $selectedTag);
+
+                $output->writeln("    <fg=green>✓</> Release <fg=white>{$selectedTag}</> cloned to <fg=white>{$releaseDir}</>");
+
+                // Set as active release and switch to release strategy
+                Json::write('release.current', $selectedTag, $repo_dir);
+                Json::write('deployment.strategy', 'release', $repo_dir);
+                Json::save($repo_dir);
+
+                // Clear awaiting_release flag in node config
+                $nodeData['deployment']['strategy'] = 'release';
+                unset($nodeData['deployment']['awaiting_release']);
+                unset($nodeData['deployment']['branch']);
+                NodeConfig::save($projectName, $nodeData);
+
+                $output->writeln("    <fg=green>✓</> Active release set to <fg=white>{$selectedTag}</>");
+            } else {
+                $output->writeln("    <fg=red>✗</> Failed to clone release. Check access permissions.");
+                $output->writeln("    <fg=gray>You can deploy manually with:</> <fg=white>protocol shadow:build {$selectedTag}</>");
+            }
+        }
+
+        $output->writeln('');
+
         // Completion
+        completion:
         $this->clearAndBanner($output);
 
         $configPath = NodeConfig::configPath($projectName);
