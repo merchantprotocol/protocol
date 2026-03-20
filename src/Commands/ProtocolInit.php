@@ -467,29 +467,27 @@ Class ProtocolInit extends Command {
         $output->writeln('');
         $output->writeln("    <fg=gray>›</> Testing repository access...");
 
+        // If GitHub App is configured, refresh credentials before testing
+        // (tokens expire, so refresh proactively on re-entry)
+        if (GitHubApp::isConfigured()) {
+            $owner = '';
+            if (preg_match('#github\.com[:/]([^/]+)/#', $gitRemote, $m)) {
+                $owner = $m[1];
+            }
+            if ($owner) {
+                GitHubApp::refreshGitCredentials($owner);
+            }
+        }
+
         $canAccess = $this->testRepoAccess($gitRemote);
 
         if (!$canAccess) {
-            // Check if GitHub App can refresh credentials
-            if (GitHubApp::isConfigured()) {
-                $owner = '';
-                if (preg_match('#github\.com[:/]([^/]+)/#', $gitRemote, $m)) {
-                    $owner = $m[1];
-                }
-                if ($owner && GitHubApp::refreshGitCredentials($owner)) {
-                    $output->writeln("    <fg=green>✓</> Credentials refreshed via GitHub App");
-                    $canAccess = $this->testRepoAccess($gitRemote);
-                }
-            }
+            $output->writeln("    <fg=red>✗</> Cannot access repository");
+            $output->writeln('');
 
-            if (!$canAccess) {
-                $output->writeln("    <fg=red>✗</> Cannot access repository");
-                $output->writeln('');
-
-                $gitRemote = $this->flowGitAuth($gitRemote, $input, $output, $helper);
-                if (!$gitRemote) {
-                    return Command::FAILURE;
-                }
+            $gitRemote = $this->flowGitAuth($gitRemote, $input, $output, $helper);
+            if (!$gitRemote) {
+                return Command::FAILURE;
             }
         } else {
             $output->writeln("    <fg=green>✓</> Repository accessible");
@@ -608,7 +606,7 @@ Class ProtocolInit extends Command {
                 if ($awaitingRelease) {
                     $output->writeln('');
                     $output->writeln("    <fg=gray>›</> Checking for new release tags...");
-                    $tagsCheck = Shell::run("git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+                    $tagsCheck = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
                     $hasTags = false;
                     if ($tagsCheck) {
                         foreach (explode("\n", trim($tagsCheck)) as $line) {
@@ -645,7 +643,7 @@ Class ProtocolInit extends Command {
 
         // List available release tags from the remote
         $output->writeln("    <fg=gray>›</> Checking for available releases...");
-        $tagsOutput = Shell::run("git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+        $tagsOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
 
         $tags = [];
         if ($tagsOutput) {
@@ -682,7 +680,7 @@ Class ProtocolInit extends Command {
             if ($helper->ask($input, $output, $question)) {
                 // Determine branch
                 $branch = 'main';
-                $branchOutput = Shell::run("git ls-remote --symref " . escapeshellarg($gitRemote) . " HEAD 2>/dev/null");
+                $branchOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --symref " . escapeshellarg($gitRemote) . " HEAD 2>/dev/null");
                 if ($branchOutput && preg_match('#ref: refs/heads/(\S+)#', $branchOutput, $m)) {
                     $branch = $m[1];
                 }
@@ -818,7 +816,7 @@ Class ProtocolInit extends Command {
      */
     protected function testRepoAccess(string $gitRemote): bool
     {
-        $result = Shell::run("git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1");
+        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1");
         // ls-remote returns refs on success, error messages on failure
         if (str_contains($result, 'fatal:') || str_contains($result, 'ERROR') || str_contains($result, 'Permission denied')) {
             return false;
@@ -925,7 +923,7 @@ Class ProtocolInit extends Command {
      * Uses a GitHub App owned by the organization so that access survives
      * team member departures.
      *
-     * @return string|null The authenticated HTTPS URL, or null on failure
+     * @return string|null The original git remote URL (credentials are set up separately), or null on failure
      */
     protected function flowGitAuth(
         string $gitRemote,
@@ -977,7 +975,7 @@ Class ProtocolInit extends Command {
             if (GitHubApp::refreshGitCredentials($owner)) {
                 $output->writeln("    <fg=green>✓</> Git credentials refreshed from GitHub App");
                 $output->writeln('');
-                return "https://github.com/{$owner}/{$repo}.git";
+                return $gitRemote;
             }
             $output->writeln("    <fg=yellow>!</> Existing credentials failed — setting up a new app");
             $output->writeln('');
@@ -1137,7 +1135,7 @@ Class ProtocolInit extends Command {
             $output->writeln("    <fg=green>✓</> Credentials stored in <fg=white>" . GitHubApp::credentialsPath() . "</>");
             $output->writeln('');
 
-            return "https://github.com/{$owner}/{$repo}.git";
+            return $gitRemote;
         } // end while(true)
     }
 
@@ -1169,7 +1167,7 @@ Class ProtocolInit extends Command {
         // Fall back to git archive (works with SSH remotes)
         $tmpDir = sys_get_temp_dir() . '/protocol-fetch-' . uniqid();
         mkdir($tmpDir, 0700);
-        $result = Shell::run("git archive --remote=" . escapeshellarg($gitRemote) . " HEAD protocol.json 2>/dev/null | tar -xO -C " . escapeshellarg($tmpDir) . " 2>/dev/null");
+        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git archive --remote=" . escapeshellarg($gitRemote) . " HEAD protocol.json 2>/dev/null | tar -xO -C " . escapeshellarg($tmpDir) . " 2>/dev/null");
         if ($result && trim($result)) {
             $data = json_decode(trim($result), true);
             @rmdir($tmpDir);
@@ -1181,7 +1179,7 @@ Class ProtocolInit extends Command {
 
         // Last resort: shallow clone
         $tmpClone = sys_get_temp_dir() . '/protocol-clone-' . uniqid();
-        Shell::run("git clone --depth 1 " . escapeshellarg($gitRemote) . " " . escapeshellarg($tmpClone) . " 2>/dev/null");
+        Shell::run("GIT_TERMINAL_PROMPT=0 git clone --depth 1 " . escapeshellarg($gitRemote) . " " . escapeshellarg($tmpClone) . " 2>/dev/null");
         $protocolFile = $tmpClone . '/protocol.json';
         if (is_file($protocolFile)) {
             $data = json_decode(file_get_contents($protocolFile), true);
@@ -1215,7 +1213,7 @@ Class ProtocolInit extends Command {
         $configRemote = $protocolData['configuration']['remote'] ?? null;
         if ($configRemote) {
             $output->writeln("    <fg=gray>›</> Checking config repo for available environments...");
-            $branchOutput = Shell::run("git ls-remote --heads " . escapeshellarg($configRemote) . " 2>/dev/null");
+            $branchOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --heads " . escapeshellarg($configRemote) . " 2>/dev/null");
 
             if ($branchOutput) {
                 $lines = explode("\n", trim($branchOutput));
