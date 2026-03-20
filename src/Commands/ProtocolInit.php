@@ -589,11 +589,28 @@ Class ProtocolInit extends Command {
     }
 
     /**
+     * Reconstruct a proper PEM from a flattened single-line paste.
+     *
+     * When users paste a PEM key, terminals often flatten it to one line.
+     * This extracts the base64 content and reformats it with 64-char lines.
+     */
+    protected function reconstructPem(string $flattened): string
+    {
+        if (preg_match('/(-{5}BEGIN [A-Z ]+KEY-{5})(.+?)(-{5}END [A-Z ]+KEY-{5})/', $flattened, $m)) {
+            $header = $m[1];
+            $base64 = trim($m[2]);
+            $footer = $m[3];
+            $formatted = chunk_split($base64, 64, "\n");
+            return "{$header}\n{$formatted}{$footer}\n";
+        }
+        return $flattened;
+    }
+
+    /**
      * Guide the user through setting up GitHub authentication when repo access fails.
      *
-     * Recommends an organization-level fine-grained personal access token (PAT)
-     * with read-only permissions. This avoids the problem where a developer's
-     * personal token is revoked (e.g. they leave the org) and production breaks.
+     * Uses a GitHub App owned by the organization so that access survives
+     * team member departures.
      *
      * @return string|null The authenticated HTTPS URL, or null on failure
      */
@@ -690,34 +707,61 @@ Class ProtocolInit extends Command {
         }
         $appId = trim($appId);
 
-        // Ask for private key
+        // Ask for private key — accept file path or pasted content
         $output->writeln('');
-        $output->writeln("    <fg=gray>Paste the path to the .pem file, or paste the key contents</>");
-        $output->writeln("    <fg=gray>(end with a blank line):</>");
+        $output->writeln("    <fg=gray>Paste the private key or enter the path to the .pem file.</>");
+        $output->writeln("    <fg=gray>If pasting, just paste — we'll read until the END marker.</>");
         $output->writeln('');
 
-        $question = new Question('    Private key (path or paste): ');
-        $keyInput = $helper->ask($input, $output, $question);
+        $question = new Question('    Private key: ');
+        $firstLine = trim($helper->ask($input, $output, $question) ?? '');
 
-        if (!$keyInput || empty(trim($keyInput))) {
+        if (empty($firstLine)) {
             $output->writeln('');
             $output->writeln("    <fg=red>✗</> No private key provided.");
             $output->writeln('');
             return null;
         }
 
-        $keyInput = trim($keyInput);
-        if (is_file($keyInput)) {
-            // It's a file path
-            $pemContents = file_get_contents($keyInput);
+        if (is_file($firstLine)) {
+            // File path provided
+            $pemContents = file_get_contents($firstLine);
+        } elseif (str_contains($firstLine, 'BEGIN')) {
+            if (str_contains($firstLine, 'END')) {
+                // Entire key flattened onto one line — reconstruct
+                $pemContents = $this->reconstructPem($firstLine);
+            } else {
+                // Multi-line paste — keep reading until END marker
+                $pemLines = [$firstLine];
+                $stdin = fopen('php://stdin', 'r');
+                while (($line = fgets($stdin)) !== false) {
+                    $line = rtrim($line, "\r\n");
+                    $pemLines[] = $line;
+                    if (str_contains($line, 'END')) {
+                        break;
+                    }
+                }
+                $pemContents = implode("\n", $pemLines) . "\n";
+            }
         } else {
-            // Treat as pasted key content
-            $pemContents = $keyInput;
+            // Maybe a file path with ~ expansion
+            $HOME = rtrim(Shell::run('echo $HOME'));
+            if (str_starts_with($firstLine, '~/')) {
+                $firstLine = $HOME . substr($firstLine, 1);
+            }
+            if (is_file($firstLine)) {
+                $pemContents = file_get_contents($firstLine);
+            } else {
+                $output->writeln('');
+                $output->writeln("    <fg=red>✗</> Not a valid private key or file path.");
+                $output->writeln('');
+                return null;
+            }
         }
 
         if (!str_contains($pemContents, 'BEGIN RSA PRIVATE KEY') && !str_contains($pemContents, 'BEGIN PRIVATE KEY')) {
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> Invalid private key format. Expected a PEM file.");
+            $output->writeln("    <fg=red>✗</> Invalid private key format.");
             $output->writeln('');
             return null;
         }
