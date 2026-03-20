@@ -158,7 +158,7 @@ Class ProtocolStart extends Command {
         });
 
         // ── Stage 2: Infrastructure provisioning ────────────────
-        $runner->run('Infrastructure provisioning', function() use ($app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev) {
+        $runner->run('Infrastructure provisioning', function() use ($app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
 
             $configRemote = Json::read('configuration.remote', false, $repo_dir);
             $configRepo = Config::repo($repo_dir);
@@ -166,16 +166,26 @@ Class ProtocolStart extends Command {
 
             // If config repo has a remote but hasn't been cloned yet, clone it silently
             if ($configRemote && !is_dir($configRepo)) {
-                $basedir = dirname($repo_dir) . DIRECTORY_SEPARATOR;
-                $foldername = basename($repo_dir) . '-config';
-                $configPath = $basedir . $foldername;
-                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configPath) . " 2>&1");
+                // Clone to the resolved config repo path (Config::repo handles slave context)
+                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configRepo) . " 2>&1");
 
                 // Switch to environment branch if needed
                 if ($environment) {
-                    $currentBranch = Git::branch($configPath);
+                    $currentBranch = Git::branch($configRepo);
                     if ($environment !== $currentBranch) {
-                        Shell::run("git -C " . escapeshellarg($configPath) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                        Shell::run("git -C " . escapeshellarg($configRepo) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                    }
+                }
+            }
+
+            // Create bridge symlink so relative paths from release dirs resolve correctly
+            if ($nodeConfig && is_dir($configRepo)) {
+                $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+                if ($releasesDir && is_dir($releasesDir)) {
+                    $configFolderName = basename(rtrim($configRepo, '/'));
+                    $bridgeLink = rtrim($releasesDir, '/') . '/' . $configFolderName;
+                    if (!file_exists($bridgeLink)) {
+                        Shell::run("ln -s " . escapeshellarg('../' . $configFolderName) . " " . escapeshellarg($bridgeLink));
                     }
                 }
             }
