@@ -468,7 +468,7 @@ Class ProtocolInit extends Command {
         // Step 3: Releases directory
         $this->writeStep($output, 3, $totalSteps, 'Code Location');
 
-        $defaultReleasesDir = dirname(rtrim($repo_dir, '/')) . '/' . $projectName . '-releases';
+        $defaultReleasesDir = rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
 
         $output->writeln("    <fg=gray>Each release gets its own directory with a full git clone,</>");
         $output->writeln("    <fg=gray>Docker containers, and config files.</>");
