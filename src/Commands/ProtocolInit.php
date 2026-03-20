@@ -175,45 +175,44 @@ Class ProtocolInit extends Command {
 
         $this->clearAndBanner($output);
 
-        // ── Auto-detect scenario ─────────────────────────────────
+        $output->writeln("    <fg=gray>Directory:</> <fg=white>{$repo_dir}</>");
+        $output->writeln('');
+
+        // ── Step 1: What environment is this? ────────────────────
+        $output->writeln("    <fg=gray>What environment is this node?</>");
+        $output->writeln('');
+
+        $envKey = $this->askWithDots($input, $output, $helper, [
+            'development' => 'Development — local machine',
+            'staging'     => 'Staging — pre-production testing',
+            'production'  => 'Production — live environment',
+        ], 'development');
+
+        // ── Production / Staging → slave node ────────────────────
+        if ($envKey === 'production' || $envKey === 'staging') {
+            return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io);
+        }
+
+        // ── Development → auto-detect project state ──────────────
         $isGitRepo = Git::isInitializedRepo($repo_dir);
         $hasProtocolJson = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'protocol.json');
 
         if ($hasProtocolJson) {
-            $scenario = 'protocol';
-        } elseif ($isGitRepo) {
-            $scenario = 'existing';
-        } else {
-            $scenario = 'new';
+            // Already has Protocol — go straight to update
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Detected existing Protocol project");
+            return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
         }
 
-        $output->writeln("    <fg=gray>We detected your project and pre-selected the best option.</>");
-        $output->writeln("    <fg=gray>Directory:</> <fg=white>{$repo_dir}</>");
-        $output->writeln('');
-
-        $selectedKey = $this->askWithDots($input, $output, $helper, [
-            'new'      => 'Start a new project',
-            'existing' => 'Connect an existing repository',
-            'slave'    => 'Make this a slave node (production / staging deploy)',
-            'protocol' => 'Update an existing Protocol project',
-        ], $scenario);
-
-        // ── Route to the right flow ──────────────────────────────
-        switch ($selectedKey) {
-            case 'new':
-                return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
-
-            case 'existing':
-                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
-
-            case 'slave':
-                return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io);
-
-            case 'protocol':
-                return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
+        if ($isGitRepo) {
+            // Has git but no protocol.json — connect existing repo
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Detected existing git repository");
+            return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
         }
 
-        return Command::SUCCESS;
+        // No git, no protocol — new project
+        return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
     }
 
     // ─── Flow: New Project ───────────────────────────────────────
