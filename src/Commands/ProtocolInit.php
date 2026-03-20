@@ -766,7 +766,7 @@ Class ProtocolInit extends Command {
         $output->writeln("    <fg=gray>This server needs read access to</> <fg=white>{$owner}/{$repo}</>");
         $output->writeln('');
 
-        // Check if a GitHub App is already configured
+        // Check if a GitHub App is already configured (fully — ID + key)
         if (GitHubApp::isConfigured()) {
             $output->writeln("    <fg=gray>›</> Found existing GitHub App credentials, refreshing token...");
             if (GitHubApp::refreshGitCredentials($owner)) {
@@ -778,72 +778,90 @@ Class ProtocolInit extends Command {
             $output->writeln('');
         }
 
+        // Check if we have a partial setup (App ID stored but key missing or failed)
+        $storedCreds = GitHubApp::loadCredentials();
+        $appId = $storedCreds['app_id'] ?? null;
+        $pemContents = null;
+
+        if ($appId && is_file(GitHubApp::privateKeyPath())) {
+            $pemContents = file_get_contents(GitHubApp::privateKeyPath());
+        }
+
         // Outer retry loop — user controls when to give up
         while (true) {
-            $appUrl = "https://github.com/organizations/{$owner}/settings/apps/new";
 
-            $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
-            $output->writeln("    The app belongs to the org — not any individual — so access");
-            $output->writeln("    won't break when someone leaves the team.");
-            $output->writeln('');
-            $output->writeln("    <fg=cyan;options=bold>{$appUrl}</>");
-            $output->writeln('');
-            $output->writeln('    ┌──────────────────────────────────┬──────────────────────────────────────────┐');
-            $output->writeln('    │ <fg=white;options=bold>Field</>                            │ <fg=white;options=bold>Value</>                                    │');
-            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-            $output->writeln('    │ GitHub App name                  │ <fg=green>Protocol Deploy App</>                    │');
-            $output->writeln('    │ Homepage URL                     │ <fg=green>https://merchantprotocol.com</>            │');
-            $output->writeln('    │ Description                      │ <fg=green>Private internal app for production</>     │');
-            $output->writeln('    │                                  │ <fg=green>server repo pulls</>                       │');
-            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-            $output->writeln('    │ Webhook → Active                 │ <fg=yellow>☐  Unchecked</>                            │');
-            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-            $output->writeln('    │ Callback URL                     │ <fg=gray>Leave blank</>                              │');
-            $output->writeln('    │ Setup URL                        │ <fg=gray>Leave blank</>                              │');
-            $output->writeln('    │ Webhook URL                      │ <fg=gray>Leave blank</>                              │');
-            $output->writeln('    │ Webhook secret                   │ <fg=gray>Leave blank</>                              │');
-            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-            $output->writeln('    │ <fg=white;options=bold>Repository Permissions</>             │                                          │');
-            $output->writeln('    │   Contents                       │ <fg=green>Read-only</>                               │');
-            $output->writeln('    │   Metadata                       │ <fg=green>Read-only</>                               │');
-            $output->writeln('    │   Variables                      │ <fg=green>Read-only</>                               │');
-            $output->writeln('    │   <fg=gray>Everything else</>                 │ <fg=gray>No access</>                               │');
-            $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
-            $output->writeln('    │ Where can this app be installed? │ <fg=green>Only on this account</>                    │');
-            $output->writeln('    └──────────────────────────────────┴──────────────────────────────────────────┘');
-            $output->writeln('');
-            $output->writeln("    <fg=white>After creating the app:</>");
-            $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
-            $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
-            $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
-            $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
-            $output->writeln('');
+            // ── Collect App ID (only if we don't have one) ──
+            if (!$appId) {
+                $appUrl = "https://github.com/organizations/{$owner}/settings/apps/new";
 
-            // ── Collect App ID ──
-            $question = new Question('    App ID: ');
-            $appId = trim($helper->ask($input, $output, $question) ?? '');
+                $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
+                $output->writeln("    The app belongs to the org — not any individual — so access");
+                $output->writeln("    won't break when someone leaves the team.");
+                $output->writeln('');
+                $output->writeln("    <fg=cyan;options=bold>{$appUrl}</>");
+                $output->writeln('');
+                $output->writeln('    ┌──────────────────────────────────┬──────────────────────────────────────────┐');
+                $output->writeln('    │ <fg=white;options=bold>Field</>                            │ <fg=white;options=bold>Value</>                                    │');
+                $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+                $output->writeln('    │ GitHub App name                  │ <fg=green>Protocol Deploy App</>                    │');
+                $output->writeln('    │ Homepage URL                     │ <fg=green>https://merchantprotocol.com</>            │');
+                $output->writeln('    │ Description                      │ <fg=green>Private internal app for production</>     │');
+                $output->writeln('    │                                  │ <fg=green>server repo pulls</>                       │');
+                $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+                $output->writeln('    │ Webhook → Active                 │ <fg=yellow>☐  Unchecked</>                            │');
+                $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+                $output->writeln('    │ Callback URL                     │ <fg=gray>Leave blank</>                              │');
+                $output->writeln('    │ Setup URL                        │ <fg=gray>Leave blank</>                              │');
+                $output->writeln('    │ Webhook URL                      │ <fg=gray>Leave blank</>                              │');
+                $output->writeln('    │ Webhook secret                   │ <fg=gray>Leave blank</>                              │');
+                $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+                $output->writeln('    │ <fg=white;options=bold>Repository Permissions</>             │                                          │');
+                $output->writeln('    │   Contents                       │ <fg=green>Read-only</>                               │');
+                $output->writeln('    │   Metadata                       │ <fg=green>Read-only</>                               │');
+                $output->writeln('    │   Variables                      │ <fg=green>Read-only</>                               │');
+                $output->writeln('    │   <fg=gray>Everything else</>                 │ <fg=gray>No access</>                               │');
+                $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+                $output->writeln('    │ Where can this app be installed? │ <fg=green>Only on this account</>                    │');
+                $output->writeln('    └──────────────────────────────────┴──────────────────────────────────────────┘');
+                $output->writeln('');
+                $output->writeln("    <fg=white>After creating the app:</>");
+                $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
+                $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
+                $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
+                $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
+                $output->writeln('');
 
-            if (empty($appId)) {
-                $output->writeln("    <fg=yellow>!</> No App ID entered.");
-                if ($this->askRetryOrExit($input, $output, $helper)) {
-                    continue;
+                $question = new Question('    App ID: ');
+                $appId = trim($helper->ask($input, $output, $question) ?? '');
+
+                if (empty($appId)) {
+                    $output->writeln("    <fg=yellow>!</> No App ID entered.");
+                    if ($this->askRetryOrExit($input, $output, $helper)) {
+                        continue;
+                    }
+                    return null;
                 }
-                return null;
+            } else {
+                $output->writeln("    <fg=green>✓</> App ID: <fg=white>{$appId}</> <fg=gray>(previously configured)</>");
             }
 
-            // ── Collect private key ──
-            $output->writeln('');
-            $output->writeln("    <fg=gray>Paste the private key or enter the path to the .pem file.</>");
-            $output->writeln("    <fg=gray>If pasting, just paste — we'll read until the END marker.</>");
-            $output->writeln('');
-
-            $pemContents = $this->readPrivateKey($input, $output, $helper);
-
+            // ── Collect private key (only if we don't have a valid one) ──
             if (!$pemContents) {
-                if ($this->askRetryOrExit($input, $output, $helper)) {
-                    continue;
+                $output->writeln('');
+                $output->writeln("    <fg=gray>Paste the private key or enter the path to the .pem file.</>");
+                $output->writeln("    <fg=gray>If pasting, just paste — we'll read until the END marker.</>");
+                $output->writeln('');
+
+                $pemContents = $this->readPrivateKey($input, $output, $helper);
+
+                if (!$pemContents) {
+                    if ($this->askRetryOrExit($input, $output, $helper)) {
+                        continue;
+                    }
+                    return null;
                 }
-                return null;
+            } else {
+                $output->writeln("    <fg=green>✓</> Private key: <fg=gray>(previously configured)</>");
             }
 
             // ── Test JWT ──
@@ -855,12 +873,17 @@ Class ProtocolInit extends Command {
                 $output->writeln("    <fg=red>✗</> Private key failed to generate a valid JWT.");
                 $output->writeln("    <fg=gray>This usually means the key doesn't match the App ID.</>");
                 $output->writeln('');
+                // Clear so retry asks for key again
+                $pemContents = null;
                 if ($this->askRetryOrExit($input, $output, $helper)) {
                     continue;
                 }
                 return null;
             }
             $output->writeln("    <fg=green>✓</> Private key verified");
+
+            // Save credentials early so re-entry skips App ID + key steps
+            GitHubApp::saveCredentials($appId, $pemContents, $owner);
 
             // ── Find installation — wait for user to install if needed ──
             $installationId = null;
