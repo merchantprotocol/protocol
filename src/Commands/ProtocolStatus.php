@@ -48,6 +48,7 @@ use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStatus extends Command {
 
@@ -64,12 +65,71 @@ Class ProtocolStatus extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo($output, $repo_dir);
+        $nodeConfig = null;
+        $nodeData = [];
 
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        // Detect slave node mode: check NodeConfig first so status works from anywhere
+        $projects = NodeConfig::listProjects();
+        if (!empty($projects)) {
+            // If run from a directory that matches a node config, use that one
+            $matchedProject = $repo_dir ? NodeConfig::findByRepoDir($repo_dir) : null;
+            if (!$matchedProject) {
+                // Use the first (or only) configured project
+                $matchedProject = $projects[0];
+            }
+            $nodeData = NodeConfig::load($matchedProject);
+            if (!empty($nodeData) && ($nodeData['node_type'] ?? '') === 'slave') {
+                $nodeConfig = $matchedProject;
+                // On slave nodes, the repo_dir from NodeConfig is authoritative
+                $repo_dir = $nodeData['repo_dir'] ?? $repo_dir;
+            }
+        }
+
+        // For non-slave nodes, require a git repo as before
+        if (!$nodeConfig) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
+
+        // Read config: slave nodes use NodeConfig, others use protocol.json
+        if ($nodeConfig) {
+            $strategy = $nodeData['deployment']['strategy'] ?? 'branch';
+            $projectName = $nodeData['name'] ?? $nodeConfig;
+            $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+            $currentRelease = $nodeData['release']['current'] ?? null;
+            $currentBranch = $nodeData['deployment']['branch'] ?? null;
+            $awaitingRelease = $nodeData['deployment']['awaiting_release'] ?? false;
+            $dockerImage = $nodeData['docker']['image'] ?? null;
+            $secretsMode = $nodeData['deployment']['secrets'] ?? 'file';
+            $gitRemote = $nodeData['git']['remote'] ?? null;
+        } else {
+            $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+            $projectName = Json::read('name', basename($repo_dir), $repo_dir);
+            $releasesDir = null;
+            $currentRelease = null;
+            $currentBranch = null;
+            $awaitingRelease = false;
+            $dockerImage = Json::read('docker.image', null, $repo_dir);
+            $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+            $gitRemote = null;
+        }
+
         $configrepo = Config::repo($repo_dir);
         $issues = [];
         $wazuhRunning = false;
+
+        // Determine the active directory for runtime state (lock files, docker, etc.)
+        $activeDir = $repo_dir;
+        if ($nodeConfig && $strategy === 'release' && $currentRelease && $releasesDir) {
+            $releaseDir = rtrim($releasesDir, '/') . '/' . $currentRelease;
+            if (is_dir($releaseDir)) {
+                $activeDir = $releaseDir;
+            }
+        } elseif ($nodeConfig && $strategy === 'branch' && $currentBranch && $releasesDir) {
+            $branchDir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+            if (is_dir($branchDir)) {
+                $activeDir = $branchDir;
+            }
+        }
 
         $output->writeln('');
 
@@ -78,28 +138,79 @@ Class ProtocolStatus extends Command {
 
         $hostname = trim(Shell::run('hostname'));
         $environment = Config::read('env', 'not set');
-        $projectName = Json::read('name', basename($repo_dir), $repo_dir);
 
         $this->writeLine($output, 'Node', "<fg=white>{$hostname}</>");
         $this->writeLine($output, 'Project', "<fg=white>{$projectName}</>");
         $this->writeLine($output, 'Environment', "<fg=cyan>{$environment}</>");
+        if ($nodeConfig) {
+            $this->writeLine($output, 'Node type', "<fg=white>slave</>");
+            $configPath = NodeConfig::configPath($nodeConfig);
+            $this->writeLine($output, 'Config', "<fg=gray>{$configPath}</>");
+        }
+        if ($gitRemote) {
+            $this->writeLine($output, 'Remote', "<fg=white>{$gitRemote}</>");
+        }
+        if ($nodeConfig) {
+            $ghConfigured = \Gitcd\Helpers\GitHubApp::isConfigured();
+            $this->writeLine($output, 'GitHub App', $ghConfigured
+                ? '<fg=green>configured</>'
+                : '<fg=yellow>not configured</>');
+        }
 
         // Release info
         if ($strategy === 'release') {
-            $currentRelease = JsonLock::read('release.current', null, $repo_dir);
-            $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
-            $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
+            if ($nodeConfig) {
+                $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
+            } else {
+                $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+                $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
+                $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
 
-            if ($deployedAt) {
-                $ago = $this->timeAgo($deployedAt);
-                $releaseDisplay .= " <fg=gray>(deployed {$ago})</>";
+                if ($deployedAt) {
+                    $ago = $this->timeAgo($deployedAt);
+                    $releaseDisplay .= " <fg=gray>(deployed {$ago})</>";
+                }
             }
             $this->writeLine($output, 'Release', $releaseDisplay);
         } else {
-            $branch = Git::branch($repo_dir);
-            $this->writeLine($output, 'Branch', "<fg=white>{$branch}</>");
+            if ($currentBranch) {
+                $branchDisplay = "<fg=white>{$currentBranch}</>";
+                if ($awaitingRelease) {
+                    $branchDisplay .= " <fg=yellow>(awaiting first release)</>";
+                }
+                $this->writeLine($output, 'Branch', $branchDisplay);
+            } else {
+                $branch = Git::isInitializedRepo($repo_dir) ? Git::branch($repo_dir) : 'unknown';
+                $this->writeLine($output, 'Branch', "<fg=white>{$branch}</>");
+            }
         }
         $this->writeLine($output, 'Strategy', "<fg=white>{$strategy}</>");
+
+        // Releases directory info for slave nodes
+        if ($nodeConfig && $releasesDir) {
+            $this->writeLine($output, 'Releases dir', "<fg=white>{$releasesDir}/</>");
+            if (is_dir($releasesDir)) {
+                $releases = array_filter(scandir($releasesDir), fn($d) => $d !== '.' && $d !== '..' && is_dir($releasesDir . '/' . $d));
+                sort($releases);
+                if (!empty($releases)) {
+                    foreach ($releases as $rel) {
+                        $marker = ($rel === $currentRelease || $rel === $currentBranch) ? '<fg=green>●</>' : '<fg=gray>·</>';
+                        $label = ($rel === $currentRelease || $rel === $currentBranch) ? "<fg=white;options=bold>{$rel}</>" : "<fg=gray>{$rel}</>";
+                        $this->writeLine($output, '', "  {$marker} {$label}");
+                    }
+                } else {
+                    $this->writeLine($output, '', '  <fg=yellow>no releases cloned</>');
+                }
+            } else {
+                $this->writeLine($output, '', '  <fg=red>directory does not exist</>');
+                $issues[] = "Releases directory {$releasesDir} does not exist";
+            }
+        }
+
+        // Active directory
+        if ($nodeConfig && $activeDir !== $repo_dir) {
+            $this->writeLine($output, 'Active dir', "<fg=white>{$activeDir}/</>");
+        }
 
         // Uptime
         $uptime = $this->getUptime();
@@ -111,9 +222,11 @@ Class ProtocolStatus extends Command {
         $output->writeln('');
         $this->writeSection($output, 'Services');
 
-        // Deploy watcher
+        // Deploy watcher — check lock files in the active directory
+        $lockDir = $nodeConfig ? $activeDir : $repo_dir;
+
         if ($strategy === 'release') {
-            $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
+            $pid = JsonLock::read('release.slave.pid', null, $lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'deploy:slave', 'watching', "pid {$pid}");
@@ -128,7 +241,7 @@ Class ProtocolStatus extends Command {
                 }
             }
         } else {
-            $pid = JsonLock::read('slave.pid', null, $repo_dir);
+            $pid = JsonLock::read('slave.pid', null, $lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'git:slave', 'watching', "pid {$pid}");
@@ -140,7 +253,7 @@ Class ProtocolStatus extends Command {
 
         // Config watcher
         if (Git::isInitializedRepo($configrepo)) {
-            $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
+            $pid = JsonLock::read('configuration.slave.pid', null, $lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'config:slave', 'watching', "pid {$pid}");
@@ -150,7 +263,7 @@ Class ProtocolStatus extends Command {
         }
 
         // Crontab
-        $hasCron = Crontab::hasCrontabRestart($repo_dir);
+        $hasCron = Crontab::hasCrontabRestart($activeDir);
         if ($hasCron) {
             $this->writeService($output, 'crontab', 'installed');
         } else {
@@ -182,11 +295,12 @@ Class ProtocolStatus extends Command {
         }
 
         // ── Docker ───────────────────────────────────────────────
-        if (Docker::isDockerInitialized($repo_dir)) {
+        $dockerDir = $nodeConfig ? $activeDir : $repo_dir;
+        if (Docker::isDockerInitialized($dockerDir)) {
             $output->writeln('');
             $this->writeSection($output, 'Docker');
 
-            $containers = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
 
             foreach ($containers as $container) {
                 $running = Docker::isDockerContainerRunning($container);
@@ -201,7 +315,7 @@ Class ProtocolStatus extends Command {
             }
 
             // Image info
-            $image = Json::read('docker.image', null, $repo_dir);
+            $image = $dockerImage ?: Json::read('docker.image', null, $dockerDir);
             if ($image) {
                 $this->writeLine($output, 'Image', "<fg=white>{$image}</>");
             }
@@ -224,7 +338,7 @@ Class ProtocolStatus extends Command {
             $this->writeLine($output, 'Config branch', "<fg={$branchColor}>{$branch}</>");
 
             // Secrets status
-            $decryptedFiles = JsonLock::read('configuration.decrypted_files', [], $repo_dir);
+            $decryptedFiles = JsonLock::read('configuration.decrypted_files', [], $lockDir);
             if (!empty($decryptedFiles)) {
                 $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
             } elseif (Secrets::hasKey()) {
@@ -236,7 +350,6 @@ Class ProtocolStatus extends Command {
                     $this->writeLine($output, 'Secrets', '<fg=green>key present</>');
                 }
             } else {
-                $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
                 if ($secretsMode === 'encrypted') {
                     $this->writeLine($output, 'Secrets', '<fg=red>encrypted but key MISSING</>');
                     $issues[] = 'Encryption key missing — run protocol secrets:setup';
@@ -246,7 +359,7 @@ Class ProtocolStatus extends Command {
             }
 
             // Symlinks
-            $symlinks = JsonLock::read('configuration.symlinks', [], $repo_dir);
+            $symlinks = JsonLock::read('configuration.symlinks', [], $lockDir);
             if (!empty($symlinks)) {
                 $this->writeLine($output, 'Symlinks', '<fg=white>' . count($symlinks) . ' linked</>');
             }
@@ -259,7 +372,7 @@ Class ProtocolStatus extends Command {
         $this->writeSection($output, 'Security');
 
         // SOC 2 checks
-        $soc2 = new Soc2Check($repo_dir);
+        $soc2 = new Soc2Check($activeDir);
         $soc2->runAll();
         $soc2Results = $soc2->getResults();
         $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
@@ -306,7 +419,6 @@ Class ProtocolStatus extends Command {
         }
 
         // Encryption key
-        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
         if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
             $keyPerms = fileperms(Secrets::keyPath()) & 0777;
             $keyOk = $keyPerms === 0600;
