@@ -164,32 +164,6 @@ Class ProtocolStart extends Command {
             $configRepo = Config::repo($repo_dir);
             $hasConfigRepo = $configRemote || is_dir($configRepo);
 
-            // If config repo has a remote but hasn't been cloned yet, clone it silently
-            if ($configRemote && !is_dir($configRepo)) {
-                // Clone to the resolved config repo path (Config::repo handles slave context)
-                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configRepo) . " 2>&1");
-
-                // Switch to environment branch if needed
-                if ($environment) {
-                    $currentBranch = Git::branch($configRepo);
-                    if ($environment !== $currentBranch) {
-                        Shell::run("git -C " . escapeshellarg($configRepo) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
-                    }
-                }
-            }
-
-            // Create bridge symlink so relative paths from release dirs resolve correctly
-            if ($nodeConfig && is_dir($configRepo)) {
-                $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
-                if ($releasesDir && is_dir($releasesDir)) {
-                    $configFolderName = basename(rtrim($configRepo, '/'));
-                    $bridgeLink = rtrim($releasesDir, '/') . '/' . $configFolderName;
-                    if (!file_exists($bridgeLink)) {
-                        Shell::run("ln -s " . escapeshellarg('../' . $configFolderName) . " " . escapeshellarg($bridgeLink));
-                    }
-                }
-            }
-
             if ($strategy === 'release') {
                 // Release-based deployment mode
                 if ($hasConfigRepo) {

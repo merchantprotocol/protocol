@@ -757,6 +757,37 @@ Class ProtocolInit extends Command {
             }
         }
 
+        // Clone the config repo into the releases directory if one is configured
+        $configRemote = $nodeData['configuration']['remote'] ?? null;
+        if ($configRemote && $releasesDir) {
+            $configDirName = $projectName . '-config';
+            $configDir = rtrim($releasesDir, '/') . '/' . $configDirName;
+
+            if (!is_dir($configDir)) {
+                $output->writeln('');
+                $output->writeln("    <fg=gray>›</> Cloning configuration repository...");
+
+                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir) . " 2>&1");
+
+                // Switch to environment branch if it exists
+                if ($environment) {
+                    $currentBranch = Git::branch($configDir);
+                    if ($environment !== $currentBranch) {
+                        Shell::run("git -C " . escapeshellarg($configDir) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                    }
+                }
+
+                if (is_dir($configDir)) {
+                    $output->writeln("    <fg=green>✓</> Config repo cloned to <fg=white>{$configDir}</>");
+                } else {
+                    $output->writeln("    <fg=yellow>!</> Failed to clone config repo. You can set it up later with <fg=white>protocol config:init</>");
+                }
+            } else {
+                $output->writeln('');
+                $output->writeln("    <fg=green>✓</> Config repo already exists at <fg=white>{$configDir}</>");
+            }
+        }
+
         $output->writeln('');
 
         // Completion — run protocol start to bring everything online
