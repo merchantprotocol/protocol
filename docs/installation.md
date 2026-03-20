@@ -35,13 +35,13 @@ If you prefer to install manually or the install script doesn't work for your pl
 
 ```bash
 # Clone the repository
-git clone https://github.com/merchantprotocol/protocol.git $HOME/protocol
+git clone https://github.com/merchantprotocol/protocol.git $HOME/.protocol
 
 # Make the binary executable
-chmod +x $HOME/protocol/protocol
+chmod +x $HOME/.protocol/protocol
 
 # Install PHP dependencies
-cd $HOME/protocol && php bin/composer.phar install --ignore-platform-reqs
+cd $HOME/.protocol && php bin/composer.phar install --ignore-platform-reqs
 
 # Make protocol globally available
 protocol self:global
@@ -50,7 +50,7 @@ protocol self:global
 Or manually create a symlink:
 
 ```bash
-sudo ln -s $HOME/protocol/protocol /usr/local/bin/protocol
+sudo ln -s $HOME/.protocol/protocol /usr/local/bin/protocol
 ```
 
 ## Post-Installation Setup
@@ -158,7 +158,7 @@ This fetches the latest changes from the Protocol repository and resets to the l
 sudo rm /usr/local/bin/protocol
 
 # Remove the protocol directory
-rm -rf $HOME/protocol
+rm -rf $HOME/.protocol
 
 # Remove crontab entries (run from each managed project)
 protocol cron:remove
