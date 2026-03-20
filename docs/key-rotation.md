@@ -46,7 +46,7 @@ This decrypts `.env.enc` files back to plaintext `.env` files in your config rep
 protocol secrets:setup
 ```
 
-This generates a new 256-bit AES key and stores it at `~/.protocol/key`. The old key is overwritten.
+This generates a new 256-bit AES key and stores it at `~/.protocol/.node/key`. The old key is overwritten.
 
 **Important:** Copy the new key to your password manager or vault before proceeding.
 
@@ -103,7 +103,7 @@ Confirm that the "Encrypted secrets" check passes on every node.
 
 If something goes wrong during rotation:
 
-1. **If you still have the old key** — restore it to `~/.protocol/key` and re-encrypt
+1. **If you still have the old key** — restore it to `~/.protocol/.node/key` and re-encrypt
 2. **If you've already pushed new encrypted files but nodes can't decrypt** — restore the old `.env.enc` files from git history:
    ```bash
    git -C /path/to/config-repo log --oneline
@@ -117,7 +117,7 @@ If something goes wrong during rotation:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.protocol/key` on each node | Runtime decryption (permissions: `0600`) |
+| `~/.protocol/.node/key` on each node | Runtime decryption (permissions: `0600`) |
 | Password manager (1Password, Bitwarden, etc.) | Backup and recovery |
 | GitHub Secrets (`PROTOCOL_ENCRYPTION_KEY`) | CI/CD pipelines |
 
@@ -131,7 +131,7 @@ If something goes wrong during rotation:
 
 ## Audit Trail
 
-Key rotation events are automatically logged to `~/.protocol/deployments.log` via the CONFIG action type. After rotation, verify the log:
+Key rotation events are automatically logged to `~/.protocol/.node/deployments.log` via the CONFIG action type. After rotation, verify the log:
 
 ```bash
 protocol deploy:log

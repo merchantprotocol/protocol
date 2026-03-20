@@ -67,7 +67,7 @@ When Protocol starts, it symlinks the config files into your project directory. 
 
 ## How Secrets Work
 
-Your `.env` files get encrypted with AES-256-GCM before they touch git. The encryption key lives on your machines at `~/.protocol/key` — it never goes into any repository.
+Your `.env` files get encrypted with AES-256-GCM before they touch git. The encryption key lives on your machines at `~/.protocol/.node/key` — it never goes into any repository.
 
 When a node starts up, Protocol sees the `.env.enc` file, decrypts it using the local key, and your app reads `.env` like nothing happened.
 
@@ -131,7 +131,7 @@ The verification stage checks that containers are actually stopped and watchers 
 
 ## The Audit Trail
 
-Every deployment writes a line to `~/.protocol/deployments.log`:
+Every deployment writes a line to `~/.protocol/.node/deployments.log`:
 
 ```
 2024-01-15T10:30:01Z deploy repo=/opt/myapp from=v1.1.0 to=v1.2.0 status=success
@@ -148,9 +148,9 @@ View it anytime with `protocol deploy:log`.
 |---|---|---|
 | `protocol.json` | Your project root (in git) | Your project's Protocol settings — Docker image, deploy strategy, config repo URL |
 | `protocol.lock` | Your project root (gitignored) | Runtime state — what version is deployed, which processes are running, which files are symlinked |
-| `~/.protocol/key` | Each machine (never in git) | Your encryption key for decrypting secrets |
-| `~/.protocol/deployments.log` | Each machine | Audit trail of every deployment |
-| `~/.protocol/nodes/<project>.json` | Each slave node (never in git) | Per-node deployment settings for slave/blue-green nodes |
+| `~/.protocol/.node/key` | Each machine (never in git) | Your encryption key for decrypting secrets |
+| `~/.protocol/.node/deployments.log` | Each machine | Audit trail of every deployment |
+| `~/.protocol/.node/nodes/<project>.json` | Each slave node (never in git) | Per-node deployment settings for slave/blue-green nodes |
 | `config/config.php` | Protocol install directory | This machine's environment name |
 
 ## How Shadow (Blue-Green) Deployments Work
@@ -166,7 +166,7 @@ When you run `protocol shadow:build v1.2.0`, Protocol:
 
 If health checks pass and `auto_promote` is enabled, the shadow version is swapped to the active ports. If anything fails, the previous version keeps running untouched. `protocol shadow:rollback` swaps back instantly — no rebuild needed.
 
-Node-level settings for shadow deployments are stored in `~/.protocol/nodes/<project>.json` so they persist even when the active release directory changes. See [Shadow Deployment](blue-green.md) for the full guide.
+Node-level settings for shadow deployments are stored in `~/.protocol/.node/nodes/<project>.json` so they persist even when the active release directory changes. See [Shadow Deployment](blue-green.md) for the full guide.
 
 ## The Big Picture
 

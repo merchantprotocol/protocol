@@ -76,7 +76,7 @@ class SecurityAudit extends BaseAuditChecker
         if (is_file($keyPath)) {
             $perms = fileperms($keyPath) & 0777;
             if ($perms !== 0600) {
-                $issues[] = sprintf("~/.protocol/key has %04o permissions (should be 0600)", $perms);
+                $issues[] = sprintf("~/.protocol/.node/key has %04o permissions (should be 0600)", $perms);
             }
         }
 
@@ -85,7 +85,7 @@ class SecurityAudit extends BaseAuditChecker
         if (is_dir($protocolDir)) {
             $perms = fileperms($protocolDir) & 0777;
             if ($perms !== 0700) {
-                $issues[] = sprintf("~/.protocol/ has %04o permissions (should be 0700)", $perms);
+                $issues[] = sprintf("~/.protocol/.node/ has %04o permissions (should be 0700)", $perms);
             }
         }
 

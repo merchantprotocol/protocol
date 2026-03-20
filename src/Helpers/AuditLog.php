@@ -11,11 +11,11 @@ class AuditLog
      */
     public static function logPath(): string
     {
-        $dir = ($_SERVER['HOME'] ?? getenv('HOME')) . '/.protocol';
+        $dir = NODE_DATA_DIR;
         if (!is_dir($dir)) {
             mkdir($dir, 0700, true);
         }
-        return $dir . '/deployments.log';
+        return $dir . 'deployments.log';
     }
 
     /**

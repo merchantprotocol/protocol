@@ -72,11 +72,11 @@ class CloudflareHelper
      */
     public static function log(string $message): void
     {
-        $dir = ($_SERVER['HOME'] ?? getenv('HOME')) . '/.protocol';
+        $dir = NODE_DATA_DIR;
         if (!is_dir($dir)) {
             mkdir($dir, 0700, true);
         }
-        $logFile = $dir . '/cloudflare-deploy.log';
+        $logFile = $dir . 'cloudflare-deploy.log';
         $entry = date('Y-m-d\TH:i:sP') . ' ' . $message . "\n";
         file_put_contents($logFile, $entry, FILE_APPEND | LOCK_EX);
     }

@@ -97,7 +97,7 @@ From your dev machine:
 protocol secrets:key --scp=deploy@production-server
 ```
 
-This copies your key file directly to `~/.protocol/key` on the remote server.
+This copies your key file directly to `~/.protocol/.node/key` on the remote server.
 
 **Option B: Use GitHub Actions** (for CI/CD pipelines)
 
@@ -178,7 +178,7 @@ protocol secrets:key --scp=user@host
 
 **Encryption:** AES-256-GCM with a random 12-byte nonce per file. The output is `base64(nonce + auth_tag + ciphertext)`. This is the same standard used by banks and government systems.
 
-**Key storage:** A 256-bit key stored as a 64-character hex string at `~/.protocol/key` with `0600` permissions (owner-only read/write).
+**Key storage:** A 256-bit key stored as a 64-character hex string at `~/.protocol/.node/key` with `0600` permissions (owner-only read/write).
 
 **Decryption during startup:** When `config:link` encounters a `.enc` file, it decrypts to plaintext in the config repo directory, sets `0600` permissions, adds the plaintext filename to `.gitignore`, and symlinks the plaintext file into your project.
 

@@ -14,3 +14,4 @@ vendor/
 !.env.example
 *.key
 *.pem
+.node/

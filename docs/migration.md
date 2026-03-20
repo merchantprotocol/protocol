@@ -9,7 +9,7 @@ Protocol v2.0.0 introduces **release-based deployment** as the recommended strat
 | **Deploy unit** | Branch tip (latest commit) | Git tag (semver) |
 | **How nodes update** | Poll branch, `git pull` | Poll GitHub variable, `git checkout tag` |
 | **Rollback** | Revert commit + push | `deploy:rollback` (instant) |
-| **Audit trail** | Git log only | Structured audit log (`~/.protocol/deployments.log`) |
+| **Audit trail** | Git log only | Structured audit log (`~/.protocol/.node/deployments.log`) |
 | **Version tracking** | None | VERSION file, protocol.lock, GitHub Releases |
 | **Multi-node deploy** | Push to branch | Set one variable, all nodes update |
 

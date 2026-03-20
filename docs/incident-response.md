@@ -117,7 +117,7 @@ Protocol provides a single command that captures everything:
 protocol incident:snapshot
 ```
 
-This saves all evidence to `~/.protocol/incidents/snapshot-YYYY-MM-DD-HHMMSS/` with restricted permissions (0700). It captures:
+This saves all evidence to `~/.protocol/.node/incidents/snapshot-YYYY-MM-DD-HHMMSS/` with restricted permissions (0700). It captures:
 - Protocol audit log and configuration
 - All running processes and network connections
 - Docker container state and recent logs
@@ -150,7 +150,7 @@ protocol incident:report "Brief description of what happened"
 This will:
 1. Run security audit and SOC 2 checks automatically
 2. Gather deployment info, container status, git state, network connections
-3. Save the full report to `~/.protocol/incidents/YYYY-MM-DD-HHMMSS.md`
+3. Save the full report to `~/.protocol/.node/incidents/YYYY-MM-DD-HHMMSS.md`
 4. Create a GitHub issue with the full report attached
 5. Send the report to all configured webhooks (Slack, PagerDuty, etc.)
 6. Log an `INCIDENT` entry in the audit trail

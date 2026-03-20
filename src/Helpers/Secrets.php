@@ -16,7 +16,7 @@ class Secrets
      */
     public static function keyPath(): string
     {
-        return ($_SERVER['HOME'] ?? getenv('HOME')) . '/.protocol/key';
+        return NODE_DATA_DIR . 'key';
     }
 
     /**

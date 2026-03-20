@@ -88,8 +88,8 @@ Class Config {
         $global = self::getGlobal();
         $default = $global->get( $property, $default );
 
-        // override the default
-        $configfile = CONFIG_DIR.'config.php';
+        // override the default from node-level config
+        $configfile = NODE_DATA_DIR.'config.php';
         if (file_exists($configfile))
         {
             $config = self::getConfig();
@@ -110,7 +110,7 @@ Class Config {
         if (is_null($property)) {
             return false;
         }
-        $config = Config::getConfig( CONFIG_DIR.'config.php' );
+        $config = Config::getConfig( NODE_DATA_DIR.'config.php' );
         $config->set($property, $value);
         $config->put();
     }
@@ -122,8 +122,11 @@ Class Config {
      */
     public static function getConfig()
     {
-        $configfile = CONFIG_DIR.'config.php';
+        $configfile = NODE_DATA_DIR.'config.php';
         if (!file_exists($configfile)) {
+            if (!is_dir(NODE_DATA_DIR)) {
+                mkdir(NODE_DATA_DIR, 0700, true);
+            }
             @touch($configfile);
         }
         $config = UtilConfig::getInstance( $configfile );

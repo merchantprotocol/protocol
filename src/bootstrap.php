@@ -30,6 +30,9 @@ if (!defined('COMMANDS_DIR')) {
 if (!defined('PLUGINS_DIR')) {
     define('PLUGINS_DIR', SRC_DIR . 'Plugins' . DIRECTORY_SEPARATOR);
 }
+if (!defined('NODE_DATA_DIR')) {
+    define('NODE_DATA_DIR', WEBROOT_DIR . '.node' . DIRECTORY_SEPARATOR);
+}
 if (!defined('PROTOCOL_VERSION')) {
     define('PROTOCOL_VERSION', '2.0.0');
 }

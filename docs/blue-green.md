@@ -431,7 +431,7 @@ Shadow deployment is **opt-in** and fully backward compatible:
 
 ## Audit Logging
 
-All shadow operations are logged to `~/.protocol/deployments.log`:
+All shadow operations are logged to `~/.protocol/.node/deployments.log`:
 
 ```
 2026-03-10T21:00:00+00:00 SHADOW repo='/opt/myapp' action='build' slot='v1.3.0' version='v1.3.0' status='success' user='deploy'

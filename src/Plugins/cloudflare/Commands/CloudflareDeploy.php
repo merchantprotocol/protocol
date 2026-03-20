@@ -89,7 +89,7 @@ class CloudflareDeploy extends Command
         if (!$accountId) {
             $output->writeln("    <fg=yellow>!</> Could not authenticate with Cloudflare API.");
             $output->writeln("    <fg=gray>Run:</> <fg=white>npx wrangler login</> <fg=gray>to refresh your token.</>");
-            $output->writeln("    <fg=gray>Check ~/.protocol/cloudflare-deploy.log for details.</>");
+            $output->writeln("    <fg=gray>Check ~/.protocol/.node/cloudflare-deploy.log for details.</>");
             $output->writeln('');
             if (!$dryRun) {
                 $question = new ConfirmationQuestion(
