@@ -190,7 +190,7 @@ Class ProtocolInit extends Command {
 
         // ── Production / Staging → slave node ────────────────────
         if ($envKey === 'production' || $envKey === 'staging') {
-            return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io);
+            return $this->flowSlaveNode($repo_dir, $input, $output, $helper, $io, $envKey);
         }
 
         // ── Development → auto-detect project state ──────────────
@@ -411,9 +411,10 @@ Class ProtocolInit extends Command {
         InputInterface $input,
         OutputInterface $output,
         $helper,
-        SymfonyStyle $io
+        SymfonyStyle $io,
+        string $environment = 'production'
     ): int {
-        $totalSteps = 3;
+        $totalSteps = 2;
 
         // Step 1: Repository URL
         $this->writeStep($output, 1, $totalSteps, 'Repository');
@@ -440,6 +441,25 @@ Class ProtocolInit extends Command {
         $output->writeln('');
         $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
 
+        // Test repository access
+        $output->writeln('');
+        $output->writeln("    <fg=gray>›</> Testing repository access...");
+
+        $canAccess = $this->testRepoAccess($gitRemote);
+
+        if (!$canAccess) {
+            $output->writeln("    <fg=red>✗</> Cannot access repository");
+            $output->writeln('');
+
+            // Offer to set up authentication
+            $gitRemote = $this->flowGitAuth($gitRemote, $input, $output, $helper);
+            if (!$gitRemote) {
+                return Command::FAILURE;
+            }
+        } else {
+            $output->writeln("    <fg=green>✓</> Repository accessible");
+        }
+
         // Fetch protocol.json from the remote repo
         $output->writeln('');
         $output->writeln("    <fg=gray>›</> Fetching project configuration...");
@@ -461,20 +481,8 @@ Class ProtocolInit extends Command {
             ];
         }
 
-        // Step 2: Environment
-        $this->writeStep($output, 2, $totalSteps, 'Environment');
-
-        $output->writeln("    <fg=gray>Choose what environment this node will be. This determines</>");
-        $output->writeln("    <fg=gray>which configuration branch gets used for secrets and settings.</>");
-        $output->writeln('');
-
-        $environment = $this->askEnvironment($gitRemote, $protocolData, $input, $output, $helper);
-
-        $output->writeln('');
-        $output->writeln("    <fg=green>✓</> Environment: <fg=white;options=bold>{$environment}</>");
-
-        // Step 3: Releases directory
-        $this->writeStep($output, 3, $totalSteps, 'Code Location');
+        // Step 2: Releases directory
+        $this->writeStep($output, 2, $totalSteps, 'Code Location');
 
         $defaultReleasesDir = rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
 
@@ -564,6 +572,140 @@ Class ProtocolInit extends Command {
         $output->writeln('');
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Test whether the current machine can access a git remote.
+     */
+    protected function testRepoAccess(string $gitRemote): bool
+    {
+        $result = Shell::run("git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1");
+        // ls-remote returns refs on success, error messages on failure
+        if (str_contains($result, 'fatal:') || str_contains($result, 'ERROR') || str_contains($result, 'Permission denied')) {
+            return false;
+        }
+        return !empty(trim($result));
+    }
+
+    /**
+     * Guide the user through setting up GitHub authentication when repo access fails.
+     *
+     * Recommends an organization-level fine-grained personal access token (PAT)
+     * with read-only permissions. This avoids the problem where a developer's
+     * personal token is revoked (e.g. they leave the org) and production breaks.
+     *
+     * @return string|null The authenticated HTTPS URL, or null on failure
+     */
+    protected function flowGitAuth(
+        string $gitRemote,
+        InputInterface $input,
+        OutputInterface $output,
+        $helper
+    ): ?string {
+        // Extract org/repo from the URL
+        $owner = '';
+        $repo = '';
+        $isGitHub = false;
+        if (preg_match('#github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?$#', $gitRemote, $matches)) {
+            $owner = $matches[1];
+            $repo = $matches[2];
+            $isGitHub = true;
+        }
+
+        if (!$isGitHub) {
+            $output->writeln("    <fg=yellow>!</> This server cannot access the repository.");
+            $output->writeln("    <fg=gray>Ensure SSH keys are configured for this remote.</>");
+            $output->writeln('');
+            $output->writeln("    <fg=gray>You can generate an SSH key with:</> <fg=white>protocol key:generate</>");
+            $output->writeln('');
+            return null;
+        }
+
+        $output->writeln("    <fg=white;options=bold>GitHub Authentication Required</>");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>This server needs read access to</> <fg=white>{$owner}/{$repo}</>");
+        $output->writeln('');
+        $output->writeln("    <fg=yellow;options=bold>Recommended:</> Create an organization-level fine-grained");
+        $output->writeln("    personal access token (PAT) with read-only permissions.");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Why org-level?</> If a developer leaves and their personal");
+        $output->writeln("    token is revoked, production won't break. The token belongs");
+        $output->writeln("    to the org, not an individual.");
+        $output->writeln('');
+        $output->writeln("    <fg=cyan;options=bold>Steps:</>");
+        $output->writeln("    <fg=yellow>1.</> Go to your GitHub org → Settings → Developer settings");
+        $output->writeln("       → Personal access tokens → Fine-grained tokens");
+        $output->writeln("    <fg=yellow>2.</> Click <fg=white>Generate new token</>");
+        $output->writeln("    <fg=yellow>3.</> Set <fg=white>Resource owner</> to your organization");
+        $output->writeln("    <fg=yellow>4.</> Under <fg=white>Repository access</>, select <fg=white>Only select repositories</>");
+        $output->writeln("       and choose <fg=white>{$repo}</>");
+        $output->writeln("    <fg=yellow>5.</> Under <fg=white>Permissions → Repository permissions</>:");
+        $output->writeln("       • <fg=white>Contents</> → <fg=green>Read-only</>");
+        $output->writeln("       • <fg=white>Variables</> → <fg=green>Read-only</> <fg=gray>(for release pointer)</>");
+        $output->writeln("       • <fg=white>Metadata</> → <fg=green>Read-only</> <fg=gray>(auto-selected)</>");
+        $output->writeln("    <fg=yellow>6.</> Click <fg=white>Generate token</> and paste it below");
+        $output->writeln('');
+
+        $question = new Question('    GitHub token (ghp_...): ');
+        $token = $helper->ask($input, $output, $question);
+
+        if (!$token || empty(trim($token))) {
+            $output->writeln('');
+            $output->writeln("    <fg=red>✗</> No token provided. Cannot continue without repo access.");
+            $output->writeln('');
+            return null;
+        }
+
+        $token = trim($token);
+
+        // Build the authenticated HTTPS URL
+        $httpsUrl = "https://x-access-token:{$token}@github.com/{$owner}/{$repo}.git";
+
+        // Test access with the token
+        $output->writeln('');
+        $output->writeln("    <fg=gray>›</> Testing token access...");
+
+        if (!$this->testRepoAccess($httpsUrl)) {
+            $output->writeln("    <fg=red>✗</> Token does not have access to this repository.");
+            $output->writeln("    <fg=gray>Check that the token has Contents: Read permission");
+            $output->writeln("    and access to the</> <fg=white>{$repo}</> <fg=gray>repository.</>");
+            $output->writeln('');
+            return null;
+        }
+
+        $output->writeln("    <fg=green>✓</> Token verified — read access confirmed");
+
+        // Store the token securely
+        $tokenDir = NODE_DATA_DIR;
+        if (!is_dir($tokenDir)) {
+            mkdir($tokenDir, 0700, true);
+        }
+        $tokenFile = $tokenDir . 'github-token';
+        file_put_contents($tokenFile, $token . "\n", LOCK_EX);
+        chmod($tokenFile, 0600);
+
+        // Configure git credential storage for this repo
+        $credentialFile = $tokenDir . 'git-credentials';
+        $credentialEntry = "https://x-access-token:{$token}@github.com";
+
+        // Append or overwrite the credential for github.com
+        $existingCreds = is_file($credentialFile) ? file_get_contents($credentialFile) : '';
+        $lines = array_filter(explode("\n", trim($existingCreds)), function ($line) {
+            // Remove any existing github.com x-access-token entries
+            return !str_contains($line, 'x-access-token') || !str_contains($line, 'github.com');
+        });
+        $lines[] = $credentialEntry;
+        file_put_contents($credentialFile, implode("\n", $lines) . "\n", LOCK_EX);
+        chmod($credentialFile, 0600);
+
+        // Configure git to use our credential file for this repo
+        Shell::run("git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
+
+        $output->writeln("    <fg=green>✓</> Token stored in <fg=white>{$tokenFile}</>");
+        $output->writeln('');
+
+        // Return the HTTPS URL (without embedded token — credential helper handles it)
+        return "https://github.com/{$owner}/{$repo}.git";
     }
 
     /**
