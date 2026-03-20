@@ -44,7 +44,9 @@ use Gitcd\Utils\JsonLock;
 
 abstract class BaseSlaveCommand extends Command {
 
-    use LockableTrait;
+    use LockableTrait {
+        lock as protected;
+    }
 
     protected function configure(): void
     {

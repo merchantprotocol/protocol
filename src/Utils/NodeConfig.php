@@ -192,4 +192,31 @@ class NodeConfig
 
         return [$projectName, $data, $activeDir];
     }
+
+    /**
+     * Find a slave node config by checking if a directory is inside
+     * any node's releases directory or matches a node's repo_dir.
+     *
+     * @return array|null [$projectName, $nodeData] or null
+     */
+    public static function findByActiveDir(string $activeDir): ?array
+    {
+        $activeDir = rtrim($activeDir, '/');
+        foreach (self::listProjects() as $project) {
+            $data = self::load($project);
+            if (($data['node_type'] ?? '') !== 'slave') {
+                continue;
+            }
+            // Check if activeDir is inside the releases directory
+            $releasesDir = rtrim($data['bluegreen']['releases_dir'] ?? '', '/');
+            if ($releasesDir && str_starts_with($activeDir, $releasesDir)) {
+                return [$project, $data];
+            }
+            // Also match repo_dir directly
+            if (rtrim($data['repo_dir'] ?? '', '/') === $activeDir) {
+                return [$project, $data];
+            }
+        }
+        return null;
+    }
 }
