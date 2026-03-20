@@ -482,7 +482,10 @@ README
         // Setup remote URL
         $configRemoteUrl = $preExistingRemoteUrl ?: Git::RemoteUrl($configrepo);
         if (!$configRemoteUrl) {
-            $question = new Question('What is the remote git URL for your config repo? (optional)', false);
+            $output->writeln('');
+            $output->writeln("    <fg=gray>If you have a remote repository for your config, enter the URL below.</>");
+            $output->writeln('');
+            $question = new Question('    Config repo GitHub URL: ', false);
             $configRemoteUrl = $helper->ask($input, $output, $question);
 
             if ($configRemoteUrl) {
