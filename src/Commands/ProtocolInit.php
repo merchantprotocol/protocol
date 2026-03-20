@@ -194,10 +194,36 @@ Class ProtocolInit extends Command {
         }
 
         // ── Development → auto-detect project state ──────────────
+        $isGitRepo = Git::isInitializedRepo($repo_dir);
         $hasProtocolJson = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'protocol.json');
 
+        // ── No git repo → ask for the repository URL first ───────
+        if (!$isGitRepo) {
+            $output->writeln('');
+            $output->writeln("    <fg=gray>No git repository detected in this directory.</>");
+            $output->writeln('');
+
+            $question = new Question('    Repository URL: ');
+            $gitRemote = $helper->ask($input, $output, $question);
+
+            if (!$gitRemote) {
+                $output->writeln('');
+                $output->writeln('    <error>A repository URL is required.</error>');
+                return Command::FAILURE;
+            }
+
+            // Clone the repo into this directory or init + add remote
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " remote add origin " . escapeshellarg($gitRemote) . " 2>/dev/null");
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Repository: <fg=white>{$gitRemote}</>");
+
+            // Re-check for protocol.json (it won't exist yet since we just init'd)
+            return $this->flowSetupProject($repo_dir, $input, $output, $helper, $io);
+        }
+
+        // ── Has git, no protocol.json → new install ──────────────
         if (!$hasProtocolJson) {
-            // No protocol.json — confirm new install
             $output->writeln('');
             $output->writeln("    <fg=white;options=bold>New Project</>");
             $output->writeln("    <fg=gray>Protocol is not installed in this directory.</>");
@@ -213,14 +239,10 @@ Class ProtocolInit extends Command {
                 return Command::SUCCESS;
             }
 
-            $isGitRepo = Git::isInitializedRepo($repo_dir);
-            if ($isGitRepo) {
-                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
-            }
-            return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
+            return $this->flowSetupProject($repo_dir, $input, $output, $helper, $io);
         }
 
-        // Has protocol.json — check if migration is needed
+        // ── Has protocol.json → check schema version ────────────
         $currentVersion = (int) Json::read('protocol_version', 0, $repo_dir);
         $targetVersion = self::SCHEMA_VERSION;
 
@@ -244,119 +266,73 @@ Class ProtocolInit extends Command {
             return Command::SUCCESS;
         }
 
-        // Up-to-date protocol project — show update menu
-        return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
-    }
+        // ── Up-to-date protocol.json → check config repo ────────
+        $hasConfigRepo = Json::read('configuration.local', false, $repo_dir);
+        if (!$hasConfigRepo) {
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Protocol is installed and up to date");
+            $output->writeln("    <fg=gray>No configuration repository detected.</>");
+            $output->writeln('');
 
-    // ─── Flow: New Project ───────────────────────────────────────
+            $initializers = $this->getAvailableInitializers();
+            $initializer = reset($initializers);
 
-    protected function flowNewProject(
-        string $repo_dir,
-        InputInterface $input,
-        OutputInterface $output,
-        $helper,
-        SymfonyStyle $io
-    ): int {
-        $totalSteps = 4;
-
-        // Initialize git silently
-        if (!Git::isInitializedRepo($repo_dir)) {
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " init");
+            $question = new ConfirmationQuestion(
+                '    Set up a configuration repository? [y/<fg=green>N</>] ', false
+            );
+            if ($helper->ask($input, $output, $question)) {
+                $initializer->initializeConfigRepo($repo_dir, $input, $output, $helper);
+            }
+            return Command::SUCCESS;
         }
 
-        // Step 1: Project type + scaffold
-        $this->writeStep($output, 1, $totalSteps, 'Project Type');
-        $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
-        $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
+        // ── Everything is set up ─────────────────────────────────
+        $projectName = Json::read('name', basename($repo_dir), $repo_dir);
         $output->writeln('');
-        $selectedInitializer = $this->selectProjectType($input, $output, $helper);
-        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
-        $selectedKey = $this->getInitializerKey($selectedInitializer);
-        $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
-
-        // Step 2: Deployment strategy
-        $this->writeStep($output, 2, $totalSteps, 'Deployment Strategy');
-        $output->writeln("    <fg=gray>This controls how code gets to your servers. Release-based</>");
-        $output->writeln("    <fg=gray>creates tagged versions you can roll back. Branch-based</>");
-        $output->writeln("    <fg=gray>just follows the tip of a branch.</>");
+        $output->writeln("    <fg=green;options=bold>✓  All set!</>");
+        $output->writeln("    <fg=gray>Project:</> <fg=white>{$projectName}</>");
+        $output->writeln("    <fg=gray>Protocol is installed and configured.</>");
         $output->writeln('');
-        $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
-
-        // Step 3: Secrets
-        $this->writeStep($output, 3, $totalSteps, 'Secrets Management');
-        $this->configureSecrets($repo_dir, $input, $output, $helper);
-
-        // Step 4: Config repo
-        $this->writeStep($output, 4, $totalSteps, 'Configuration Repository');
-        $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
-
-        // Done
-        $this->writeCompletion($output, $repo_dir);
 
         return Command::SUCCESS;
     }
 
-    // ─── Flow: Existing Project ──────────────────────────────────
+    // ─── Flow: Setup Project (unified new + existing) ─────────────
 
-    protected function flowExistingProject(
+    protected function flowSetupProject(
         string $repo_dir,
         InputInterface $input,
         OutputInterface $output,
         $helper,
         SymfonyStyle $io
     ): int {
-        $totalSteps = 4;
         $step = 0;
+        $hasDockerCompose = file_exists(rtrim($repo_dir, '/') . '/docker-compose.yml');
+        $totalSteps = $hasDockerCompose ? 1 : 2;
 
-        // Step: Repository URL
-        $this->writeStep($output, ++$step, $totalSteps, 'Repository');
-        $output->writeln("    <fg=gray>Tell us the GitHub URL for your existing repository.</>");
-        $output->writeln('');
-
-        $existingRemote = Git::RemoteUrl($repo_dir);
-        $defaultRemote = $existingRemote ?: '';
-
-        $question = new Question(
-            '    GitHub URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
-            $defaultRemote
-        );
-        $gitRemote = $helper->ask($input, $output, $question);
-
-        if ($gitRemote) {
-            // Set or update the remote
-            if (!$existingRemote) {
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " remote add origin " . escapeshellarg($gitRemote) . " 2>/dev/null");
-            } elseif ($existingRemote !== $gitRemote) {
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " remote set-url origin " . escapeshellarg($gitRemote) . " 2>/dev/null");
-            }
+        // Step: Docker container (only if no docker-compose.yml)
+        if (!$hasDockerCompose) {
+            $this->writeStep($output, ++$step, $totalSteps, 'Docker Container');
+            $output->writeln("    <fg=gray>Protocol manages the Docker container for your project.</>");
+            $output->writeln("    <fg=gray>No docker-compose.yml was found. We'll set one up for you.</>");
             $output->writeln('');
-            $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
+            $output->writeln("    <fg=gray>We suggest going with the latest in-house container.</>");
+            $output->writeln("    <fg=gray>You can also choose an older version or enter your own.</>");
+            $output->writeln('');
+
+            $selectedInitializer = $this->selectProjectType($input, $output, $helper);
+            $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
         } else {
             $output->writeln('');
-            $output->writeln("    <fg=yellow>!</> No URL provided — skipping remote setup");
+            $output->writeln("    <fg=green>✓</> docker-compose.yml detected");
+            $initializers = $this->getAvailableInitializers();
+            $selectedInitializer = reset($initializers);
         }
 
-        // Use default initializer — existing projects manage their own Docker setup
-        $initializers = $this->getAvailableInitializers();
-        $selectedInitializer = reset($initializers);
+        // Step: Create protocol.json
+        $this->writeStep($output, ++$step, $totalSteps, 'Protocol Configuration');
         $selectedKey = $this->getInitializerKey($selectedInitializer);
         $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
-
-        // Step: Deployment strategy
-        $this->writeStep($output, ++$step, $totalSteps, 'Deployment Strategy');
-        $output->writeln("    <fg=gray>This controls how code gets to your servers. Release-based</>");
-        $output->writeln("    <fg=gray>creates tagged versions you can roll back. Branch-based</>");
-        $output->writeln("    <fg=gray>just follows the tip of a branch.</>");
-        $output->writeln('');
-        $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
-
-        // Step: Secrets
-        $this->writeStep($output, ++$step, $totalSteps, 'Secrets Management');
-        $this->configureSecrets($repo_dir, $input, $output, $helper);
-
-        // Step: Config repo
-        $this->writeStep($output, ++$step, $totalSteps, 'Configuration Repository');
-        $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
 
         // Done
         $this->writeCompletion($output, $repo_dir);
@@ -397,7 +373,7 @@ Class ProtocolInit extends Command {
                 return $this->flowFixMigrate($repo_dir, $input, $output, $helper, $io);
 
             case 'settings':
-                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+                return $this->flowSetupProject($repo_dir, $input, $output, $helper, $io);
 
             case 'strategy':
                 $output->writeln('');
