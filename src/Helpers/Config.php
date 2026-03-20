@@ -66,19 +66,23 @@ Class Config {
      */
     public static function repo( $repo_dir )
     {
-        // Detect slave context: resolve config path relative to the node's
-        // repo_dir, not the active release directory
-        $base_dir = $repo_dir;
+        // Detect slave context: config repo lives inside the releases directory
         $nodeInfo = \Gitcd\Utils\NodeConfig::findByActiveDir($repo_dir);
         if ($nodeInfo) {
-            $base_dir = rtrim($nodeInfo[1]['repo_dir'] ?? $repo_dir, '/') . '/';
+            $nodeData = $nodeInfo[1];
+            $releasesDir = rtrim($nodeData['bluegreen']['releases_dir'] ?? '', '/');
+            $projectName = $nodeData['name'] ?? basename(rtrim($nodeData['repo_dir'] ?? $repo_dir, '/'));
+            if ($releasesDir) {
+                $path = $releasesDir . '/' . $projectName . '-config/';
+                return Dir::realpath($path);
+            }
         }
 
-        $foldername = basename(rtrim($base_dir, '/')). '-config';
+        $foldername = basename(rtrim($repo_dir, '/')). '-config';
 
         $path = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR, $repo_dir);
         if (strpos($path, '..')!==false) {
-            $path = $base_dir.$path;
+            $path = $repo_dir.$path;
         }
         return Dir::realpath($path);
     }
