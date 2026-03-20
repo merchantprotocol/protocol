@@ -273,32 +273,70 @@ Class ProtocolInit extends Command {
         $helper,
         SymfonyStyle $io
     ): int {
-        $totalSteps = 4;
+        $hasDockerCompose = file_exists(rtrim($repo_dir, '/') . '/docker-compose.yml');
+        $totalSteps = $hasDockerCompose ? 4 : 5;
+        $step = 0;
 
-        // Step 1: Project type + scaffold
-        $this->writeStep($output, 1, $totalSteps, 'Project Type');
-        $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
-        $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
+        // Step: Repository URL
+        $this->writeStep($output, ++$step, $totalSteps, 'Repository');
+        $output->writeln("    <fg=gray>Tell us the GitHub URL for your existing repository.</>");
         $output->writeln('');
-        $selectedInitializer = $this->selectProjectType($input, $output, $helper);
-        $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
+
+        $existingRemote = Git::RemoteUrl($repo_dir);
+        $defaultRemote = $existingRemote ?: '';
+
+        $question = new Question(
+            '    GitHub URL: ' . ($defaultRemote ? "[<fg=green>{$defaultRemote}</>] " : ''),
+            $defaultRemote
+        );
+        $gitRemote = $helper->ask($input, $output, $question);
+
+        if ($gitRemote) {
+            // Set or update the remote
+            if (!$existingRemote) {
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " remote add origin " . escapeshellarg($gitRemote) . " 2>/dev/null");
+            } elseif ($existingRemote !== $gitRemote) {
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " remote set-url origin " . escapeshellarg($gitRemote) . " 2>/dev/null");
+            }
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Remote: <fg=white>{$gitRemote}</>");
+        } else {
+            $output->writeln('');
+            $output->writeln("    <fg=yellow>!</> No URL provided — skipping remote setup");
+        }
+
+        // Step: Project type + scaffold (only if no docker-compose.yml exists)
+        if (!$hasDockerCompose) {
+            $this->writeStep($output, ++$step, $totalSteps, 'Project Type');
+            $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
+            $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
+            $output->writeln('');
+            $selectedInitializer = $this->selectProjectType($input, $output, $helper);
+            $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
+        } else {
+            $output->writeln('');
+            $output->writeln("    <fg=green>✓</> Existing docker-compose.yml detected — keeping current container config");
+            $initializers = $this->getAvailableInitializers();
+            $selectedInitializer = reset($initializers);
+        }
+
         $selectedKey = $this->getInitializerKey($selectedInitializer);
         $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
 
-        // Step 2: Deployment strategy
-        $this->writeStep($output, 2, $totalSteps, 'Deployment Strategy');
+        // Step: Deployment strategy
+        $this->writeStep($output, ++$step, $totalSteps, 'Deployment Strategy');
         $output->writeln("    <fg=gray>This controls how code gets to your servers. Release-based</>");
         $output->writeln("    <fg=gray>creates tagged versions you can roll back. Branch-based</>");
         $output->writeln("    <fg=gray>just follows the tip of a branch.</>");
         $output->writeln('');
         $this->configureDeploymentStrategy($repo_dir, $input, $output, $helper);
 
-        // Step 3: Secrets
-        $this->writeStep($output, 3, $totalSteps, 'Secrets Management');
+        // Step: Secrets
+        $this->writeStep($output, ++$step, $totalSteps, 'Secrets Management');
         $this->configureSecrets($repo_dir, $input, $output, $helper);
 
-        // Step 4: Config repo
-        $this->writeStep($output, 4, $totalSteps, 'Configuration Repository');
+        // Step: Config repo
+        $this->writeStep($output, ++$step, $totalSteps, 'Configuration Repository');
         $this->configureConfigRepo($repo_dir, $input, $output, $helper, $selectedInitializer);
 
         // Done
