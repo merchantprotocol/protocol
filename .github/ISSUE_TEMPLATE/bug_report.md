@@ -36,4 +36,4 @@ What actually happened. Include error messages and stack traces if available.
 
 - Contents of `protocol.json` (redact any credentials)
 - Output of `protocol status`
-- Relevant log output from `~/protocol_background_process.log`
+- Relevant log output from `~/.protocol/background_process.log`

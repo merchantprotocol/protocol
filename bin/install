@@ -25,7 +25,7 @@ REPO_URL="https://github.com/merchantprotocol/protocol.git"
 REPO_OWNER="merchantprotocol"
 REPO_NAME="protocol"
 BINARY_NAME="protocol"
-INSTALL_DIR="$HOME/protocol"
+INSTALL_DIR="$HOME/.protocol"
 MIN_PHP_VERSION="8.4"
 USE_NIGHTLY=false
 
