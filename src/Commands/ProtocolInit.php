@@ -625,25 +625,21 @@ Class ProtocolInit extends Command {
         $output->writeln('');
         $output->writeln("    <fg=gray>This server needs read access to</> <fg=white>{$owner}/{$repo}</>");
         $output->writeln('');
-        $output->writeln("    <fg=yellow;options=bold>Recommended:</> Create an organization-level fine-grained");
-        $output->writeln("    personal access token (PAT) with read-only permissions.");
+        $tokenUrl = "https://github.com/organizations/{$owner}/settings/personal-access-tokens/new";
+
+        $output->writeln("    Create an org-level fine-grained token with read-only access:");
         $output->writeln('');
-        $output->writeln("    <fg=gray>Why org-level?</> If a developer leaves and their personal");
-        $output->writeln("    token is revoked, production won't break. The token belongs");
-        $output->writeln("    to the org, not an individual.");
+        $output->writeln("    <fg=cyan;options=bold>{$tokenUrl}</>");
         $output->writeln('');
-        $output->writeln("    <fg=cyan;options=bold>Steps:</>");
-        $output->writeln("    <fg=yellow>1.</> Go to your GitHub org → Settings → Developer settings");
-        $output->writeln("       → Personal access tokens → Fine-grained tokens");
-        $output->writeln("    <fg=yellow>2.</> Click <fg=white>Generate new token</>");
-        $output->writeln("    <fg=yellow>3.</> Set <fg=white>Resource owner</> to your organization");
-        $output->writeln("    <fg=yellow>4.</> Under <fg=white>Repository access</>, select <fg=white>Only select repositories</>");
-        $output->writeln("       and choose <fg=white>{$repo}</>");
-        $output->writeln("    <fg=yellow>5.</> Under <fg=white>Permissions → Repository permissions</>:");
-        $output->writeln("       • <fg=white>Contents</> → <fg=green>Read-only</>");
-        $output->writeln("       • <fg=white>Variables</> → <fg=green>Read-only</> <fg=gray>(for release pointer)</>");
-        $output->writeln("       • <fg=white>Metadata</> → <fg=green>Read-only</> <fg=gray>(auto-selected)</>");
-        $output->writeln("    <fg=yellow>6.</> Click <fg=white>Generate token</> and paste it below");
+        $output->writeln("    <fg=gray>Set these options on that page:</>");
+        $output->writeln("    • <fg=white>Resource owner</>  → <fg=green>{$owner}</>");
+        $output->writeln("    • <fg=white>Repository access</> → <fg=green>Only select repositories</> → <fg=green>{$repo}</>");
+        $output->writeln("    • <fg=white>Contents</>          → <fg=green>Read-only</>");
+        $output->writeln("    • <fg=white>Variables</>         → <fg=green>Read-only</> <fg=gray>(for release pointer)</>");
+        $output->writeln("    • <fg=white>Metadata</>          → <fg=green>Read-only</> <fg=gray>(auto-selected)</>");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Why org-level?</> If a developer leaves, the token stays valid —");
+        $output->writeln("    production won't break when someone is removed from the org.");
         $output->writeln('');
 
         $question = new Question('    GitHub token (ghp_...): ');
