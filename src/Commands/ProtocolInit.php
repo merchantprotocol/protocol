@@ -639,22 +639,42 @@ Class ProtocolInit extends Command {
             $output->writeln('');
         }
 
-        // Generate the manifest URL
-        $manifestUrl = GitHubApp::manifestUrl($owner, $repo);
+        $appUrl = "https://github.com/organizations/{$owner}/settings/apps/new";
 
         $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
         $output->writeln("    The app belongs to the org — not any individual — so access");
         $output->writeln("    won't break when someone leaves the team.");
         $output->writeln('');
-        $output->writeln("    <fg=cyan;options=bold>Click this URL to create the app (everything is pre-configured):</>");
+        $output->writeln("    <fg=cyan;options=bold>{$appUrl}</>");
         $output->writeln('');
-        $output->writeln("    {$manifestUrl}");
-        $output->writeln('');
-        $output->writeln("    <fg=gray>Permissions: Contents (read), Variables (read), Metadata (read)</>");
+        $output->writeln('    ┌──────────────────────────────────┬──────────────────────────────────────────┐');
+        $output->writeln('    │ <fg=white;options=bold>Field</>                            │ <fg=white;options=bold>Value</>                                    │');
+        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+        $output->writeln('    │ GitHub App name                  │ <fg=green>Protocol Deploy App</>                    │');
+        $output->writeln('    │ Homepage URL                     │ <fg=green>https://merchantprotocol.com</>            │');
+        $output->writeln('    │ Description                      │ <fg=green>Private internal app for production</>     │');
+        $output->writeln('    │                                  │ <fg=green>server repo pulls</>                       │');
+        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+        $output->writeln('    │ Webhook → Active                 │ <fg=yellow>☐  Unchecked</>                            │');
+        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+        $output->writeln('    │ Callback URL                     │ <fg=gray>Leave blank</>                              │');
+        $output->writeln('    │ Setup URL                        │ <fg=gray>Leave blank</>                              │');
+        $output->writeln('    │ Webhook URL                      │ <fg=gray>Leave blank</>                              │');
+        $output->writeln('    │ Webhook secret                   │ <fg=gray>Leave blank</>                              │');
+        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+        $output->writeln('    │ <fg=white;options=bold>Repository Permissions</>             │                                          │');
+        $output->writeln('    │   Contents                       │ <fg=green>Read-only</>                               │');
+        $output->writeln('    │   Metadata                       │ <fg=green>Read-only</>                               │');
+        $output->writeln('    │   Variables                      │ <fg=green>Read-only</>                               │');
+        $output->writeln('    │   <fg=gray>Everything else</>                 │ <fg=gray>No access</>                               │');
+        $output->writeln('    ├──────────────────────────────────┼──────────────────────────────────────────┤');
+        $output->writeln('    │ Where can this app be installed? │ <fg=green>Only on this account</>                    │');
+        $output->writeln('    └──────────────────────────────────┴──────────────────────────────────────────┘');
         $output->writeln('');
         $output->writeln("    <fg=white>After creating the app:</>");
         $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
-        $output->writeln("    <fg=yellow>2.</> Install the app on your org → select <fg=white>{$repo}</>");
+        $output->writeln("    <fg=yellow>2.</> Install the app: <fg=white>https://github.com/organizations/{$owner}/settings/apps</>");
+        $output->writeln("       → your app → <fg=white>Install</> → select <fg=white>{$repo}</>");
         $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
         $output->writeln('');
 
