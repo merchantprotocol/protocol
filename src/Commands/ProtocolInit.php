@@ -273,8 +273,7 @@ Class ProtocolInit extends Command {
         $helper,
         SymfonyStyle $io
     ): int {
-        $hasDockerCompose = file_exists(rtrim($repo_dir, '/') . '/docker-compose.yml');
-        $totalSteps = $hasDockerCompose ? 4 : 5;
+        $totalSteps = 4;
         $step = 0;
 
         // Step: Repository URL
@@ -305,21 +304,9 @@ Class ProtocolInit extends Command {
             $output->writeln("    <fg=yellow>!</> No URL provided — skipping remote setup");
         }
 
-        // Step: Project type + scaffold (only if no docker-compose.yml exists)
-        if (!$hasDockerCompose) {
-            $this->writeStep($output, ++$step, $totalSteps, 'Project Type');
-            $output->writeln("    <fg=gray>Choose the Docker base image for your project. This determines</>");
-            $output->writeln("    <fg=gray>which PHP version, extensions, and tools are available.</>");
-            $output->writeln('');
-            $selectedInitializer = $this->selectProjectType($input, $output, $helper);
-            $selectedInitializer->initialize($repo_dir, $input, $output, $helper);
-        } else {
-            $output->writeln('');
-            $output->writeln("    <fg=green>✓</> Existing docker-compose.yml detected — keeping current container config");
-            $initializers = $this->getAvailableInitializers();
-            $selectedInitializer = reset($initializers);
-        }
-
+        // Use default initializer — existing projects manage their own Docker setup
+        $initializers = $this->getAvailableInitializers();
+        $selectedInitializer = reset($initializers);
         $selectedKey = $this->getInitializerKey($selectedInitializer);
         $selectedInitializer->createProtocolJson($repo_dir, $selectedKey, $output, self::SCHEMA_VERSION);
 
