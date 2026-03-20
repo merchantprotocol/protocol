@@ -759,29 +759,25 @@ Class ProtocolInit extends Command {
 
         $output->writeln('');
 
-        // Completion
+        // Completion — run protocol start to bring everything online
         completion:
         $this->clearAndBanner($output);
 
-        $configPath = NodeConfig::configPath($projectName);
-
         $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Ready!</>                                  <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=white;options=bold>Next steps:</>                                            <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=yellow>1.</> <fg=white>protocol start</>                <fg=gray>Start watcher daemon</> <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=yellow>2.</> <fg=white>protocol status</>               <fg=gray>Check node health</>    <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Configured!</>                              <fg=cyan>│</>');
+        $output->writeln('<fg=cyan>  │</>   <fg=gray>Starting services...</>                                  <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
         $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
         $output->writeln('');
-        $output->writeln("    <fg=gray>Project:</>      <fg=white>{$projectName}</>");
-        $output->writeln("    <fg=gray>Remote:</>       <fg=white>{$gitRemote}</>");
-        $output->writeln("    <fg=gray>Environment:</> <fg=white>{$environment}</>");
-        $output->writeln("    <fg=gray>Releases dir:</> <fg=white>{$releasesDir}/</>");
-        $output->writeln("    <fg=gray>Node config:</>  <fg=white>{$configPath}</>");
-        $output->writeln('');
+
+        // Run protocol start — this will also run protocol status at the end
+        $app = $this->getApplication();
+        $startArgs = new \Symfony\Component\Console\Input\ArrayInput([
+            'environment' => $environment,
+            'project' => $projectName,
+        ]);
+        $app->find('start')->run($startArgs, $output);
 
         return Command::SUCCESS;
     }
