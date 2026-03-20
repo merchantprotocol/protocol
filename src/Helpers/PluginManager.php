@@ -4,12 +4,11 @@ namespace Gitcd\Helpers;
 class PluginManager
 {
     /**
-     * Path to the global plugins config file: ~/.protocol/plugins.json
+     * Path to the global plugins config file: ~/.protocol/.node/plugins.json
      */
     public static function configPath(): string
     {
-        $home = ($_SERVER['HOME'] ?? getenv('HOME')) ?: '/root';
-        return rtrim($home, '/') . '/.protocol/plugins.json';
+        return NODE_DATA_DIR . 'plugins.json';
     }
 
     /**
@@ -90,7 +89,7 @@ class PluginManager
     }
 
     /**
-     * Enable a plugin globally by adding it to ~/.protocol/plugins.json.
+     * Enable a plugin globally by adding it to ~/.protocol/.node/plugins.json.
      *
      * @param string $slug
      */
@@ -110,7 +109,7 @@ class PluginManager
     }
 
     /**
-     * Disable a plugin globally by removing it from ~/.protocol/plugins.json.
+     * Disable a plugin globally by removing it from ~/.protocol/.node/plugins.json.
      *
      * @param string $slug
      */

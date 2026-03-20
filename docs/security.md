@@ -13,7 +13,7 @@ Six checks run against your codebase and server:
 | Check | What it looks for |
 |---|---|
 | **Malicious code** | Scans PHP files for dangerous patterns — `eval(`, `base64_decode(`, `shell_exec(`, `proc_open(`, and other common backdoor signatures |
-| **File permissions** | Verifies `~/.protocol/key` is `0600` and `~/.protocol/` is `0700`. Flags world-writable files in your config repo |
+| **File permissions** | Verifies `~/.protocol/.node/key` is `0600` and `~/.protocol/.node/` is `0700`. Flags world-writable files in your config repo |
 | **Dependencies** | Runs `composer audit` to check for known vulnerabilities in your PHP packages |
 | **Suspicious processes** | Scans running processes for known bad actors — cryptominers (`xmrig`, `kinsing`), reverse shells (`nc`, `ncat`, `socat`) |
 | **Docker security** | Parses your `docker-compose.yml` for risky settings — `privileged: true`, `user: root`, dangerous capability additions |
@@ -30,7 +30,7 @@ Seven checks validate your setup against SOC 2 Type II requirements:
 | Check | What it verifies |
 |---|---|
 | **Encrypted secrets** | `deployment.secrets` is set to `"encrypted"` and an encryption key exists on this machine |
-| **Audit logging** | The deployment log file exists at `~/.protocol/deployments.log` and isn't world-readable |
+| **Audit logging** | The deployment log file exists at `~/.protocol/.node/deployments.log` and isn't world-readable |
 | **Deploy strategy** | `deployment.strategy` is set to `"release"` — immutable tags with audit trails, not mutable branches |
 | **Git integrity** | A remote is configured and HEAD is reachable from the remote — no orphaned or detached states |
 | **Reboot recovery** | A `@reboot` crontab entry exists so Protocol restarts after server reboots |
@@ -143,7 +143,7 @@ Before running Protocol in a SOC 2 environment, go through this list:
 - [ ] Require pull request reviews before merging to production
 - [ ] Set up `protocol cron:add` on every node for reboot recovery
 - [ ] Keep your encryption key in a password manager as a backup
-- [ ] Restrict `~/.protocol/key` permissions to `0600` (Protocol does this by default)
+- [ ] Restrict `~/.protocol/.node/key` permissions to `0600` (Protocol does this by default)
 
 ### Should Do
 
@@ -181,7 +181,7 @@ Your Machine                    Git                         Production Node
    → plaintext deleted             and pushed
    → .gitignore updated                                    5. protocol start
                                                               → pulls config repo
-                                                              → reads ~/.protocol/key
+                                                              → reads ~/.protocol/.node/key
                                                               → decrypts .env.enc
                                                               → .env exists in memory
                                                               → passed to Docker
@@ -203,7 +203,7 @@ At no point does a plaintext secret travel through git. At no point is a plainte
 
 ## The Deployment Audit Log
 
-Every deployment action writes to `~/.protocol/deployments.log`:
+Every deployment action writes to `~/.protocol/.node/deployments.log`:
 
 ```
 2024-01-15T10:30:01Z deploy repo=/opt/myapp from=v1.1.0 to=v1.2.0 status=success
@@ -264,9 +264,9 @@ protocol stop && protocol start
 | Question | Answer |
 |---|---|
 | What encryption does Protocol use? | AES-256-GCM (same as banks and governments) |
-| Where is the key stored? | `~/.protocol/key` on each machine, with `0600` permissions |
+| Where is the key stored? | `~/.protocol/.node/key` on each machine, with `0600` permissions |
 | Can I recover secrets without the key? | No. Keep a backup in a password manager. |
 | Are secrets stored in git? | Only the encrypted versions. Plaintext is gitignored and deleted. |
 | Does each environment use a different key? | No. Same key, different secrets (on different config branches). |
 | How do I transfer the key to production? | `protocol secrets:key --scp=user@host` or `protocol secrets:key --push` (GitHub) |
-| Where is the audit log? | `~/.protocol/deployments.log` — view with `protocol deploy:log` |
+| Where is the audit log? | `~/.protocol/.node/deployments.log` — view with `protocol deploy:log` |

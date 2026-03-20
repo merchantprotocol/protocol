@@ -18,10 +18,10 @@ An auditor evaluating your SOC 2 Type II readiness will walk through these crite
 
 | | |
 |---|---|
-| **Protocol Control** | All secrets (`.env` files) are encrypted with AES-256-GCM before entering any repository. The encryption key is stored at `~/.protocol/key` with `0600` permissions (owner-read/write only). The `~/.protocol/` directory is restricted to `0700`. These permissions are validated on every startup by `protocol soc2:check` — if they drift, the check fails. |
+| **Protocol Control** | All secrets (`.env` files) are encrypted with AES-256-GCM before entering any repository. The encryption key is stored at `~/.protocol/.node/key` with `0600` permissions (owner-read/write only). The `~/.protocol/.node/` directory is restricted to `0700`. These permissions are validated on every startup by `protocol soc2:check` — if they drift, the check fails. |
 | **Evidence** | `protocol soc2:check` → "Encrypted secrets" and "Key permissions" rows show PASS |
 | **Evidence Command** | `protocol soc2:check` — run on each node and save output |
-| **Evidence Files** | `~/.protocol/key` (verify permissions with `ls -la`), `.env.enc` files in config repo (verify encrypted content) |
+| **Evidence Files** | `~/.protocol/.node/key` (verify permissions with `ls -la`), `.env.enc` files in config repo (verify encrypted content) |
 | **Your Team Provides** | Document which team members have access to production encryption keys. Maintain an access control list showing who can SSH into production nodes. |
 
 ### CC6.2 — Prior to issuing system credentials and granting system access, the entity registers and authorizes new internal and external users whose access is administered by the entity.
@@ -86,7 +86,7 @@ An auditor evaluating your SOC 2 Type II readiness will walk through these crite
 
 | | |
 |---|---|
-| **Protocol Control** | Wazuh SIEM agent (`protocol siem:install`) provides real-time file integrity monitoring for `~/.protocol/` directory, rootkit detection, and log anomaly analysis. Protocol's audit log (`~/.protocol/deployments.log`) is forwarded to the centralized SIEM for tamper-evident storage. `protocol status` provides a real-time dashboard showing Docker container health, watcher status, SIEM connectivity, and security state. |
+| **Protocol Control** | Wazuh SIEM agent (`protocol siem:install`) provides real-time file integrity monitoring for `~/.protocol/.node/` directory, rootkit detection, and log anomaly analysis. Protocol's audit log (`~/.protocol/.node/deployments.log`) is forwarded to the centralized SIEM for tamper-evident storage. `protocol status` provides a real-time dashboard showing Docker container health, watcher status, SIEM connectivity, and security state. |
 | **Evidence** | Wazuh dashboard showing agent connectivity and alerts, `protocol siem:status` output, `protocol status` output |
 | **Evidence Command** | `protocol siem:status`, `protocol status` |
 | **Your Team Provides** | SIEM alert routing and escalation procedures. Define which anomalies trigger alerts vs. which are informational. External uptime monitoring configuration (Uptime Robot, Datadog, etc.). |
@@ -129,7 +129,7 @@ An auditor evaluating your SOC 2 Type II readiness will walk through these crite
 | **Protocol Control** | All code and configuration changes flow through git with full commit history (author, timestamp, message). Release mode deploys immutable git tags — `v1.2.0` always means the same code. CI pipeline (`.github/workflows/ci.yml`) enforces automated testing (PHPUnit across PHP 8.1/8.2/8.3), syntax checking, dependency auditing, and secret scanning on every push and pull request. CODEOWNERS requires team review before merge. `protocol deploy:push` captures the full PR approval chain (author, approvers, merger) and writes APPROVAL entries to the audit log. GitHub branch protection requires passing CI status checks and approved reviews before merge. |
 | **Evidence** | Git commit history, GitHub PR history with approvals, CI pipeline results, audit log APPROVAL entries, branch protection configuration |
 | **Evidence Command** | `protocol deploy:log` (shows DEPLOY and APPROVAL entries), `gh pr list --state merged --limit 50`, `gh api repos/{owner}/{repo}/branches/master/protection` |
-| **Evidence Files** | `.github/workflows/ci.yml`, `.github/CODEOWNERS`, `~/.protocol/deployments.log` |
+| **Evidence Files** | `.github/workflows/ci.yml`, `.github/CODEOWNERS`, `~/.protocol/.node/deployments.log` |
 | **Your Team Provides** | Change management policy documenting the approval workflow. [Deployment SOPs](deployment-sops.md) — follow these for all production changes. Document any emergency change procedures (reference SOP 6: Emergency Hotfix). |
 
 ---
@@ -171,9 +171,9 @@ An auditor evaluating your SOC 2 Type II readiness will walk through these crite
 
 | | |
 |---|---|
-| **Protocol Control** | Secrets are encrypted with AES-256-GCM (256-bit key, random 12-byte nonce per file, authenticated encryption with tamper detection). Encryption key never enters any git repository — stored only at `~/.protocol/key` on each machine with `0600` permissions. Plaintext `.env` files are gitignored (`.env`, `*.key`, `*.pem` in `.gitignore`). During decryption, plaintext files receive `0600` permissions; on Linux, `decryptToTempFile()` uses RAM-backed `/dev/shm` to avoid writing to disk. Each environment is a separate config branch — production credentials never appear in development branches. CI pipeline runs TruffleHog to detect accidentally committed secrets. |
+| **Protocol Control** | Secrets are encrypted with AES-256-GCM (256-bit key, random 12-byte nonce per file, authenticated encryption with tamper detection). Encryption key never enters any git repository — stored only at `~/.protocol/.node/key` on each machine with `0600` permissions. Plaintext `.env` files are gitignored (`.env`, `*.key`, `*.pem` in `.gitignore`). During decryption, plaintext files receive `0600` permissions; on Linux, `decryptToTempFile()` uses RAM-backed `/dev/shm` to avoid writing to disk. Each environment is a separate config branch — production credentials never appear in development branches. CI pipeline runs TruffleHog to detect accidentally committed secrets. |
 | **Evidence** | Encrypted `.env.enc` files in config repo, `.gitignore` contents, key file permissions, TruffleHog CI results |
-| **Evidence Command** | `protocol soc2:check` → "Encrypted secrets" and "Key permissions" rows, `cat .gitignore`, `ls -la ~/.protocol/key` |
+| **Evidence Command** | `protocol soc2:check` → "Encrypted secrets" and "Key permissions" rows, `cat .gitignore`, `ls -la ~/.protocol/.node/.node/key` |
 | **Your Team Provides** | Data classification policy identifying what constitutes confidential information. Document which secrets are stored in `.env` files (database credentials, API keys, etc.). Key custodian list — who has access to the encryption key. |
 
 ### C1.2 — The entity disposes of confidential information to meet the entity's objectives related to confidentiality.
@@ -182,7 +182,7 @@ An auditor evaluating your SOC 2 Type II readiness will walk through these crite
 |---|---|
 | **Protocol Control** | After encryption, plaintext `.env` files are deleted and gitignored. Key rotation procedure (`protocol secrets:setup` → re-encrypt → distribute) replaces old encryption keys. When using `decryptToTempFile()`, temporary plaintext is created in `/dev/shm` (RAM-backed, not persisted to disk) and cleaned up after use. |
 | **Evidence** | Absence of plaintext `.env` files in git history, key rotation records |
-| **Evidence Command** | `git log --all --diff-filter=A -- '*.env'` (should show no results), key file modification date (`stat ~/.protocol/key`) |
+| **Evidence Command** | `git log --all --diff-filter=A -- '*.env'` (should show no results), key file modification date (`stat ~/.protocol/.node/key`) |
 | **Your Team Provides** | Data retention and disposal policy. Procedure for securely decommissioning nodes (wipe encryption keys, revoke SSH keys, remove from deploy key list). |
 
 ---
@@ -212,14 +212,14 @@ protocol deploy:log > "$EVIDENCE_DIR/deploy-log.txt" 2>&1
 protocol siem:status > "$EVIDENCE_DIR/siem-status.txt" 2>&1
 
 # Key file permissions (CC6, C1)
-ls -la ~/.protocol/key >> "$EVIDENCE_DIR/permissions.txt" 2>&1
-ls -la ~/.protocol/ >> "$EVIDENCE_DIR/permissions.txt" 2>&1
+ls -la ~/.protocol/.node/.node/key >> "$EVIDENCE_DIR/permissions.txt" 2>&1
+ls -la ~/.protocol/.node/ >> "$EVIDENCE_DIR/permissions.txt" 2>&1
 
 # Crontab reboot recovery (A1)
 crontab -l > "$EVIDENCE_DIR/crontab.txt" 2>&1
 
 # Encryption key age (CC6)
-stat ~/.protocol/key >> "$EVIDENCE_DIR/key-age.txt" 2>&1
+stat ~/.protocol/.node/key >> "$EVIDENCE_DIR/key-age.txt" 2>&1
 
 # Dependency audit (CC6, CC7)
 composer audit > "$EVIDENCE_DIR/composer-audit.txt" 2>&1

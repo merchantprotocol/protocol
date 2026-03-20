@@ -499,7 +499,7 @@ Class ProtocolInit extends Command {
         $output->writeln('');
         $output->writeln("    <fg=green>✓</> Releases: <fg=white>{$releasesDir}/</>");
 
-        // Save node config to ~/.protocol/nodes/
+        // Save node config to ~/.protocol/.node/nodes/
         $nodeData = $protocolData;
         $nodeData['name'] = $projectName;
         $nodeData['node_type'] = 'slave';

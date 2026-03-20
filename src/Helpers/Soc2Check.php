@@ -142,7 +142,7 @@ class Soc2Check extends BaseAuditChecker
         $protocolDir = dirname($keyPath);
         $dirPerms = fileperms($protocolDir) & 0777;
         if ($dirPerms !== 0700) {
-            $issues[] = sprintf("~/.protocol/ has %04o permissions (should be 0700)", $dirPerms);
+            $issues[] = sprintf("~/.protocol/.node/ has %04o permissions (should be 0700)", $dirPerms);
         }
 
         if (empty($issues)) {

@@ -269,7 +269,7 @@ protocol secrets:setup                          # generate new key
 protocol secrets:setup "your-64-char-hex-key"   # store existing key
 ```
 
-The key is saved at `~/.protocol/key` with strict permissions. Run this once per machine.
+The key is saved at `~/.protocol/.node/key` with strict permissions. Run this once per machine.
 
 In CI/CD, it also reads from the `PROTOCOL_ENCRYPTION_KEY` environment variable automatically.
 
@@ -568,7 +568,7 @@ Severity levels:
 - **P3** — Warnings from audits or checks
 - **P4** — Informational, no failures detected
 
-The report is saved to `~/.protocol/incidents/`, a forensic snapshot is automatically captured, a GitHub issue is created, everything is logged to the audit trail, and notifications are sent to all configured webhook URLs in `protocol.json`.
+The report is saved to `~/.protocol/.node/incidents/`, a forensic snapshot is automatically captured, a GitHub issue is created, everything is logged to the audit trail, and notifications are sent to all configured webhook URLs in `protocol.json`.
 
 ### `protocol incident:snapshot`
 
@@ -578,11 +578,11 @@ Capture a forensic snapshot of the entire system state. Run this **immediately**
 protocol incident:snapshot
 ```
 
-Captures: audit logs, running processes, network connections, Docker container state and logs, git history and diffs, system info, crontab, SIEM status, auth logs, and recently modified files. All saved to `~/.protocol/incidents/snapshot-YYYY-MM-DD-HHMMSS/` with 0700 permissions.
+Captures: audit logs, running processes, network connections, Docker container state and logs, git history and diffs, system info, crontab, SIEM status, auth logs, and recently modified files. All saved to `~/.protocol/.node/incidents/snapshot-YYYY-MM-DD-HHMMSS/` with 0700 permissions.
 
 ### `protocol siem:install`
 
-Install and configure the Wazuh SIEM agent for centralized security monitoring. Sets up file integrity monitoring for `~/.protocol/` and forwards audit logs to your SIEM.
+Install and configure the Wazuh SIEM agent for centralized security monitoring. Sets up file integrity monitoring for `~/.protocol/.node/` and forwards audit logs to your SIEM.
 
 ```bash
 protocol siem:install --manager=wazuh.example.com

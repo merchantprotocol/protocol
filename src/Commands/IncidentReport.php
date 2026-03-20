@@ -37,7 +37,7 @@ class IncidentReport extends Command
             compiles a structured incident report.
 
             The report is:
-            1. Written to ~/.protocol/incidents/YYYY-MM-DD-HHMMSS.md
+            1. Written to ~/.protocol/.node/incidents/YYYY-MM-DD-HHMMSS.md
             2. Logged as an INCIDENT entry in the audit log
             3. Opened as a GitHub issue (if gh CLI is available)
             4. Sent to all configured webhooks
@@ -151,7 +151,7 @@ class IncidentReport extends Command
         $report = $this->compileReport($sections);
 
         // ── Save to file ─────────────────────────────────────────
-        $incidentDir = (($_SERVER['HOME'] ?? getenv('HOME')) ?: '/tmp') . '/.protocol/incidents';
+        $incidentDir = NODE_DATA_DIR . 'incidents';
         if (!is_dir($incidentDir)) {
             mkdir($incidentDir, 0700, true);
         }

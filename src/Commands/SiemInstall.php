@@ -259,8 +259,8 @@ EOF',
         $configFile = $this->getConfigPath();
         if (!$configFile || !is_file($configFile)) return;
 
-        $protocolDir = ($_SERVER['HOME'] ?? getenv('HOME')) . '/.protocol';
-        $logPath = $protocolDir . '/deployments.log';
+        $nodeDir = rtrim(NODE_DATA_DIR, DIRECTORY_SEPARATOR);
+        $logPath = NODE_DATA_DIR . 'deployments.log';
 
         // Add Protocol-specific monitoring rules
         $protocolConfig = <<<XML
@@ -273,7 +273,7 @@ EOF',
 
   <!-- File integrity monitoring for Protocol encryption keys -->
   <syscheck>
-    <directories check_all="yes" realtime="yes">{$protocolDir}</directories>
+    <directories check_all="yes" realtime="yes">{$nodeDir}</directories>
   </syscheck>
 XML;
 
@@ -290,7 +290,7 @@ XML;
         file_put_contents($configFile, $config);
 
         $output->writeln('  <fg=green>✓</> Protocol audit log forwarding configured');
-        $output->writeln('  <fg=green>✓</> File integrity monitoring for ~/.protocol/ configured');
+        $output->writeln('  <fg=green>✓</> File integrity monitoring for ~/.protocol/.node/ configured');
     }
 
     private function restartAgent(OutputInterface $output): void

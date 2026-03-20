@@ -21,7 +21,7 @@ class PluginEnable extends Command
             Enable a plugin globally. When enabling, the plugin's credentials
             and tooling are verified to ensure everything is ready to use.
 
-            Plugin state is stored in ~/.protocol/plugins.json so it applies
+            Plugin state is stored in ~/.protocol/.node/plugins.json so it applies
             across all projects on this machine.
 
             Example:

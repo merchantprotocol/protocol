@@ -59,7 +59,7 @@ Class SecretsSetup extends Command {
             The key is also read automatically from the PROTOCOL_ENCRYPTION_KEY
             environment variable, so CI/CD workflows can pass it from GitHub secrets.
 
-            The key is stored at ~/.protocol/key with 0600 permissions.
+            The key is stored at ~/.protocol/.node/key with 0600 permissions.
 
             HELP)
         ;

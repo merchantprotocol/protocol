@@ -1,6 +1,6 @@
 <?php
 /**
- * Node-level configuration stored in ~/.protocol/nodes/
+ * Node-level configuration stored in ~/.protocol/.node/nodes/
  *
  * When a server is set up as a slave/deployment node, its configuration
  * is stored here instead of in the project repo. This way blue-green
@@ -18,7 +18,7 @@ class NodeConfig
     public static function nodesDir(): string
     {
         if (!self::$nodesDir) {
-            self::$nodesDir = rtrim(getenv('HOME') ?: '/root', '/') . '/.protocol/nodes';
+            self::$nodesDir = NODE_DATA_DIR . 'nodes';
         }
         return self::$nodesDir;
     }

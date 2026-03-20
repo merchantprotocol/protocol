@@ -8,8 +8,8 @@ There are four things that configure Protocol:
 
 1. **`protocol.json`** — Lives in your project. Tells Protocol what Docker image to use, how to deploy, and where your config repo is.
 2. **The config repo** — A separate git repo next to your project. Holds your `.env` files, nginx configs, cron schedules — anything that changes between environments.
-3. **`~/.protocol/key`** — Lives on each machine. The encryption key for your secrets.
-4. **`~/.protocol/nodes/`** — On slave nodes only. Stores per-node deployment settings that persist across blue-green directory swaps.
+3. **`~/.protocol/.node/key`** — Lives on each machine. The encryption key for your secrets.
+4. **`~/.protocol/.node/nodes/`** — On slave nodes only. Stores per-node deployment settings that persist across blue-green directory swaps.
 
 For most projects, you only need the first three. Node config is created automatically when you set up a slave node via `protocol init`.
 
@@ -267,11 +267,11 @@ Set once per machine:
 protocol secrets:setup "your-64-char-hex-key"
 ```
 
-Stored at `~/.protocol/key` with `0600` permissions. This is the key that decrypts your `.env.enc` files. Same key on every machine.
+Stored at `~/.protocol/.node/key` with `0600` permissions. This is the key that decrypts your `.env.enc` files. Same key on every machine.
 
-### Node Config (`~/.protocol/nodes/`)
+### Node Config (`~/.protocol/.node/nodes/`)
 
-When a server is set up as a slave/deployment node via `protocol init`, its configuration is stored in `~/.protocol/nodes/<project>.json`. This is separate from the project's `protocol.json` so that blue-green deployments can swap directories without losing track of settings.
+When a server is set up as a slave/deployment node via `protocol init`, its configuration is stored in `~/.protocol/.node/nodes/<project>.json`. This is separate from the project's `protocol.json` so that blue-green deployments can swap directories without losing track of settings.
 
 ```json
 {
@@ -310,7 +310,7 @@ Here's what happens when `protocol start` runs on a production node:
 1. Reads `protocol.json` → knows the Docker image, deploy strategy, and config repo URL
 2. Reads `config/config.php` → knows this machine is `production`
 3. Checks out the `production` branch of the config repo
-4. Sees `.env.enc` → reads `~/.protocol/key` → decrypts to `.env`
+4. Sees `.env.enc` → reads `~/.protocol/.node/key` → decrypts to `.env`
 5. Symlinks `nginx.conf`, `php.ini`, etc. into the project
 6. Starts Docker with the decrypted secrets
 7. Starts watching for new releases

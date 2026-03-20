@@ -45,7 +45,7 @@ This is about making sure only the right people and systems can access sensitive
 
 - **Secrets are encrypted at rest.** Your `.env` files are encrypted with AES-256-GCM using a 256-bit key. The encrypted files live in git; plaintext never touches a shared repository. Each encryption uses a random 12-byte nonce, so identical plaintext produces different ciphertext every time.
 
-- **Keys have strict filesystem permissions.** The encryption key at `~/.protocol/key` is created with `0600` permissions (owner-read/write only). The `~/.protocol/` directory is `0700`. Protocol's SOC 2 check validates these on every startup and fails if they've drifted.
+- **Keys have strict filesystem permissions.** The encryption key at `~/.protocol/.node/key` is created with `0600` permissions (owner-read/write only). The `~/.protocol/.node/` directory is `0700`. Protocol's SOC 2 check validates these on every startup and fails if they've drifted.
 
 - **Key rotation is tracked.** Protocol checks the age of your encryption key on every startup. If it's older than 90 days, you get a warning. The [Key Rotation Procedure](key-rotation.md) documents the full process.
 
@@ -91,7 +91,7 @@ This is about detecting and responding to issues — knowing what's happening an
   | Key permissions | Key is `0600`, directory is `0700` |
   | Key rotation | Key is less than 90 days old |
 
-- **Centralized logging via SIEM.** `protocol siem:install` installs and configures the Wazuh agent, sets up file integrity monitoring for `~/.protocol/`, and forwards Protocol's audit log to your centralized SIEM. This ensures logs are preserved off-node in a tamper-evident system even if a node is compromised. `protocol siem:status` checks agent health. The `protocol status` dashboard shows SIEM status alongside other services.
+- **Centralized logging via SIEM.** `protocol siem:install` installs and configures the Wazuh agent, sets up file integrity monitoring for `~/.protocol/.node/`, and forwards Protocol's audit log to your centralized SIEM. This ensures logs are preserved off-node in a tamper-evident system even if a node is compromised. `protocol siem:status` checks agent health. The `protocol status` dashboard shows SIEM status alongside other services.
 
 - **Rich status dashboard.** `protocol status` shows a real-time view of all services, Docker containers, configuration state, and security status with colored indicators and issue summaries.
 
@@ -112,7 +112,7 @@ This is about controlling how changes move from development to production.
 
 - **Immutable release tags.** Release mode deploys specific git tags. `v1.2.0` always means the same code. You can't accidentally deploy "whatever's on main." Creating a release is a deliberate approval decision.
 
-- **Deployment audit trail.** Every deployment writes a structured log entry to `~/.protocol/deployments.log`:
+- **Deployment audit trail.** Every deployment writes a structured log entry to `~/.protocol/.node/deployments.log`:
 
   ```
   2024-01-15T10:30:01Z DEPLOY repo=/opt/myapp from=v1.1.0 to=v1.2.0 status=success user=deploy scope=global
@@ -179,7 +179,7 @@ This is about protecting sensitive data from unauthorized access.
 
 - **AES-256-GCM authenticated encryption.** Secrets are encrypted with the same standard used by banks and governments. The authentication tag ensures tamper detection — if anyone modifies the encrypted file, decryption fails.
 
-- **Encryption key never enters git.** The key lives at `~/.protocol/key` on each machine. It's generated locally or transferred via `protocol secrets:key --scp=user@host`. Secure key distribution options include SCP (direct transfer) and GitHub Secrets (for CI/CD pipelines).
+- **Encryption key never enters git.** The key lives at `~/.protocol/.node/key` on each machine. It's generated locally or transferred via `protocol secrets:key --scp=user@host`. Secure key distribution options include SCP (direct transfer) and GitHub Secrets (for CI/CD pipelines).
 
 - **Plaintext is gitignored.** `.env`, `*.key`, and `*.pem` are in `.gitignore`. Even if you forget to encrypt, plaintext secrets won't be committed.
 

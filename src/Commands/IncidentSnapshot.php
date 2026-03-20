@@ -38,7 +38,7 @@ class IncidentSnapshot extends Command
             - Crontab entries
             - SIEM agent status
 
-            All files are saved to ~/.protocol/incidents/snapshot-YYYY-MM-DD-HHMMSS/
+            All files are saved to ~/.protocol/.node/incidents/snapshot-YYYY-MM-DD-HHMMSS/
             with 0700 directory permissions.
 
             HELP)
@@ -50,8 +50,7 @@ class IncidentSnapshot extends Command
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         $timestamp = date('Y-m-d-His');
-        $home = ($_SERVER['HOME'] ?? getenv('HOME')) ?: '/tmp';
-        $snapshotDir = "{$home}/.protocol/incidents/snapshot-{$timestamp}";
+        $snapshotDir = NODE_DATA_DIR . "incidents/snapshot-{$timestamp}";
 
         $output->writeln('');
         $output->writeln('<fg=red;options=bold>  Incident Snapshot — Preserving Evidence</>');
@@ -66,9 +65,9 @@ class IncidentSnapshot extends Command
         // ── Protocol state ───────────────────────────────────────
         $output->writeln('  Capturing Protocol state...');
 
-        $protocolDir = "{$home}/.protocol";
-        if (is_file("{$protocolDir}/deployments.log")) {
-            copy("{$protocolDir}/deployments.log", "{$snapshotDir}/deployments.log");
+        $nodeDir = NODE_DATA_DIR;
+        if (is_file("{$nodeDir}deployments.log")) {
+            copy("{$nodeDir}deployments.log", "{$snapshotDir}/deployments.log");
         }
 
         // Copy protocol.json and protocol.lock from repo
