@@ -48,6 +48,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
 use Gitcd\Commands\Init\ProjectType;
@@ -625,82 +626,134 @@ Class ProtocolInit extends Command {
         $output->writeln('');
         $output->writeln("    <fg=gray>This server needs read access to</> <fg=white>{$owner}/{$repo}</>");
         $output->writeln('');
-        $tokenUrl = "https://github.com/organizations/{$owner}/settings/personal-access-tokens/new";
 
-        $output->writeln("    Create an org-level fine-grained token with read-only access:");
-        $output->writeln('');
-        $output->writeln("    <fg=cyan;options=bold>{$tokenUrl}</>");
-        $output->writeln('');
-        $output->writeln("    <fg=gray>Set these options on that page:</>");
-        $output->writeln("    • <fg=white>Resource owner</>  → <fg=green>{$owner}</>");
-        $output->writeln("    • <fg=white>Repository access</> → <fg=green>Only select repositories</> → <fg=green>{$repo}</>");
-        $output->writeln("    • <fg=white>Contents</>          → <fg=green>Read-only</>");
-        $output->writeln("    • <fg=white>Variables</>         → <fg=green>Read-only</> <fg=gray>(for release pointer)</>");
-        $output->writeln("    • <fg=white>Metadata</>          → <fg=green>Read-only</> <fg=gray>(auto-selected)</>");
-        $output->writeln('');
-        $output->writeln("    <fg=gray>Why org-level?</> If a developer leaves, the token stays valid —");
-        $output->writeln("    production won't break when someone is removed from the org.");
-        $output->writeln('');
-
-        $question = new Question('    GitHub token (ghp_...): ');
-        $token = $helper->ask($input, $output, $question);
-
-        if (!$token || empty(trim($token))) {
+        // Check if a GitHub App is already configured
+        if (GitHubApp::isConfigured()) {
+            $output->writeln("    <fg=gray>›</> Found existing GitHub App credentials, refreshing token...");
+            if (GitHubApp::refreshGitCredentials($owner)) {
+                $output->writeln("    <fg=green>✓</> Git credentials refreshed from GitHub App");
+                $output->writeln('');
+                return "https://github.com/{$owner}/{$repo}.git";
+            }
+            $output->writeln("    <fg=yellow>!</> Existing credentials failed — setting up a new app");
             $output->writeln('');
-            $output->writeln("    <fg=red>✗</> No token provided. Cannot continue without repo access.");
+        }
+
+        // Generate the manifest URL
+        $manifestUrl = GitHubApp::manifestUrl($owner, $repo);
+
+        $output->writeln("    <fg=yellow;options=bold>Create a GitHub App</> for this organization.");
+        $output->writeln("    The app belongs to the org — not any individual — so access");
+        $output->writeln("    won't break when someone leaves the team.");
+        $output->writeln('');
+        $output->writeln("    <fg=cyan;options=bold>Click this URL to create the app (everything is pre-configured):</>");
+        $output->writeln('');
+        $output->writeln("    {$manifestUrl}");
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Permissions: Contents (read), Variables (read), Metadata (read)</>");
+        $output->writeln('');
+        $output->writeln("    <fg=white>After creating the app:</>");
+        $output->writeln("    <fg=yellow>1.</> Click <fg=white>Generate a private key</> — a .pem file will download");
+        $output->writeln("    <fg=yellow>2.</> Install the app on your org → select <fg=white>{$repo}</>");
+        $output->writeln("    <fg=yellow>3.</> Come back here and paste the App ID and private key");
+        $output->writeln('');
+
+        // Ask for App ID
+        $question = new Question('    App ID: ');
+        $appId = $helper->ask($input, $output, $question);
+
+        if (!$appId || empty(trim($appId))) {
+            $output->writeln('');
+            $output->writeln("    <fg=red>✗</> No App ID provided.");
+            $output->writeln('');
+            return null;
+        }
+        $appId = trim($appId);
+
+        // Ask for private key
+        $output->writeln('');
+        $output->writeln("    <fg=gray>Paste the path to the .pem file, or paste the key contents</>");
+        $output->writeln("    <fg=gray>(end with a blank line):</>");
+        $output->writeln('');
+
+        $question = new Question('    Private key (path or paste): ');
+        $keyInput = $helper->ask($input, $output, $question);
+
+        if (!$keyInput || empty(trim($keyInput))) {
+            $output->writeln('');
+            $output->writeln("    <fg=red>✗</> No private key provided.");
             $output->writeln('');
             return null;
         }
 
-        $token = trim($token);
+        $keyInput = trim($keyInput);
+        if (is_file($keyInput)) {
+            // It's a file path
+            $pemContents = file_get_contents($keyInput);
+        } else {
+            // Treat as pasted key content
+            $pemContents = $keyInput;
+        }
 
-        // Build the authenticated HTTPS URL
+        if (!str_contains($pemContents, 'BEGIN RSA PRIVATE KEY') && !str_contains($pemContents, 'BEGIN PRIVATE KEY')) {
+            $output->writeln('');
+            $output->writeln("    <fg=red>✗</> Invalid private key format. Expected a PEM file.");
+            $output->writeln('');
+            return null;
+        }
+
+        // Test JWT generation
+        $output->writeln('');
+        $output->writeln("    <fg=gray>›</> Generating JWT...");
+
+        $jwt = GitHubApp::generateJwt($appId, $pemContents);
+        if (!$jwt) {
+            $output->writeln("    <fg=red>✗</> Failed to generate JWT. Check that the private key is valid.");
+            $output->writeln('');
+            return null;
+        }
+        $output->writeln("    <fg=green>✓</> JWT generated");
+
+        // Find installation
+        $output->writeln("    <fg=gray>›</> Looking for app installation on <fg=white>{$owner}</>...");
+
+        $installationId = GitHubApp::getInstallationId($jwt, $owner);
+        if (!$installationId) {
+            $output->writeln("    <fg=red>✗</> App not installed on <fg=white>{$owner}</>");
+            $output->writeln("    <fg=gray>Go to the app settings and click</> <fg=white>Install App</> <fg=gray>→ select</> <fg=white>{$owner}</>");
+            $output->writeln('');
+            return null;
+        }
+        $output->writeln("    <fg=green>✓</> Found installation (ID: {$installationId})");
+
+        // Generate installation token
+        $output->writeln("    <fg=gray>›</> Generating access token...");
+
+        $token = GitHubApp::generateInstallationToken($jwt, $installationId);
+        if (!$token) {
+            $output->writeln("    <fg=red>✗</> Failed to generate installation token.");
+            $output->writeln('');
+            return null;
+        }
+
+        // Test repo access with the token
         $httpsUrl = "https://x-access-token:{$token}@github.com/{$owner}/{$repo}.git";
-
-        // Test access with the token
-        $output->writeln('');
-        $output->writeln("    <fg=gray>›</> Testing token access...");
-
         if (!$this->testRepoAccess($httpsUrl)) {
-            $output->writeln("    <fg=red>✗</> Token does not have access to this repository.");
-            $output->writeln("    <fg=gray>Check that the token has Contents: Read permission");
-            $output->writeln("    and access to the</> <fg=white>{$repo}</> <fg=gray>repository.</>");
+            $output->writeln("    <fg=red>✗</> Token doesn't have access to <fg=white>{$repo}</>");
+            $output->writeln("    <fg=gray>Make sure the app is installed with access to this repository.</>");
             $output->writeln('');
             return null;
         }
 
-        $output->writeln("    <fg=green>✓</> Token verified — read access confirmed");
+        $output->writeln("    <fg=green>✓</> Access verified — read access to <fg=white>{$repo}</> confirmed");
 
-        // Store the token securely
-        $tokenDir = NODE_DATA_DIR;
-        if (!is_dir($tokenDir)) {
-            mkdir($tokenDir, 0700, true);
-        }
-        $tokenFile = $tokenDir . 'github-token';
-        file_put_contents($tokenFile, $token . "\n", LOCK_EX);
-        chmod($tokenFile, 0600);
+        // Save credentials and configure git
+        GitHubApp::saveCredentials($appId, $pemContents, $owner);
+        GitHubApp::writeGitCredentials($token);
 
-        // Configure git credential storage for this repo
-        $credentialFile = $tokenDir . 'git-credentials';
-        $credentialEntry = "https://x-access-token:{$token}@github.com";
-
-        // Append or overwrite the credential for github.com
-        $existingCreds = is_file($credentialFile) ? file_get_contents($credentialFile) : '';
-        $lines = array_filter(explode("\n", trim($existingCreds)), function ($line) {
-            // Remove any existing github.com x-access-token entries
-            return !str_contains($line, 'x-access-token') || !str_contains($line, 'github.com');
-        });
-        $lines[] = $credentialEntry;
-        file_put_contents($credentialFile, implode("\n", $lines) . "\n", LOCK_EX);
-        chmod($credentialFile, 0600);
-
-        // Configure git to use our credential file for this repo
-        Shell::run("git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
-
-        $output->writeln("    <fg=green>✓</> Token stored in <fg=white>{$tokenFile}</>");
+        $output->writeln("    <fg=green>✓</> Credentials stored in <fg=white>" . GitHubApp::credentialsPath() . "</>");
         $output->writeln('');
 
-        // Return the HTTPS URL (without embedded token — credential helper handles it)
         return "https://github.com/{$owner}/{$repo}.git";
     }
 
