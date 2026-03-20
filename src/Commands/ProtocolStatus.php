@@ -59,6 +59,7 @@ Class ProtocolStatus extends Command {
     {
         $this
             ->setHelp('Displays a comprehensive dashboard of node health, services, Docker containers, and security status.')
+            ->addArgument('project', \Symfony\Component\Console\Input\InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder());
     }
 
@@ -68,21 +69,12 @@ Class ProtocolStatus extends Command {
         $nodeConfig = null;
         $nodeData = [];
 
-        // Detect slave node mode: check NodeConfig first so status works from anywhere
-        $projects = NodeConfig::listProjects();
-        if (!empty($projects)) {
-            // If run from a directory that matches a node config, use that one
-            $matchedProject = $repo_dir ? NodeConfig::findByRepoDir($repo_dir) : null;
-            if (!$matchedProject) {
-                // Use the first (or only) configured project
-                $matchedProject = $projects[0];
-            }
-            $nodeData = NodeConfig::load($matchedProject);
-            if (!empty($nodeData) && ($nodeData['node_type'] ?? '') === 'slave') {
-                $nodeConfig = $matchedProject;
-                // On slave nodes, the repo_dir from NodeConfig is authoritative
-                $repo_dir = $nodeData['repo_dir'] ?? $repo_dir;
-            }
+        // Detect slave node mode so status works from anywhere
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [$nodeConfig, $nodeData, $activeDir] = $resolved;
+            $repo_dir = $nodeData['repo_dir'] ?? $repo_dir;
         }
 
         // For non-slave nodes, require a git repo as before
@@ -111,24 +103,7 @@ Class ProtocolStatus extends Command {
             $dockerImage = Json::read('docker.image', null, $repo_dir);
             $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
             $gitRemote = null;
-        }
-
-        $configrepo = Config::repo($repo_dir);
-        $issues = [];
-        $wazuhRunning = false;
-
-        // Determine the active directory for runtime state (lock files, docker, etc.)
-        $activeDir = $repo_dir;
-        if ($nodeConfig && $strategy === 'release' && $currentRelease && $releasesDir) {
-            $releaseDir = rtrim($releasesDir, '/') . '/' . $currentRelease;
-            if (is_dir($releaseDir)) {
-                $activeDir = $releaseDir;
-            }
-        } elseif ($nodeConfig && $strategy === 'branch' && $currentBranch && $releasesDir) {
-            $branchDir = rtrim($releasesDir, '/') . '/' . $currentBranch;
-            if (is_dir($branchDir)) {
-                $activeDir = $branchDir;
-            }
+            $activeDir = $repo_dir;
         }
 
         $output->writeln('');

@@ -56,6 +56,7 @@ use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStart extends Command {
 
@@ -77,6 +78,7 @@ Class ProtocolStart extends Command {
         $this
             // configure an argument
             ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
+            ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
@@ -90,7 +92,21 @@ Class ProtocolStart extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
+        $nodeConfig = null;
+        $nodeData = [];
+
+        // Detect slave node mode so start works from anywhere
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [$nodeConfig, $nodeData, $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        // For non-slave nodes, require a git repo
+        if (!$nodeConfig) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         $helper = $this->getHelper('question');
 
@@ -102,6 +118,9 @@ Class ProtocolStart extends Command {
 
         // get the correct environment
         $environment = $input->getArgument('environment') ?: Config::read('env', false);
+        if (!$environment && $nodeConfig) {
+            $environment = $nodeData['environment'] ?? 'production';
+        }
         if (!$environment) {
             $question = new Question('What is the current env we need to configure protocol for globally? This must be set:', 'localhost');
             $environment = $helper->ask($input, $output, $question);
@@ -111,7 +130,9 @@ Class ProtocolStart extends Command {
         $devEnvs = ['localhost', 'local', 'dev', 'development'];
         $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost') !== false);
 
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $strategy = $nodeConfig
+            ? ($nodeData['deployment']['strategy'] ?? 'branch')
+            : Json::read('deployment.strategy', 'branch', $repo_dir);
 
         // Prepare sub-command inputs
         $arrInput = new ArrayInput(['--dir' => $repo_dir]);
@@ -345,6 +366,10 @@ Class ProtocolStart extends Command {
             $output->writeln('    <fg=gray>Old images will accumulate. Enable with:</> <fg=white>protocol docker:cleanup:schedule on</>');
             $output->writeln('');
         }
+
+        // Run protocol status to show full dashboard
+        $statusArgs = new ArrayInput(['--dir' => $repo_dir]);
+        $app->find('status')->run($statusArgs, $output);
 
         return Command::SUCCESS;
     }

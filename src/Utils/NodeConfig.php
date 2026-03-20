@@ -131,4 +131,65 @@ class NodeConfig
         }
         return null;
     }
+
+    /**
+     * Resolve a slave node by project name or current directory.
+     *
+     * Returns [projectName, nodeData, activeDir] or null if no slave node found.
+     * If $projectName is provided, uses that; otherwise tries to match by $repoDir
+     * or falls back to the first configured slave project.
+     */
+    public static function resolveSlaveNode(?string $projectName = null, ?string $repoDir = null): ?array
+    {
+        if ($projectName) {
+            if (!self::exists($projectName)) {
+                return null;
+            }
+            $data = self::load($projectName);
+            if (($data['node_type'] ?? '') !== 'slave') {
+                return null;
+            }
+        } else {
+            $projects = self::listProjects();
+            if (empty($projects)) {
+                return null;
+            }
+
+            $matched = $repoDir ? self::findByRepoDir($repoDir) : null;
+            if (!$matched) {
+                $matched = $projects[0];
+            }
+
+            $data = self::load($matched);
+            if (empty($data) || ($data['node_type'] ?? '') !== 'slave') {
+                return null;
+            }
+            $projectName = $matched;
+        }
+
+        $repoDir = $data['repo_dir'] ?? $repoDir;
+        $strategy = $data['deployment']['strategy'] ?? 'branch';
+        $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
+        $currentRelease = $data['release']['current'] ?? null;
+        $currentBranch = $data['deployment']['branch'] ?? null;
+
+        // Resolve the active directory (where code, docker-compose, lock files live)
+        $activeDir = $repoDir;
+        if ($strategy === 'release' && $currentRelease && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . $currentRelease;
+            if (is_dir($dir)) {
+                $activeDir = $dir;
+            }
+        } elseif ($strategy === 'branch' && $currentBranch && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+            if (is_dir($dir)) {
+                $activeDir = $dir;
+            }
+        }
+
+        // Ensure trailing slash
+        $activeDir = rtrim($activeDir, '/') . '/';
+
+        return [$projectName, $data, $activeDir];
+    }
 }

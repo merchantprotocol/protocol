@@ -49,6 +49,7 @@ use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStop extends Command {
 
@@ -69,6 +70,7 @@ Class ProtocolStop extends Command {
         ;
         $this
             // configure an argument
+            ->addArgument('project', \Symfony\Component\Console\Input\InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
@@ -82,7 +84,21 @@ Class ProtocolStop extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
+        $nodeConfig = null;
+        $nodeData = [];
+
+        // Detect slave node mode so stop works from anywhere
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [$nodeConfig, $nodeData, $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        // For non-slave nodes, require a git repo
+        if (!$nodeConfig) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         // command should only have one running instance
         if (!$this->lock()) {
@@ -93,7 +109,9 @@ Class ProtocolStop extends Command {
         $arrInput = new ArrayInput(['--dir' => $repo_dir]);
         $nullOutput = new NullOutput();
         $app = $this->getApplication();
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $strategy = $nodeConfig
+            ? ($nodeData['deployment']['strategy'] ?? 'branch')
+            : Json::read('deployment.strategy', 'branch', $repo_dir);
 
         $output->writeln('');
 
