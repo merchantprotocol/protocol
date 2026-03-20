@@ -194,25 +194,58 @@ Class ProtocolInit extends Command {
         }
 
         // ── Development → auto-detect project state ──────────────
-        $isGitRepo = Git::isInitializedRepo($repo_dir);
         $hasProtocolJson = is_file(rtrim($repo_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'protocol.json');
 
-        if ($hasProtocolJson) {
-            // Already has Protocol — go straight to update
+        if (!$hasProtocolJson) {
+            // No protocol.json — confirm new install
             $output->writeln('');
-            $output->writeln("    <fg=green>✓</> Detected existing Protocol project");
-            return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
+            $output->writeln("    <fg=white;options=bold>New Project</>");
+            $output->writeln("    <fg=gray>Protocol is not installed in this directory.</>");
+            $output->writeln('');
+
+            $question = new ConfirmationQuestion(
+                "    Install Protocol in <fg=white>{$repo_dir}</> ? [<fg=green>Y</>/n] ", true
+            );
+            if (!$helper->ask($input, $output, $question)) {
+                $output->writeln('');
+                $output->writeln('    <fg=gray>No changes made.</>');
+                $output->writeln('');
+                return Command::SUCCESS;
+            }
+
+            $isGitRepo = Git::isInitializedRepo($repo_dir);
+            if ($isGitRepo) {
+                return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+            }
+            return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
         }
 
-        if ($isGitRepo) {
-            // Has git but no protocol.json — connect existing repo
+        // Has protocol.json — check if migration is needed
+        $currentVersion = (int) Json::read('protocol_version', 0, $repo_dir);
+        $targetVersion = self::SCHEMA_VERSION;
+
+        if ($currentVersion < $targetVersion) {
+            $projectName = Json::read('name', basename($repo_dir), $repo_dir);
             $output->writeln('');
-            $output->writeln("    <fg=green>✓</> Detected existing git repository");
-            return $this->flowExistingProject($repo_dir, $input, $output, $helper, $io);
+            $output->writeln("    <fg=yellow;options=bold>Migration Required</>");
+            $output->writeln("    <fg=gray>Project:</> <fg=white>{$projectName}</>");
+            $output->writeln("    <fg=gray>Schema version:</> <fg=yellow>v{$currentVersion}</> → <fg=green>v{$targetVersion}</>");
+            $output->writeln('');
+
+            $question = new ConfirmationQuestion(
+                '    Migrate to the latest version? [<fg=green>Y</>/n] ', true
+            );
+            if ($helper->ask($input, $output, $question)) {
+                return $this->flowFixMigrate($repo_dir, $input, $output, $helper, $io);
+            }
+            $output->writeln('');
+            $output->writeln('    <fg=gray>No changes made.</>');
+            $output->writeln('');
+            return Command::SUCCESS;
         }
 
-        // No git, no protocol — new project
-        return $this->flowNewProject($repo_dir, $input, $output, $helper, $io);
+        // Up-to-date protocol project — show update menu
+        return $this->flowProtocolProject($repo_dir, $input, $output, $helper, $io);
     }
 
     // ─── Flow: New Project ───────────────────────────────────────
