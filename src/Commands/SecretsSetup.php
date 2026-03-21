@@ -59,8 +59,7 @@ Class SecretsSetup extends Command {
             The storage location is determined by the environment set via
             config:env. Production environments store the key globally in
             protocol's .node/key. All other environments (local, dev, staging)
-            store the key per-project in the current working directory's
-            .protocol/key.
+            store the key per-project in the current working directory's .node/key.
 
             The key is also read automatically from the PROTOCOL_ENCRYPTION_KEY
             environment variable, so CI/CD workflows can pass it from GitHub secrets.

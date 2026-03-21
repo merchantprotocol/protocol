@@ -68,9 +68,8 @@ Class ConfigNew extends Command {
             HELP)
         ;
         $this
-            // configure an argument
+            ->addArgument('environment', InputArgument::OPTIONAL, 'Name for the new environment (e.g., production, staging)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
-            // ...
         ;
     }
 
@@ -108,8 +107,11 @@ Class ConfigNew extends Command {
         }
 
         // get the correct environment
-        $question = new Question('New Environment Name: ');
-        $newName = $helper->ask($input, $output, $question);
+        $newName = $input->getArgument('environment');
+        if (!$newName) {
+            $question = new Question('New Environment Name: ');
+            $newName = $helper->ask($input, $output, $question);
+        }
 
         $slug = Str::slugify( $newName );
         if ($newName != $slug) {

@@ -52,10 +52,17 @@ class AwsSecretsHelper
      */
     public static function getClient($repoDir = false): SecretsManagerClient
     {
-        return new SecretsManagerClient([
+        $config = [
             'region' => self::region($repoDir),
             'version' => 'latest',
-        ]);
+        ];
+
+        $profile = self::config('profile', null, $repoDir);
+        if ($profile) {
+            $config['profile'] = $profile;
+        }
+
+        return new SecretsManagerClient($config);
     }
 
     // ─── Logging ────────────────────────────────────────────────
@@ -147,6 +154,40 @@ class AwsSecretsHelper
      *
      * @return bool True on success
      */
+    public static function pushSecretAs(string $envContents, string $secretName, $repoDir = false): bool
+    {
+        $client = self::getClient($repoDir);
+        $secretString = self::envToJson($envContents);
+
+        self::log("Pushing secret: {$secretName}");
+
+        try {
+            $client->putSecretValue([
+                'SecretId' => $secretName,
+                'SecretString' => $secretString,
+            ]);
+            self::log("Secret updated: {$secretName}");
+            return true;
+        } catch (AwsException $e) {
+            if ($e->getAwsErrorCode() === 'ResourceNotFoundException') {
+                try {
+                    $client->createSecret([
+                        'Name' => $secretName,
+                        'SecretString' => $secretString,
+                        'Description' => 'Protocol managed environment secrets',
+                    ]);
+                    self::log("Secret created: {$secretName}");
+                    return true;
+                } catch (AwsException $createEx) {
+                    self::log("ERROR creating secret: " . $createEx->getMessage());
+                    return false;
+                }
+            }
+            self::log("ERROR pushing secret: " . $e->getMessage());
+            return false;
+        }
+    }
+
     public static function pushSecret(string $envContents, $repoDir = false): bool
     {
         $client = self::getClient($repoDir);

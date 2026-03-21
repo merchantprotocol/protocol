@@ -241,6 +241,30 @@ class GitHubApp
     }
 
     /**
+     * Write the GitHub App token to composer's global auth.json
+     * so composer can access GitHub API without rate-limit prompts.
+     */
+    public static function writeComposerAuth(string $token): void
+    {
+        $composerHome = getenv('COMPOSER_HOME') ?: (getenv('HOME') ?: getenv('USERPROFILE')) . '/.config/composer';
+        $authFile = $composerHome . '/auth.json';
+
+        $auth = [];
+        if (is_file($authFile)) {
+            $auth = json_decode(file_get_contents($authFile), true) ?: [];
+        }
+
+        $auth['github-oauth'] = $auth['github-oauth'] ?? [];
+        $auth['github-oauth']['github.com'] = $token;
+
+        if (!is_dir($composerHome)) {
+            mkdir($composerHome, 0700, true);
+        }
+        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+        chmod($authFile, 0600);
+    }
+
+    /**
      * Refresh the git credentials with a new installation token.
      * Call this periodically (tokens expire after 1 hour).
      */
@@ -251,6 +275,7 @@ class GitHubApp
             return false;
         }
         self::writeGitCredentials($token);
+        self::writeComposerAuth($token);
         return true;
     }
 
