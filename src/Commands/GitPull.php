@@ -157,10 +157,15 @@ Class GitPull extends Command {
 
         // Update the submodules
         $logMsg("running submodule update");
-        $command = "GIT_TERMINAL_PROMPT=0 timeout 60 git -C " . escapeshellarg($repo_dir) . " submodule update --init --recursive";
-        $response = Shell::run($command);
-        $logMsg("submodule update done");
-        if ($response) $output->writeln($response);
+        $submoduleCmd = "{$envPrefix} timeout 60 git -C " . escapeshellarg($repo_dir) . " submodule update --init --recursive";
+        if ($output->isVerbose()) {
+            $output->writeln("  > {$submoduleCmd}");
+            passthru($submoduleCmd . " 2>&1", $subReturn);
+        } else {
+            $response = Shell::run($submoduleCmd, $subReturn);
+            if ($response) $output->writeln($response);
+        }
+        $logMsg("submodule update done exit={$subReturn}");
 
         return Command::SUCCESS;
     }
