@@ -238,7 +238,7 @@ Class ProtocolStatus extends Command {
         }
 
         // Crontab
-        $hasCron = Crontab::hasCrontabRestart($activeDir);
+        $hasCron = Crontab::hasCrontabRestart($repo_dir);
         if ($hasCron) {
             $this->writeService($output, 'crontab', 'installed');
         } else {
