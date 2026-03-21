@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 
 Class ComposerInstall extends Command {
@@ -95,6 +96,16 @@ Class ComposerInstall extends Command {
         }
 
         Shell::run("chmod +x ".SCRIPT_DIR."composer.phar");
+
+        // If GitHub App is configured, inject the token into composer's config
+        // so it can authenticate to private GitHub repos via HTTPS
+        if (GitHubApp::isConfigured()) {
+            $token = GitHubApp::getAccessToken();
+            if ($token) {
+                Shell::run(SCRIPT_DIR . "composer.phar config --global github-oauth.github.com " . escapeshellarg($token) . " 2>/dev/null");
+            }
+        }
+
         $command = "timeout 120 " . SCRIPT_DIR . "composer.phar install"
             . " --working-dir=" . escapeshellarg($repo_dir)
             . " --ignore-platform-reqs"
