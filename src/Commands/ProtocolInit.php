@@ -1191,13 +1191,26 @@ Class ProtocolInit extends Command {
             $owner = $matches[1];
             $repo = $matches[2];
 
-            $json = Shell::run("gh api repos/" . escapeshellarg("{$owner}/{$repo}") . "/contents/protocol.json --jq '.content' 2>/dev/null");
-            if ($json && trim($json)) {
-                $decoded = base64_decode(trim($json));
-                if ($decoded) {
-                    $data = json_decode($decoded, true);
-                    if (is_array($data)) {
-                        return $data;
+            $token = GitHubApp::getAccessToken();
+            if ($token) {
+                $apiResult = Shell::run(
+                    "curl -s"
+                    . " -H " . escapeshellarg("Authorization: token {$token}")
+                    . " -H 'Accept: application/vnd.github+json'"
+                    . " " . escapeshellarg("https://api.github.com/repos/{$owner}/{$repo}/contents/protocol.json")
+                    . " 2>/dev/null"
+                );
+                if ($apiResult) {
+                    $apiData = json_decode($apiResult, true);
+                    $content = $apiData['content'] ?? null;
+                    if ($content) {
+                        $decoded = base64_decode($content);
+                        if ($decoded) {
+                            $data = json_decode($decoded, true);
+                            if (is_array($data)) {
+                                return $data;
+                            }
+                        }
                     }
                 }
             }
