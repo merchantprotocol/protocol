@@ -165,31 +165,65 @@ class AwsSecretsInit extends Command
         $secretName = $helper->ask($input, $output, $question);
         $output->writeln('');
 
-        // ── Step 3: Test Access ──────────────────────────────────────
-        $output->writeln('  <fg=white;options=bold>Step 3/3:</> Test Access');
+        // ── Step 3: Test Secrets Manager Access ──────────────────────
+        $output->writeln('  <fg=white;options=bold>Step 3/3:</> Test Secrets Manager Access');
         $output->writeln('');
 
-        // Try to describe the secret (may not exist yet, that's ok)
-        $testCmd = 'aws secretsmanager describe-secret'
-            . ' --secret-id ' . escapeshellarg($secretName)
-            . ' --region ' . escapeshellarg($region)
-            . ' 2>&1';
-        $testResult = Shell::run($testCmd, $testReturn);
+        $accessGranted = false;
+        while (!$accessGranted) {
+            $testCmd = 'aws secretsmanager describe-secret'
+                . ' --secret-id ' . escapeshellarg($secretName)
+                . ' --region ' . escapeshellarg($region)
+                . ' 2>&1';
+            $testResult = Shell::run($testCmd, $testReturn);
 
-        if ($testReturn === 0) {
-            $output->writeln("  <info>✓</info> Secret exists: <fg=white>{$secretName}</>");
-        } else {
-            $testData = json_decode($testResult, true);
-            $errorCode = $testData['Error']['Code'] ?? '';
-
-            if (strpos($testResult, 'ResourceNotFoundException') !== false) {
-                $output->writeln("  <info>✓</info> Secret does not exist yet — it will be created on first <fg=cyan>aws:push</>");
+            if ($testReturn === 0) {
+                $output->writeln("  <info>✓</info> Secret exists: <fg=white>{$secretName}</>");
+                $accessGranted = true;
+            } elseif (strpos($testResult, 'ResourceNotFoundException') !== false) {
+                // Secret doesn't exist yet but we have permission to check — that's fine
+                $output->writeln("  <info>✓</info> Access confirmed — secret will be created on first <fg=cyan>aws:push</>");
+                $accessGranted = true;
             } elseif (strpos($testResult, 'AccessDeniedException') !== false) {
-                $output->writeln('  <error>✗ Access denied — check IAM permissions for secretsmanager:DescribeSecret</error>');
-                $output->writeln("  <fg=gray>{$testResult}</>");
-                return Command::FAILURE;
+                $output->writeln('  <error>✗ Access denied — this identity cannot access Secrets Manager.</error>');
+                $output->writeln('');
+                $output->writeln('  <fg=white>Add this IAM policy to the role/user shown above:</>');
+                $output->writeln('');
+                $output->writeln('  <fg=gray>{</>');
+                $output->writeln('    <fg=gray>"Version": "2012-10-17",</>');
+                $output->writeln('    <fg=gray>"Statement": [{</>');
+                $output->writeln('      <fg=gray>"Effect": "Allow",</>');
+                $output->writeln('      <fg=gray>"Action": [</>');
+                $output->writeln('        <fg=gray>"secretsmanager:CreateSecret",</>');
+                $output->writeln('        <fg=gray>"secretsmanager:PutSecretValue",</>');
+                $output->writeln('        <fg=gray>"secretsmanager:GetSecretValue",</>');
+                $output->writeln('        <fg=gray>"secretsmanager:DescribeSecret",</>');
+                $output->writeln('        <fg=gray>"secretsmanager:ListSecrets"</>');
+                $output->writeln('      <fg=gray>],</>');
+                $output->writeln("      <fg=gray>\"Resource\": \"arn:aws:secretsmanager:{$region}:{$account}:secret:protocol/*\"</>");
+                $output->writeln('    <fg=gray>}]</>');
+                $output->writeln('  <fg=gray>}</>');
+                $output->writeln('');
+
+                $retryQ = new ConfirmationQuestion('  Retry after updating permissions? [Y/n] ', true);
+                if (!$helper->ask($input, $output, $retryQ)) {
+                    $output->writeln('');
+                    $output->writeln('  <comment>Configuration saved but access test failed.</comment>');
+                    $output->writeln('  Update IAM permissions and re-run <fg=cyan>protocol aws:init</>');
+                    $output->writeln('');
+
+                    // Still save the config so they don't have to re-enter region/name
+                    Json::write('aws.region', $region, $repoDir);
+                    Json::write('aws.secret_name', $secretName, $repoDir);
+                    Json::save($repoDir);
+                    return Command::FAILURE;
+                }
+                $output->writeln('');
+                $output->writeln('  Retrying...');
+                $output->writeln('');
             } else {
                 $output->writeln("  <comment>⚠ Unexpected response:</comment> <fg=gray>{$testResult}</>");
+                $accessGranted = true; // Don't loop on unknown errors
             }
         }
 

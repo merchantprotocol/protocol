@@ -131,9 +131,22 @@ Class ConfigSwitch extends Command {
         $remoteExists = trim(Shell::run("git -C {$escapedRepo} branch -r --list " . escapeshellarg("*/{$newName}") . " 2>/dev/null") ?: '');
 
         if (!$localExists && !$remoteExists) {
-            $output->writeln("<error>Environment \"{$newName}\" does not exist.</error>");
-            $output->writeln('Available: ' . implode(', ', $branches));
-            return Command::FAILURE;
+            $question = new ConfirmationQuestion(
+                "Environment \"{$newName}\" does not exist. Create it? [Y/n] ",
+                true
+            );
+            if (!$helper->ask($input, $output, $question)) {
+                $output->writeln('Available: ' . implode(', ', $branches));
+                return Command::FAILURE;
+            }
+
+            // Create the new branch from current, then let the rest of the flow handle it
+            $command = $this->getApplication()->find('config:new');
+            $returnCode = $command->run(new ArrayInput([
+                'environment' => $newName,
+                '--dir' => $repo_dir,
+            ]), $output);
+            return $returnCode;
         }
 
         if ($newName === $currentBranch) {
