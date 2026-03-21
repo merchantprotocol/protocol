@@ -106,6 +106,39 @@ Class ProtocolStop extends Command {
             return Command::SUCCESS;
         }
 
+        // If the resolved dir has no docker-compose.yml, try to find the actual
+        // running directory from node config (handles strategy switches mid-flight)
+        $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        if (!file_exists($composePath) && $nodeConfig) {
+            $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+            $fallbackDirs = [];
+
+            // Check branch directory
+            $branch = $nodeData['deployment']['branch'] ?? null;
+            if ($branch && $releasesDir) {
+                $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $branch;
+            }
+
+            // Check current release directory
+            $release = $nodeData['release']['current'] ?? null;
+            if ($release && $releasesDir) {
+                $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $release;
+            }
+
+            // Check repo_dir from node config
+            $nodeRepoDir = $nodeData['repo_dir'] ?? null;
+            if ($nodeRepoDir) {
+                $fallbackDirs[] = rtrim($nodeRepoDir, '/');
+            }
+
+            foreach ($fallbackDirs as $dir) {
+                if (is_file(rtrim($dir, '/') . '/docker-compose.yml')) {
+                    $repo_dir = rtrim($dir, '/') . '/';
+                    break;
+                }
+            }
+        }
+
         $arrInput = new ArrayInput(['--dir' => $repo_dir]);
         $nullOutput = new NullOutput();
         $app = $this->getApplication();
@@ -165,7 +198,10 @@ Class ProtocolStop extends Command {
         // ── Stage 5: Verifying shutdown ─────────────────────────
         $runner->run('Verifying shutdown', function() use ($repo_dir, $strategy) {
             // Verify containers are stopped
-            $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            $verifyCompose = rtrim($repo_dir, '/') . '/docker-compose.yml';
+            $containerNames = file_exists($verifyCompose)
+                ? Docker::getContainerNamesFromDockerComposeFile($repo_dir)
+                : [];
             foreach ($containerNames as $name) {
                 if (Docker::isDockerContainerRunning($name)) {
                     throw new \RuntimeException("Container '{$name}' is still running");
@@ -184,7 +220,10 @@ Class ProtocolStop extends Command {
         // ── Summary ─────────────────────────────────────────────
         $environment = Config::read('env', 'unknown');
 
-        $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+        $summaryCompose = rtrim($repo_dir, '/') . '/docker-compose.yml';
+        $containerNames = file_exists($summaryCompose)
+            ? Docker::getContainerNamesFromDockerComposeFile($repo_dir)
+            : [];
         $stoppedCount = 0;
         foreach ($containerNames as $name) {
             if (!Docker::isDockerContainerRunning($name)) $stoppedCount++;
