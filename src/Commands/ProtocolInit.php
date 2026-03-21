@@ -773,6 +773,10 @@ Class ProtocolInit extends Command {
         }
 
         if ($activeCloneDir && !is_dir($activeCloneDir)) {
+            if (!is_dir($releasesDir)) {
+                mkdir($releasesDir, 0755, true);
+            }
+
             $output->writeln("    <fg=gray>›</> Cloning primary repository...");
             if ($currentStrategy === 'branch' && $currentBranch) {
                 Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
@@ -795,20 +799,27 @@ Class ProtocolInit extends Command {
             $configDir = rtrim($releasesDir, '/') . '/' . $configDirName;
 
             if (!is_dir($configDir)) {
-                $output->writeln("    <fg=gray>›</> Cloning configuration repository...");
-                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir) . " 2>&1");
-
-                if ($environment) {
-                    $currentBranchConfig = Git::branch($configDir);
-                    if ($environment !== $currentBranchConfig) {
-                        Shell::run("GIT_TERMINAL_PROMPT=0 git -C " . escapeshellarg($configDir) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
-                    }
+                if (!is_dir($releasesDir)) {
+                    mkdir($releasesDir, 0755, true);
                 }
 
+                $output->writeln("    <fg=gray>›</> Cloning configuration repository...");
+                $cloneResult = Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir));
+
                 if (is_dir($configDir)) {
+                    // Switch to environment branch if it exists
+                    if ($environment) {
+                        $currentBranchConfig = Git::branch($configDir);
+                        if ($environment !== $currentBranchConfig) {
+                            Shell::run("GIT_TERMINAL_PROMPT=0 git -C " . escapeshellarg($configDir) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                        }
+                    }
                     $output->writeln("    <fg=green>✓</> Config repo cloned to <fg=white>{$configDir}</>");
                 } else {
-                    $output->writeln("    <fg=yellow>!</> Failed to clone config repo");
+                    $output->writeln("    <fg=red>✗</> Failed to clone config repo");
+                    if ($cloneResult) {
+                        $output->writeln("    <fg=gray>" . trim($cloneResult) . "</>");
+                    }
                 }
                 $output->writeln('');
             }
