@@ -140,7 +140,11 @@ Class Crontab
      */
     public static function appendCrontab( $toappend )
     {
-        $existing = Shell::run("crontab -l 2>/dev/null") ?: '';
+        $existing = Shell::run("crontab -l", $returnVar);
+        // If crontab -l fails (no crontab), start fresh
+        if ($returnVar !== 0) {
+            $existing = '';
+        }
         $newCrontab = rtrim($existing) . PHP_EOL . $toappend;
         return self::overwriteCrontab($newCrontab);
     }
