@@ -44,6 +44,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
@@ -114,33 +115,20 @@ Class NodeDeploy extends Command {
         JsonLock::save($repo_dir);
         $output->writeln(' - Updated protocol.lock');
 
-        // Handle encrypted secrets
-        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
-        $configRepo = Config::repo($repo_dir);
+        // Handle secrets (encrypted or AWS Secrets Manager)
+        $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
 
-        if ($secretsMode === 'encrypted' && $configRepo) {
-            $encFile = $configRepo . '.env.enc';
-            if (is_file($encFile) && Secrets::hasKey()) {
-                $tmpEnv = Secrets::decryptToTempFile($encFile);
-                if ($tmpEnv) {
-                    $output->writeln(' - Decrypted secrets to temp file');
+        if ($tmpEnv) {
+            $output->writeln(' - Secrets resolved to temp file');
 
-                    // Rebuild docker with env file
-                    Shell::passthru("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+            // Rebuild docker with env file
+            Shell::passthru("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
 
-                    // Delete temp file immediately
-                    unlink($tmpEnv);
-                    $output->writeln(' - Docker containers rebuilt (secrets injected and cleaned)');
-                } else {
-                    $output->writeln('<error>Failed to decrypt secrets</error>');
-                }
-            } else {
-                // Rebuild docker without secrets
-                $command = $this->getApplication()->find('docker:compose:rebuild');
-                $command->run(new ArrayInput(['--dir' => $repo_dir]), $output);
-            }
+            // Delete temp file immediately
+            unlink($tmpEnv);
+            $output->writeln(' - Docker containers rebuilt (secrets injected and cleaned)');
         } else {
-            // Rebuild docker normally
+            // Rebuild docker normally (file mode or no secrets)
             $command = $this->getApplication()->find('docker:compose:rebuild');
             $command->run(new ArrayInput(['--dir' => $repo_dir]), $output);
             $output->writeln(' - Docker containers rebuilt');

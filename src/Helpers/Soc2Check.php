@@ -32,12 +32,14 @@ class Soc2Check extends BaseAuditChecker
         $mode = Json::read('deployment.secrets', 'file', $this->repoDir);
         $hasKey = Secrets::hasKey();
 
-        if ($mode === 'encrypted' && $hasKey) {
-            $this->addResult('Encrypted secrets', 'pass', 'Secrets encrypted with AES-256-GCM, key present');
+        if ($mode === 'aws') {
+            $this->addResult('Secrets management', 'pass', 'Secrets managed via AWS Secrets Manager');
+        } elseif ($mode === 'encrypted' && $hasKey) {
+            $this->addResult('Secrets management', 'pass', 'Secrets encrypted with AES-256-GCM, key present');
         } elseif ($mode === 'encrypted' && !$hasKey) {
-            $this->addResult('Encrypted secrets', 'fail', 'Encryption configured but key is missing on this node');
+            $this->addResult('Secrets management', 'fail', 'Encryption configured but key is missing on this node');
         } else {
-            $this->addResult('Encrypted secrets', 'fail', 'Secrets mode is "' . $mode . '" — should be "encrypted" for production');
+            $this->addResult('Secrets management', 'fail', 'Secrets mode is "' . $mode . '" — should be "encrypted" or "aws" for production');
         }
     }
 
