@@ -18,6 +18,7 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -40,6 +41,15 @@ while (true) {
 
         if ($activeRelease && $activeRelease !== $currentRelease) {
             echo "[" . date('Y-m-d H:i:s') . "] New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")\n";
+
+            // Refresh GitHub App credentials if configured (tokens expire after 1 hour)
+            if (GitHubApp::isConfigured()) {
+                $creds = GitHubApp::loadCredentials();
+                $appOwner = $creds['owner'] ?? null;
+                if ($appOwner) {
+                    GitHubApp::refreshGitCredentials($appOwner);
+                }
+            }
 
             // Fetch latest tags
             $remote = Git::remoteName($repo_dir) ?: 'origin';
