@@ -40,6 +40,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class DeployReleaseSlaveStop extends Command {
 
@@ -69,7 +70,7 @@ Class DeployReleaseSlaveStop extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
+        $pid = DeploymentState::watcherPid($repo_dir);
 
         if ($pid && Shell::isRunning($pid)) {
             Shell::run("kill {$pid} 2>/dev/null");
@@ -95,6 +96,7 @@ Class DeployReleaseSlaveStop extends Command {
 
         JsonLock::write('release.slave.pid', null, $repo_dir);
         JsonLock::save($repo_dir);
+        DeploymentState::setWatcherPid($repo_dir, null);
 
         return Command::SUCCESS;
     }

@@ -47,6 +47,7 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\StageRunner;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
@@ -118,15 +119,11 @@ Class ProtocolStop extends Command {
         $runner = new StageRunner($output);
 
         // ── Stage 1: Stopping watchers ──────────────────────────
-        $runner->run('Stopping watchers', function() use ($app, $arrInput, $nullOutput, $strategy) {
-            if ($strategy === 'release') {
-                $app->find('deploy:slave:stop')->run($arrInput, $nullOutput);
-            } else {
-                $app->find('git:slave:stop')->run($arrInput, $nullOutput);
-            }
-
-            // Always stop config watcher
-            $app->find('config:slave:stop')->run($arrInput, $nullOutput);
+        $runner->run('Stopping watchers', function() use ($app, $arrInput, $nullOutput) {
+            // Stop all watchers regardless of strategy
+            try { $app->find('deploy:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
+            try { $app->find('git:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
+            try { $app->find('config:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
         });
 
         // ── Stage 2: Unlinking configuration ────────────────────
@@ -138,7 +135,13 @@ Class ProtocolStop extends Command {
 
         // ── Stage 3: Stopping containers ────────────────────────
         $runner->run('Stopping containers', function() use ($repo_dir) {
-            // Shadow mode: stop containers in all release directories
+            $dirs = DeploymentState::allKnownDirs($repo_dir);
+            foreach ($dirs as $dir) {
+                $dockerCommand = Docker::getDockerCommand();
+                Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
+            }
+
+            // Also stop blue-green releases if enabled
             if (BlueGreen::isEnabled($repo_dir)) {
                 foreach (BlueGreen::listReleases($repo_dir) as $release) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
@@ -146,15 +149,7 @@ Class ProtocolStop extends Command {
                         BlueGreen::stopContainers($releaseDir);
                     }
                 }
-                return;
             }
-
-            // Standard mode
-            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
-            if (!file_exists($composePath)) return;
-
-            $dockerCommand = Docker::getDockerCommand();
-            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} down 2>&1");
         });
 
         // ── Stage 4: Removing crontab ───────────────────────────
@@ -163,28 +158,37 @@ Class ProtocolStop extends Command {
         });
 
         // ── Stage 5: Verifying shutdown ─────────────────────────
-        $runner->run('Verifying shutdown', function() use ($repo_dir, $strategy) {
-            // Verify containers are stopped
-            $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
-            foreach ($containerNames as $name) {
-                if (Docker::isDockerContainerRunning($name)) {
-                    throw new \RuntimeException("Container '{$name}' is still running");
+        $runner->run('Verifying shutdown', function() use ($repo_dir) {
+            // Verify containers are stopped in all known dirs
+            $dirs = DeploymentState::allKnownDirs($repo_dir);
+            foreach ($dirs as $dir) {
+                $composePath = rtrim($dir, '/') . '/docker-compose.yml';
+                if (file_exists($composePath)) {
+                    $containerNames = Docker::getContainerNamesFromDockerComposeFile($dir);
+                    foreach ($containerNames as $name) {
+                        if (Docker::isDockerContainerRunning($name)) {
+                            throw new \RuntimeException("Container '{$name}' is still running");
+                        }
+                    }
                 }
             }
 
-            // Verify watchers are stopped
-            if ($strategy === 'release') {
-                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
-                if ($pid && Shell::isRunning($pid)) {
-                    throw new \RuntimeException('Release watcher is still running');
-                }
+            // Verify watcher is stopped
+            if (DeploymentState::isWatcherRunning($repo_dir)) {
+                throw new \RuntimeException('Deployment watcher is still running');
             }
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
         $environment = Config::read('env', 'unknown');
 
-        $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+        $containerNames = [];
+        foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
+            $composePath = rtrim($dir, '/') . '/docker-compose.yml';
+            if (file_exists($composePath)) {
+                $containerNames = array_merge($containerNames, Docker::getContainerNamesFromDockerComposeFile($dir));
+            }
+        }
         $stoppedCount = 0;
         foreach ($containerNames as $name) {
             if (!Docker::isDockerContainerRunning($name)) $stoppedCount++;
@@ -196,9 +200,7 @@ Class ProtocolStop extends Command {
 
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'still installed' : 'removed';
 
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
-        $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
-        $watcherStatus = (!$watcherPid || !Shell::isRunning($watcherPid)) ? 'stopped' : 'still running';
+        $watcherStatus = DeploymentState::isWatcherRunning($repo_dir) ? 'still running' : 'stopped';
 
         $runner->writeSummary([
             'Environment' => $environment,

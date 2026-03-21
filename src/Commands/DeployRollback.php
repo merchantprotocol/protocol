@@ -44,6 +44,7 @@ use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class DeployRollback extends Command {
 
@@ -79,13 +80,15 @@ Class DeployRollback extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $previousRelease = JsonLock::read('release.previous', null, $repo_dir);
+        $prev = DeploymentState::previous($repo_dir);
+        $previousRelease = $prev['version'] ?? null;
         if (!$previousRelease) {
             $output->writeln('<error>No previous release found in protocol.lock. Use: protocol deploy:push <version></error>');
             return Command::FAILURE;
         }
 
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $cur = DeploymentState::current($repo_dir);
+        $currentRelease = $cur['version'] ?? null;
         $output->writeln("<comment>Rolling back from {$currentRelease} to {$previousRelease}</comment>");
 
         // Delegate to deploy:push command

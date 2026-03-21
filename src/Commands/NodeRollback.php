@@ -40,6 +40,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\JsonLock;
 
 Class NodeRollback extends Command {
@@ -73,13 +74,15 @@ Class NodeRollback extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $previousRelease = JsonLock::read('release.previous', null, $repo_dir);
+        $prev = DeploymentState::previous($repo_dir);
+        $previousRelease = $prev['version'] ?? null;
         if (!$previousRelease) {
             $output->writeln('<error>No previous release found in protocol.lock.</error>');
             return Command::FAILURE;
         }
 
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $cur = DeploymentState::current($repo_dir);
+        $currentRelease = $cur['version'] ?? null;
         $output->writeln("<comment>Rolling back this node from {$currentRelease} to {$previousRelease}</comment>");
 
         $command = $this->getApplication()->find('node:deploy');

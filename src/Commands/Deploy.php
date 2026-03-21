@@ -45,6 +45,7 @@ use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class Deploy extends Command {
 
@@ -108,7 +109,8 @@ Class Deploy extends Command {
         }
 
         $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $cur = DeploymentState::current($repo_dir);
+        $currentRelease = $cur['version'] ?? null;
 
         $output->writeln("<info>Deploying {$version} to all nodes</info>");
         $output->writeln(" - Setting {$pointerName} = {$version}");

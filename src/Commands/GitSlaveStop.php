@@ -44,6 +44,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class GitSlaveStop extends Command {
 
@@ -111,6 +112,7 @@ Class GitSlaveStop extends Command {
         }
         JsonLock::write('slave.pid', null, $repo_dir);
         JsonLock::save($repo_dir);
+        DeploymentState::setWatcherPid($repo_dir, null);
 
         $output->writeln("$count slave commands stopped out of ". count($pids));
 
