@@ -39,18 +39,16 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\FlockStore;
-use Symfony\Component\Lock\Store\SemaphoreStore;
+use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
 
 Class GitPull extends Command {
 
-    private ?\Symfony\Component\Lock\LockInterface $lock = null;
-    private const LOCK_TTL = 120;
+    use LockableTrait;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'git:pull';
@@ -108,13 +106,12 @@ Class GitPull extends Command {
         $logMsg("enter execute() repo_dir={$repo_dir}");
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        // command should only have one running instance (lock auto-expires after 2 min)
-        $store = SemaphoreStore::isSupported() ? new SemaphoreStore() : new FlockStore();
-        $this->lock = (new LockFactory($store))->createLock($this->getName(), self::LOCK_TTL);
+        // command should only have one running instance
         $logMsg("acquiring lock...");
-        if (!$this->lock->acquire()) {
+        if (!$this->lock()) {
             if ($input->getOption('force')) {
-                $this->lock->acquire(true);
+                $this->release();
+                $this->lock();
                 $logMsg("lock forced");
             } else {
                 $logMsg("lock FAILED — another instance running");
@@ -125,6 +122,9 @@ Class GitPull extends Command {
         $logMsg("lock acquired");
 
         $output->writeln('<comment>Pulling a git repo</comment>');
+
+        // Capture current commit before pull for audit log
+        $beforeCommit = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " rev-parse --short HEAD 2>/dev/null") ?: 'unknown');
 
         // the .git directory
         $branch = Git::branch( $repo_dir );
@@ -176,6 +176,13 @@ Class GitPull extends Command {
             if ($response) $output->writeln($response);
         }
         $logMsg("submodule update done exit={$subReturn}");
+
+        // Audit log for branch-strategy deployments
+        $afterCommit = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " rev-parse --short HEAD 2>/dev/null") ?: 'unknown');
+        if ($afterCommit !== $beforeCommit) {
+            AuditLog::logDeploy($repo_dir, $beforeCommit, $afterCommit, 'success', 'branch');
+            $logMsg("audit logged: {$beforeCommit} -> {$afterCommit}");
+        }
 
         return Command::SUCCESS;
     }
