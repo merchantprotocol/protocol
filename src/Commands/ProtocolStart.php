@@ -81,6 +81,7 @@ Class ProtocolStart extends Command {
             ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
             ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Force start, ignoring any existing lock')
             // ...
         ;
     }
@@ -113,8 +114,14 @@ Class ProtocolStart extends Command {
 
         // command should only have one running instance
         if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-            return Command::SUCCESS;
+            if ($input->getOption('force')) {
+                $this->release();
+                $this->lock();
+                $output->writeln('<comment>Forcing lock override...</comment>');
+            } else {
+                $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                return Command::SUCCESS;
+            }
         }
 
         // get the correct environment
@@ -136,8 +143,9 @@ Class ProtocolStart extends Command {
             : Json::read('deployment.strategy', 'branch', $repo_dir);
 
         // Prepare sub-command inputs
-        $arrInput = new ArrayInput(['--dir' => $repo_dir]);
-        $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment]);
+        $force = $input->getOption('force');
+        $arrInput = new ArrayInput(['--dir' => $repo_dir] + ($force ? ['--force' => true] : []));
+        $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment] + ($force ? ['--force' => true] : []));
         $verbose = $output->isVerbose();
         $subOutput = $verbose ? $output : new NullOutput();
         $app = $this->getApplication();

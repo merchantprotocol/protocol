@@ -77,13 +77,14 @@ Class GitPull extends Command {
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Force run, ignoring any existing lock')
             // ...
         ;
     }
 
     /**
      * We're not looking to remove all changed and untracked files. We only want to overwrite local
-     * files that exist in the remote branch. Only the remotely tracked files will be overwritten, 
+     * files that exist in the remote branch. Only the remotely tracked files will be overwritten,
      * and every local file that has been here was left untouched.
      *
      * @param InputInterface $input
@@ -107,10 +108,15 @@ Class GitPull extends Command {
         // command should only have one running instance
         $logMsg("acquiring lock...");
         if (!$this->lock()) {
-            $logMsg("lock FAILED — another instance running");
-            $output->writeln('The command is already running in another process.');
-
-            return Command::SUCCESS;
+            if ($input->getOption('force')) {
+                $this->release();
+                $this->lock();
+                $logMsg("lock forced");
+            } else {
+                $logMsg("lock FAILED — another instance running");
+                $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                return Command::SUCCESS;
+            }
         }
         $logMsg("lock acquired");
 
