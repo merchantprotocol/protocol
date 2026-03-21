@@ -132,7 +132,8 @@ Class GitPull extends Command {
 
         // Update the submodules
         $command = "git -C '$repo_dir' submodule update --init --recursive";
-        $response = Shell::passthru($command);
+        $response = Shell::run($command);
+        if ($response) $output->writeln($response);
 
         return Command::SUCCESS;
     }
