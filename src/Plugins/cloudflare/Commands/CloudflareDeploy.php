@@ -87,8 +87,8 @@ class CloudflareDeploy extends Command
 
         $accountId = CloudflareHelper::getAccountId();
         if (!$accountId) {
-            $output->writeln("    <fg=yellow>!</> Could not authenticate with Cloudflare API.");
-            $output->writeln("    <fg=gray>Run:</> <fg=white>npx wrangler login</> <fg=gray>to refresh your token.</>");
+            $output->writeln("    <fg=yellow>!</> Could not authenticate with Cloudflare API (auto-refresh failed).");
+            $output->writeln("    <fg=gray>Run:</> <fg=white>npx wrangler login</> <fg=gray>if the refresh token has also expired.</>");
             $output->writeln("    <fg=gray>Check ~/.protocol/.node/cloudflare-deploy.log for details.</>");
             $output->writeln('');
             if (!$dryRun) {
