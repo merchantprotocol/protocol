@@ -94,9 +94,10 @@ Class ComposerInstall extends Command {
             return Command::SUCCESS;
         }
 
-        Shell::passthru("chmod +x ".SCRIPT_DIR."composer.phar");
+        Shell::run("chmod +x ".SCRIPT_DIR."composer.phar");
         $command = SCRIPT_DIR."composer.phar install --working-dir='$repo_dir' --ignore-platform-reqs";
-        $response = Shell::passthru($command);
+        $response = Shell::run($command);
+        if ($response) $output->writeln($response);
 
         return Command::SUCCESS;
     }

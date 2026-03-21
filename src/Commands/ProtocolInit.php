@@ -690,9 +690,9 @@ Class ProtocolInit extends Command {
 
                 $nightlyDir = rtrim($releasesDir, '/') . '/' . $branch;
                 if (!is_dir($nightlyDir)) {
-                    Shell::passthru("git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($nightlyDir) . " --branch " . escapeshellarg($branch));
+                    Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($nightlyDir) . " --branch " . escapeshellarg($branch) . " 2>&1");
                 } else {
-                    Shell::passthru("git -C " . escapeshellarg($nightlyDir) . " pull");
+                    Shell::run("GIT_TERMINAL_PROMPT=0 git -C " . escapeshellarg($nightlyDir) . " pull 2>&1");
                 }
 
                 // Update node config with nightly strategy (mark as fallback)
@@ -755,41 +755,65 @@ Class ProtocolInit extends Command {
             }
         }
 
-        // Clone the config repo into the releases directory if one is configured
+        $output->writeln('');
+
+        // Completion — verify repos exist, then run protocol start
+        completion:
+
+        // Verify primary repo is cloned
+        $currentStrategy = $nodeData['deployment']['strategy'] ?? 'release';
+        $currentBranch = $nodeData['deployment']['branch'] ?? null;
+        $currentRelease = $nodeData['release']['current'] ?? null;
+
+        $activeCloneDir = null;
+        if ($currentStrategy === 'branch' && $currentBranch) {
+            $activeCloneDir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+        } elseif ($currentRelease) {
+            $activeCloneDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+        }
+
+        if ($activeCloneDir && !is_dir($activeCloneDir)) {
+            $output->writeln("    <fg=gray>›</> Cloning primary repository...");
+            if ($currentStrategy === 'branch' && $currentBranch) {
+                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
+            } else {
+                ReleaseBuilder::initReleaseDir($repo_dir, $currentRelease, $gitRemote);
+                ReleaseBuilder::checkoutVersion($activeCloneDir, $currentRelease);
+            }
+            if (is_dir($activeCloneDir)) {
+                $output->writeln("    <fg=green>✓</> Primary repo cloned to <fg=white>{$activeCloneDir}</>");
+            } else {
+                $output->writeln("    <fg=red>✗</> Failed to clone primary repo");
+            }
+            $output->writeln('');
+        }
+
+        // Verify config repo is cloned
         $configRemote = $nodeData['configuration']['remote'] ?? null;
         if ($configRemote && $releasesDir) {
             $configDirName = $projectName . '-config';
             $configDir = rtrim($releasesDir, '/') . '/' . $configDirName;
 
             if (!is_dir($configDir)) {
-                $output->writeln('');
                 $output->writeln("    <fg=gray>›</> Cloning configuration repository...");
+                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir) . " 2>&1");
 
-                Shell::run("git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir) . " 2>&1");
-
-                // Switch to environment branch if it exists
                 if ($environment) {
-                    $currentBranch = Git::branch($configDir);
-                    if ($environment !== $currentBranch) {
-                        Shell::run("git -C " . escapeshellarg($configDir) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
+                    $currentBranchConfig = Git::branch($configDir);
+                    if ($environment !== $currentBranchConfig) {
+                        Shell::run("GIT_TERMINAL_PROMPT=0 git -C " . escapeshellarg($configDir) . " checkout " . escapeshellarg($environment) . " 2>/dev/null");
                     }
                 }
 
                 if (is_dir($configDir)) {
                     $output->writeln("    <fg=green>✓</> Config repo cloned to <fg=white>{$configDir}</>");
                 } else {
-                    $output->writeln("    <fg=yellow>!</> Failed to clone config repo. You can set it up later with <fg=white>protocol config:init</>");
+                    $output->writeln("    <fg=yellow>!</> Failed to clone config repo");
                 }
-            } else {
                 $output->writeln('');
-                $output->writeln("    <fg=green>✓</> Config repo already exists at <fg=white>{$configDir}</>");
             }
         }
 
-        $output->writeln('');
-
-        // Completion — run protocol start to bring everything online
-        completion:
         $this->clearAndBanner($output);
 
         $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
