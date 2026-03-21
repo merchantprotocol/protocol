@@ -108,8 +108,12 @@ Class GitPull extends Command {
         $branch = Git::branch( $repo_dir );
         $remote = Git::remoteName( $repo_dir );
 
+        // Ensure HOME is set so git finds ~/.gitconfig (credential helper)
+        $home = getenv('HOME') ?: (posix_getpwuid(posix_geteuid())['dir'] ?? '');
+        $envPrefix = "GIT_TERMINAL_PROMPT=0" . ($home ? " HOME=" . escapeshellarg($home) : "");
+
         // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("GIT_TERMINAL_PROMPT=0 timeout 30 git -C '$repo_dir' fetch $remote", $return_var);
+        $response = Shell::run("{$envPrefix} timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch $remote", $return_var);
         if ($response) $output->writeln($response);
 
         // if the fetch failed, then stop
