@@ -106,7 +106,9 @@ Class ComposerInstall extends Command {
             }
         }
 
-        $command = "timeout 120 " . SCRIPT_DIR . "composer.phar install"
+        // Suppress PHP deprecation notices from old composer.phar on PHP 8.4+
+        $phpFlags = "php -d error_reporting=E_ALL\\&~E_DEPRECATED -d display_errors=0";
+        $command = "timeout 120 {$phpFlags} " . SCRIPT_DIR . "composer.phar install"
             . " --working-dir=" . escapeshellarg($repo_dir)
             . " --ignore-platform-reqs"
             . " --no-interaction"
