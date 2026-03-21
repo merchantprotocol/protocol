@@ -228,6 +228,32 @@ class GitHubApp
     }
 
     /**
+     * Resolve a git remote URL for cloning/fetching.
+     *
+     * If a GitHub App is configured, converts SSH URLs to HTTPS so the
+     * credential helper can provide the installation token. Non-GitHub
+     * URLs and URLs when no App is configured are returned unchanged.
+     */
+    public static function resolveUrl(string $gitRemote): string
+    {
+        if (!self::isConfigured()) {
+            return $gitRemote;
+        }
+
+        // Convert git@github.com:owner/repo.git → https://github.com/owner/repo.git
+        if (preg_match('#^git@github\.com:(.+)$#', $gitRemote, $m)) {
+            return 'https://github.com/' . $m[1];
+        }
+
+        // Convert ssh://git@github.com/owner/repo.git
+        if (preg_match('#^ssh://git@github\.com/(.+)$#', $gitRemote, $m)) {
+            return 'https://github.com/' . $m[1];
+        }
+
+        return $gitRemote;
+    }
+
+    /**
      * Base64url encode (JWT-safe).
      */
     private static function base64urlEncode(string $data): string
