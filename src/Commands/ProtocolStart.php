@@ -217,8 +217,18 @@ Class ProtocolStart extends Command {
             } else {
                 // Legacy branch-based deployment mode
                 if (!$isDev) {
+                    // Log diagnostic info for debugging auth issues
+                    $runner->log("HOME=" . (getenv('HOME') ?: 'NOT SET'));
+                    $credFile = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : '') . 'git-credentials';
+                    $runner->log("git-credentials exists=" . (is_file($credFile) ? 'yes' : 'no'));
+                    $credHelper = trim(Shell::run("git config --global credential.helper 2>/dev/null") ?: '');
+                    $runner->log("credential.helper={$credHelper}");
+                    $remoteUrl = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " remote get-url origin 2>/dev/null") ?: '');
+                    $runner->log("remote.origin.url={$remoteUrl}");
+
                     $runner->log("Running git:pull");
                     $app->find('git:pull')->run($arrInput, $nullOutput);
+                    $runner->log("git:pull completed");
                     $runner->log("Running git:slave");
                     $app->find('git:slave')->run($arrInput, $nullOutput);
                 }
