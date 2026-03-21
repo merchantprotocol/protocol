@@ -52,8 +52,9 @@ class ReleaseBuilder
             Shell::run("rm -rf " . escapeshellarg(rtrim($releaseDir, '/')));
         }
 
+        $cloneUrl = \Gitcd\Helpers\GitHubApp::resolveUrl($gitRemote);
         $result = Shell::run(
-            "git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg(rtrim($releaseDir, '/')) . " 2>&1",
+            "GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg(rtrim($releaseDir, '/')) . " 2>&1",
             $returnVar
         );
 

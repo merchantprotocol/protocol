@@ -479,7 +479,7 @@ Class ProtocolInit extends Command {
             }
         }
 
-        $canAccess = $this->testRepoAccess($gitRemote);
+        $canAccess = $this->testRepoAccess(GitHubApp::resolveUrl($gitRemote));
 
         if (!$canAccess) {
             $output->writeln("    <fg=red>✗</> Cannot access repository");
@@ -493,11 +493,14 @@ Class ProtocolInit extends Command {
             $output->writeln("    <fg=green>✓</> Repository accessible");
         }
 
+        // Resolve URL for git operations (SSH → HTTPS when GitHub App is configured)
+        $gitCloneUrl = GitHubApp::resolveUrl($gitRemote);
+
         // Fetch protocol.json from the remote repo
         $output->writeln('');
         $output->writeln("    <fg=gray>›</> Fetching project configuration...");
 
-        $protocolData = $this->fetchRemoteProtocolJson($gitRemote);
+        $protocolData = $this->fetchRemoteProtocolJson($gitCloneUrl);
         $projectName = $protocolData['name'] ?? basename(parse_url($gitRemote, PHP_URL_PATH) ?: $gitRemote, '.git');
 
         if (!empty($protocolData)) {
@@ -606,7 +609,7 @@ Class ProtocolInit extends Command {
                 if ($awaitingRelease) {
                     $output->writeln('');
                     $output->writeln("    <fg=gray>›</> Checking for new release tags...");
-                    $tagsCheck = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+                    $tagsCheck = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitCloneUrl) . " 2>/dev/null");
                     $hasTags = false;
                     if ($tagsCheck) {
                         foreach (explode("\n", trim($tagsCheck)) as $line) {
@@ -643,7 +646,7 @@ Class ProtocolInit extends Command {
 
         // List available release tags from the remote
         $output->writeln("    <fg=gray>›</> Checking for available releases...");
-        $tagsOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitRemote) . " 2>/dev/null");
+        $tagsOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --tags " . escapeshellarg($gitCloneUrl) . " 2>/dev/null");
 
         $tags = [];
         if ($tagsOutput) {
@@ -680,7 +683,7 @@ Class ProtocolInit extends Command {
             if ($helper->ask($input, $output, $question)) {
                 // Determine branch
                 $branch = 'main';
-                $branchOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --symref " . escapeshellarg($gitRemote) . " HEAD 2>/dev/null");
+                $branchOutput = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote --symref " . escapeshellarg($gitCloneUrl) . " HEAD 2>/dev/null");
                 if ($branchOutput && preg_match('#ref: refs/heads/(\S+)#', $branchOutput, $m)) {
                     $branch = $m[1];
                 }
@@ -690,7 +693,7 @@ Class ProtocolInit extends Command {
 
                 $nightlyDir = rtrim($releasesDir, '/') . '/' . $branch;
                 if (!is_dir($nightlyDir)) {
-                    Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($nightlyDir) . " --branch " . escapeshellarg($branch) . " 2>&1");
+                    Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitCloneUrl) . " " . escapeshellarg($nightlyDir) . " --branch " . escapeshellarg($branch) . " 2>&1");
                 } else {
                     Shell::run("GIT_TERMINAL_PROMPT=0 git -C " . escapeshellarg($nightlyDir) . " pull 2>&1");
                 }
@@ -730,7 +733,7 @@ Class ProtocolInit extends Command {
             $output->writeln('');
             $output->writeln("    <fg=gray>›</> Cloning release <fg=white>{$selectedTag}</>...");
 
-            $cloneSuccess = ReleaseBuilder::initReleaseDir($repo_dir, $selectedTag, $gitRemote);
+            $cloneSuccess = ReleaseBuilder::initReleaseDir($repo_dir, $selectedTag, $gitCloneUrl);
             if ($cloneSuccess) {
                 $releaseDir = BlueGreen::getReleaseDir($repo_dir, $selectedTag);
                 ReleaseBuilder::checkoutVersion($releaseDir, $selectedTag);
@@ -779,9 +782,9 @@ Class ProtocolInit extends Command {
 
             $output->writeln("    <fg=gray>›</> Cloning primary repository...");
             if ($currentStrategy === 'branch' && $currentBranch) {
-                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitRemote) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
+                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitCloneUrl) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
             } else {
-                ReleaseBuilder::initReleaseDir($repo_dir, $currentRelease, $gitRemote);
+                ReleaseBuilder::initReleaseDir($repo_dir, $currentRelease, $gitCloneUrl);
                 ReleaseBuilder::checkoutVersion($activeCloneDir, $currentRelease);
             }
             if (is_dir($activeCloneDir)) {
@@ -804,7 +807,8 @@ Class ProtocolInit extends Command {
                 }
 
                 $output->writeln("    <fg=gray>›</> Cloning configuration repository...");
-                $cloneResult = Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($configRemote) . " " . escapeshellarg($configDir));
+                $configCloneUrl = GitHubApp::resolveUrl($configRemote);
+                $cloneResult = Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($configCloneUrl) . " " . escapeshellarg($configDir));
 
                 if (is_dir($configDir)) {
                     // Switch to environment branch if it exists
