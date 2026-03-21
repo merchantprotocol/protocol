@@ -138,12 +138,13 @@ Class ProtocolStart extends Command {
         // Prepare sub-command inputs
         $arrInput = new ArrayInput(['--dir' => $repo_dir]);
         $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment]);
-        $nullOutput = new NullOutput();
+        $verbose = $output->isVerbose();
+        $subOutput = $verbose ? $output : new NullOutput();
         $app = $this->getApplication();
 
         $output->writeln('');
 
-        $runner = new StageRunner($output);
+        $runner = new StageRunner($output, $verbose);
 
         // ── Stage 1: Scanning codebase ──────────────────────────
         $runner->run('Scanning codebase', function() use ($repo_dir, $environment, $strategy) {
@@ -159,7 +160,7 @@ Class ProtocolStart extends Command {
         });
 
         // ── Stage 2: Infrastructure provisioning ────────────────
-        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
+        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $subOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
 
             // Refresh GitHub App credentials and fix remote URLs if needed
             if (GitHubApp::isConfigured()) {
@@ -204,15 +205,15 @@ Class ProtocolStart extends Command {
                 if ($hasConfigRepo) {
                     if ($configRemote) {
                         $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                        $app->find('config:slave')->run($arrInput, $subOutput);
                     }
                     $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $nullOutput);
+                    $app->find('config:link')->run($arrInput, $subOutput);
                 }
 
                 // Start the release watcher daemon
                 $runner->log("Running deploy:slave");
-                $app->find('deploy:slave')->run($arrInput, $nullOutput);
+                $app->find('deploy:slave')->run($arrInput, $subOutput);
 
             } else {
                 // Legacy branch-based deployment mode
@@ -227,20 +228,20 @@ Class ProtocolStart extends Command {
                     $runner->log("remote.origin.url={$remoteUrl}");
 
                     $runner->log("Running git:pull");
-                    $app->find('git:pull')->run($arrInput, $nullOutput);
+                    $app->find('git:pull')->run($arrInput, $subOutput);
                     $runner->log("git:pull completed");
                     $runner->log("Running git:slave");
-                    $app->find('git:slave')->run($arrInput, $nullOutput);
+                    $app->find('git:slave')->run($arrInput, $subOutput);
                 }
 
                 if ($hasConfigRepo) {
                     if (!$isDev && $configRemote) {
                         $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                        $app->find('config:slave')->run($arrInput, $subOutput);
                     }
 
                     $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $nullOutput);
+                    $app->find('config:link')->run($arrInput, $subOutput);
                 }
             }
 
