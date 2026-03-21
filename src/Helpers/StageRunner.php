@@ -2,10 +2,12 @@
 /**
  * Animated staged output for protocol start.
  *
- * Displays each stage as a single status line:
- *   [protocol] Scanning codebase.............. OK
- *   [protocol] Infrastructure provisioning.... OK
- *   [protocol] Running security audit......... PASS
+ * Displays each stage as a single status line with elapsed time:
+ *   [protocol] Scanning codebase.............. OK (0.2s)
+ *   [protocol] Infrastructure provisioning.... OK (4.1s)
+ *   [protocol] Running security audit......... PASS (1.3s)
+ *
+ * All stage activity is logged to NODE_DATA_DIR/protocol-start.log
  */
 namespace Gitcd\Helpers;
 
@@ -19,12 +21,65 @@ class StageRunner
     private bool $isTty;
     private array $completedStages = [];
     private float $startTime;
+    private ?string $logFile = null;
+    private ?string $currentStage = null;
 
     public function __construct(OutputInterface $output)
     {
         $this->output = $output;
         $this->isTty = self::isTty();
         $this->startTime = microtime(true);
+        $this->initLog();
+    }
+
+    /**
+     * Initialize the log file.
+     */
+    private function initLog(): void
+    {
+        $logDir = '/var/log/protocol/';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0755, true);
+        }
+        // Fall back to NODE_DATA_DIR if /var/log/protocol isn't writable
+        if (!is_dir($logDir) || !is_writable($logDir)) {
+            $logDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
+            if (!is_dir($logDir)) {
+                mkdir($logDir, 0700, true);
+            }
+        }
+        $this->logFile = $logDir . 'protocol-start.log';
+
+        // Rotate: keep last run's log as .prev
+        if (is_file($this->logFile)) {
+            @rename($this->logFile, $this->logFile . '.prev');
+        }
+
+        $this->log("=== Protocol start at " . date('Y-m-d H:i:s') . " ===");
+    }
+
+    /**
+     * Write a line to the log file.
+     */
+    public function log(string $message): void
+    {
+        if (!$this->logFile) return;
+
+        $timestamp = date('H:i:s');
+        $prefix = $this->currentStage ? "[{$this->currentStage}] " : '';
+        @file_put_contents(
+            $this->logFile,
+            "[{$timestamp}] {$prefix}{$message}\n",
+            FILE_APPEND | LOCK_EX
+        );
+    }
+
+    /**
+     * Get the log file path.
+     */
+    public function getLogFile(): ?string
+    {
+        return $this->logFile;
     }
 
     /**
@@ -36,6 +91,8 @@ class StageRunner
     public function run(string $label, callable $callback, string $passLabel = 'OK'): bool
     {
         $stageStart = microtime(true);
+        $this->currentStage = $label;
+        $this->log("START");
 
         // Show the "working" line
         $this->writeProgress($label);
@@ -48,14 +105,18 @@ class StageRunner
         } catch (\Throwable $e) {
             $success = false;
             $errorMessage = $e->getMessage();
+            $this->log("ERROR: " . $errorMessage);
         }
 
         $duration = microtime(true) - $stageStart;
+        $durationStr = round($duration, 1) . 's';
 
         // Overwrite with the result line
         $status = $success ? $passLabel : 'FAIL';
         $color = $success ? 'green' : 'red';
-        $this->writeResult($label, $status, $color);
+        $this->writeResult($label, $status, $color, $durationStr);
+
+        $this->log("END: {$status} ({$durationStr})");
 
         $this->completedStages[] = [
             'label' => $label,
@@ -70,6 +131,7 @@ class StageRunner
             $this->writeError($errorMessage);
         }
 
+        $this->currentStage = null;
         return $success;
     }
 
@@ -116,6 +178,12 @@ class StageRunner
         }
 
         $this->writeTty("  \033[90mCompleted in {$totalTime}s\033[0m\n");
+
+        if ($this->logFile) {
+            $this->writeTty("  \033[90mLog: {$this->logFile}\033[0m\n");
+        }
+
+        $this->log("=== Completed in {$totalTime}s ===");
     }
 
     /**
@@ -144,17 +212,19 @@ class StageRunner
     /**
      * Overwrite the progress line with the final result.
      */
-    private function writeResult(string $label, string $status, string $color): void
+    private function writeResult(string $label, string $status, string $color, string $duration = ''): void
     {
         $dots = str_repeat('.', max(1, self::LINE_WIDTH - strlen($label) - 1));
         $colorCode = $color === 'green' ? '32' : '31';
+        $durationSuffix = $duration ? " \033[90m({$duration})\033[0m" : '';
 
         if ($this->isTty) {
             // Carriage return to overwrite, then write the full line
             fwrite(STDOUT, "\r\033[2K");
-            fwrite(STDOUT, "\033[90m[protocol]\033[0m {$label}{$dots} \033[{$colorCode}m{$status}\033[0m\n");
+            fwrite(STDOUT, "\033[90m[protocol]\033[0m {$label}{$dots} \033[{$colorCode}m{$status}\033[0m{$durationSuffix}\n");
         } else {
-            $this->output->writeln($status);
+            $plainDuration = $duration ? " ({$duration})" : '';
+            $this->output->writeln("{$status}{$plainDuration}");
         }
     }
 
