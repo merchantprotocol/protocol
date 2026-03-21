@@ -109,12 +109,20 @@ hook() {
     fi
 }
 
-# Pulls commit from remote git repository 
+# Pulls commit from remote git repository
 #
 # $1 - Git repository name
 # $2 - Branch name
 pull_change() {
     $gitcd git:pull $git_repository_dir
+    local exit_code=$?
+
+    # Exit code 42 = release detected, switch strategy
+    if [[ $exit_code -eq 42 ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Release detected — restarting protocol with release strategy"
+        $gitcd restart --force 2>&1 &
+        exit 0
+    fi
 }
 
 export GIT_TERMINAL_PROMPT=0

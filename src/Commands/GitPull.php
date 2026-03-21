@@ -43,8 +43,10 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 Class GitPull extends Command {
 
@@ -182,6 +184,54 @@ Class GitPull extends Command {
         if ($afterCommit !== $beforeCommit) {
             AuditLog::logDeploy($repo_dir, $beforeCommit, $afterCommit, 'success', 'branch');
             $logMsg("audit logged: {$beforeCommit} -> {$afterCommit}");
+        }
+
+        // ── Auto-switch: check if a release is now available ──
+        // When running as a fallback branch watcher (awaiting_release=true),
+        // poll PROTOCOL_ACTIVE_RELEASE. If a release is detected, update
+        // node config to release strategy and exit with code 42 to signal
+        // the bash watcher to restart protocol.
+        $projectName = NodeConfig::findByRepoDir($repo_dir);
+        if (!$projectName) {
+            // Also check if repo_dir is inside a releases directory
+            $match = NodeConfig::findByActiveDir($repo_dir);
+            if ($match) {
+                $projectName = $match[0];
+            }
+        }
+
+        if ($projectName) {
+            $nodeData = NodeConfig::load($projectName);
+            $awaitingRelease = $nodeData['deployment']['awaiting_release'] ?? false;
+
+            if ($awaitingRelease) {
+                $pointerName = $nodeData['deployment']['pointer_name'] ?? 'PROTOCOL_ACTIVE_RELEASE';
+                $logMsg("awaiting_release=true, checking {$pointerName}");
+
+                $activeRelease = GitHub::getVariable($pointerName, $repo_dir);
+
+                if ($activeRelease) {
+                    $logMsg("Release detected: {$activeRelease} — switching to release strategy");
+                    $output->writeln("<info>Release detected: {$activeRelease} — switching from branch to release strategy</info>");
+
+                    // Update node config
+                    $nodeData['deployment']['strategy'] = 'release';
+                    unset($nodeData['deployment']['awaiting_release']);
+                    unset($nodeData['deployment']['branch']);
+                    NodeConfig::save($projectName, $nodeData);
+
+                    // Update protocol.json in repo
+                    Json::write('deployment.strategy', 'release', $repo_dir);
+                    Json::save($repo_dir);
+
+                    AuditLog::logConfig($repo_dir, 'strategy_switch', "branch -> release (detected {$activeRelease})");
+
+                    // Exit code 42 tells git-repo-watcher to stop and restart protocol
+                    return 42;
+                } else {
+                    $logMsg("No release found yet, continuing branch polling");
+                }
+            }
         }
 
         return Command::SUCCESS;
