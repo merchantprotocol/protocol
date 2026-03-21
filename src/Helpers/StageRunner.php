@@ -19,15 +19,17 @@ class StageRunner
 
     private OutputInterface $output;
     private bool $isTty;
+    private bool $verbose;
     private array $completedStages = [];
     private float $startTime;
     private ?string $logFile = null;
     private ?string $currentStage = null;
 
-    public function __construct(OutputInterface $output)
+    public function __construct(OutputInterface $output, bool $verbose = false)
     {
         $this->output = $output;
-        $this->isTty = self::isTty();
+        $this->verbose = $verbose;
+        $this->isTty = $verbose ? false : self::isTty();
         $this->startTime = microtime(true);
         $this->initLog();
     }
@@ -67,15 +69,20 @@ class StageRunner
      */
     public function log(string $message): void
     {
-        if (!$this->logFile) return;
-
         $timestamp = date('H:i:s');
         $prefix = $this->currentStage ? "[{$this->currentStage}] " : '';
-        @file_put_contents(
-            $this->logFile,
-            "[{$timestamp}] {$prefix}{$message}\n",
-            FILE_APPEND | LOCK_EX
-        );
+
+        if ($this->logFile) {
+            @file_put_contents(
+                $this->logFile,
+                "[{$timestamp}] {$prefix}{$message}\n",
+                FILE_APPEND | LOCK_EX
+            );
+        }
+
+        if ($this->verbose) {
+            $this->output->writeln("[{$timestamp}] {$prefix}{$message}");
+        }
     }
 
     /**
