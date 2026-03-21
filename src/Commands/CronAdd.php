@@ -98,7 +98,11 @@ Class CronAdd extends Command {
 
         // add crontab restart command
         $output->writeln('<info>Adding cron job</info>');
-        Crontab::addCrontabRestart( $repo_dir );
+        $added = Crontab::addCrontabRestart( $repo_dir );
+        if (!$added) {
+            $output->writeln('<error>Failed to install crontab — cronie could not be installed on this system</error>');
+            return Command::FAILURE;
+        }
         $output->writeln('Checking if cronjob was installed: '. (Crontab::hasCrontabRestart( $repo_dir ) ?"<info>YES</info>" :"<comment>NO</comment>"));
 
         return Command::SUCCESS;
