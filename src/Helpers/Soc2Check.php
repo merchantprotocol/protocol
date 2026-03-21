@@ -94,8 +94,8 @@ class Soc2Check extends BaseAuditChecker
 
         // Check that protocol.json remote matches actual remote
         $configuredRemote = Json::read('git.remote', null, $this->repoDir);
-        if ($configuredRemote && $configuredRemote !== $remote) {
-            $this->addResult('Git integrity', 'warn', 'Git remote does not match protocol.json (expected: ' . $configuredRemote . ')');
+        if ($configuredRemote && !self::remotesMatch($configuredRemote, $remote)) {
+            $this->addResult('Git integrity', 'warn', 'Git remote does not match protocol.json (expected: ' . $configuredRemote . ', actual: ' . $remote . ')');
             return;
         }
 
@@ -174,6 +174,27 @@ class Soc2Check extends BaseAuditChecker
         } else {
             $this->addResult('Key rotation', 'warn', "Encryption key is {$ageDays} days old — rotate quarterly (every {$maxAgeDays} days). See: protocol docs/key-rotation.md");
         }
+    }
+
+    /**
+     * Compare two git remote URLs, treating SSH and HTTPS variants as equivalent.
+     * e.g. git@github.com:org/repo.git == https://github.com/org/repo.git
+     */
+    private static function remotesMatch(string $a, string $b): bool
+    {
+        return self::normalizeRemote($a) === self::normalizeRemote($b);
+    }
+
+    private static function normalizeRemote(string $url): string
+    {
+        // git@github.com:org/repo.git → github.com/org/repo
+        $url = preg_replace('#^git@([^:]+):#', 'https://$1/', $url);
+        // Strip protocol
+        $url = preg_replace('#^https?://#', '', $url);
+        // Strip trailing .git
+        $url = preg_replace('#\.git$#', '', $url);
+        // Strip trailing slash
+        return rtrim($url, '/');
     }
 
 }
