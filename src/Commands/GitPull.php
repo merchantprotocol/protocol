@@ -93,31 +93,49 @@ Class GitPull extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
+
+        $logFile = is_writable('/var/log/protocol/') ? '/var/log/protocol/protocol-start.log' : null;
+        $logMsg = function(string $msg) use ($logFile) {
+            if ($logFile) {
+                @file_put_contents($logFile, "[" . date('H:i:s') . "] [git:pull] {$msg}\n", FILE_APPEND | LOCK_EX);
+            }
+        };
+
+        $logMsg("enter execute() repo_dir={$repo_dir}");
         Git::checkInitializedRepo( $output, $repo_dir );
 
         // command should only have one running instance
+        $logMsg("acquiring lock...");
         if (!$this->lock()) {
+            $logMsg("lock FAILED — another instance running");
             $output->writeln('The command is already running in another process.');
 
             return Command::SUCCESS;
         }
+        $logMsg("lock acquired");
 
         $output->writeln('<comment>Pulling a git repo</comment>');
 
         // the .git directory
         $branch = Git::branch( $repo_dir );
         $remote = Git::remoteName( $repo_dir );
+        $logMsg("branch={$branch} remote={$remote}");
 
         // Ensure HOME is set so git finds ~/.gitconfig (credential helper)
         $home = getenv('HOME') ?: (posix_getpwuid(posix_geteuid())['dir'] ?? '');
         $envPrefix = "GIT_TERMINAL_PROMPT=0" . ($home ? " HOME=" . escapeshellarg($home) : "");
 
+        $fetchCmd = "{$envPrefix} timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch $remote";
+        $logMsg("fetch cmd: {$fetchCmd}");
+
         // First, run a fetch to update all origin/<branch> refs to latest:
-        $response = Shell::run("{$envPrefix} timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch $remote", $return_var);
+        $response = Shell::run($fetchCmd, $return_var);
+        $logMsg("fetch done: exit={$return_var} response=" . substr($response ?: '', 0, 200));
         if ($response) $output->writeln($response);
 
         // if the fetch failed, then stop
         if ($return_var) {
+            $logMsg("fetch FAILED, aborting");
             $output->writeln('Pull failed, canceling operation...');
             return Command::FAILURE;
         }
