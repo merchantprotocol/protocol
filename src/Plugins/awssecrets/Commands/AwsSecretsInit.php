@@ -46,103 +46,159 @@ class AwsSecretsInit extends Command
         $output->writeln('  <fg=gray>────────────────────────────────</>');
         $output->writeln('');
 
-        // ── Step 1: Verify AWS Access ────────────────────────────────
-        $output->writeln('  <fg=white;options=bold>Step 1/3:</> Verify AWS Access');
+        // ── Step 1: Select AWS Credentials ────────────────────────────
+        $output->writeln('  <fg=white;options=bold>Step 1/3:</> Select AWS Credentials');
+        $output->writeln('');
+        $output->writeln('  Scanning profiles for Secrets Manager access...');
         $output->writeln('');
 
-        $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
+        // Discover all AWS profiles from ~/.aws/credentials and ~/.aws/config
+        $profiles = $this->discoverProfiles();
 
-        if ($returnVar === 0) {
-            $identityData = json_decode($identity, true);
-            $account = $identityData['Account'] ?? 'unknown';
-            $arn = $identityData['Arn'] ?? 'unknown';
-            $userId = $identityData['UserId'] ?? 'unknown';
-            $output->writeln("  Current AWS identity:");
-            $output->writeln("    Account: <fg=white>{$account}</>");
-            $output->writeln("    ARN:     <fg=white>{$arn}</>");
-            $output->writeln("    User ID: <fg=white>{$userId}</>");
-            $output->writeln('');
+        // Test each profile for Secrets Manager access
+        $profileResults = [];
+        foreach ($profiles as $profile) {
+            $profileFlag = ($profile === 'default') ? '' : ' --profile ' . escapeshellarg($profile);
 
-            $question = new ConfirmationQuestion('  Use this identity? [<fg=cyan>Y</>/n]: ', true);
-            $useExisting = $helper->ask($input, $output, $question);
-            $output->writeln('');
-
-            if (!$useExisting) {
-                $output->writeln('  <fg=white>How would you like to configure AWS credentials?</>');
-                $output->writeln('');
-                $choice = new ChoiceQuestion('  Select method:', [
-                    '1' => 'Run "aws configure" (access key + secret key)',
-                    '2' => 'Set a named profile (aws configure --profile <name>)',
-                    '3' => 'Cancel — I\'ll configure credentials manually',
-                ], '1');
-                $method = $helper->ask($input, $output, $choice);
-                $output->writeln('');
-
-                if ($method === '3' || str_contains($method, 'Cancel')) {
-                    $output->writeln('  Configure your credentials and re-run <fg=cyan>protocol aws:init</>');
-                    $output->writeln('');
-                    return Command::FAILURE;
-                }
-
-                if ($method === '2' || str_contains($method, 'profile')) {
-                    $profileQ = new Question('  Profile name: ', '');
-                    $profile = $helper->ask($input, $output, $profileQ);
-                    if (!$profile) {
-                        $output->writeln('  <error>Profile name is required.</error>');
-                        return Command::FAILURE;
-                    }
-                    $output->writeln('');
-                    $output->writeln("  Running <fg=cyan>aws configure --profile {$profile}</>...");
-                    $output->writeln('');
-                    Shell::passthru("aws configure --profile " . escapeshellarg($profile));
-                    // Set the profile for subsequent AWS calls in this session
-                    putenv("AWS_PROFILE={$profile}");
-                    // Save profile to protocol.json so deploy uses the right one
-                    Json::write('aws.profile', $profile, $repoDir);
-                } else {
-                    $output->writeln('  Running <fg=cyan>aws configure</>...');
-                    $output->writeln('');
-                    Shell::passthru('aws configure');
-                }
-
-                $output->writeln('');
-
-                // Re-verify after configuration
-                $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
-                if ($returnVar !== 0) {
-                    $output->writeln('  <error>AWS authentication failed after configuration.</error>');
-                    $output->writeln("  <fg=gray>{$identity}</>");
-                    return Command::FAILURE;
-                }
-
-                $identityData = json_decode($identity, true);
-                $account = $identityData['Account'] ?? 'unknown';
-                $arn = $identityData['Arn'] ?? 'unknown';
+            // Check identity
+            $identResult = Shell::run("aws sts get-caller-identity{$profileFlag} 2>&1", $identReturn);
+            if ($identReturn !== 0) {
+                $profileResults[$profile] = ['auth' => false, 'sm' => false, 'arn' => null, 'account' => null];
+                continue;
             }
-        } else {
-            $output->writeln('  <comment>No AWS credentials found.</comment>');
+
+            $identData = json_decode($identResult, true);
+            $profileArn = $identData['Arn'] ?? 'unknown';
+            $profileAccount = $identData['Account'] ?? 'unknown';
+
+            // Check Secrets Manager access
+            $smResult = Shell::run("aws secretsmanager list-secrets --max-results 1{$profileFlag} 2>&1", $smReturn);
+            $hasSm = ($smReturn === 0);
+
+            $profileResults[$profile] = [
+                'auth' => true,
+                'sm' => $hasSm,
+                'arn' => $profileArn,
+                'account' => $profileAccount,
+            ];
+        }
+
+        // Also check if EC2 instance role is available (no profile)
+        if (!in_array('default', $profiles)) {
+            $identResult = Shell::run('aws sts get-caller-identity 2>&1', $identReturn);
+            if ($identReturn === 0) {
+                $identData = json_decode($identResult, true);
+                $smResult = Shell::run('aws secretsmanager list-secrets --max-results 1 2>&1', $smReturn);
+                $profileResults['(instance role)'] = [
+                    'auth' => true,
+                    'sm' => ($smReturn === 0),
+                    'arn' => $identData['Arn'] ?? 'unknown',
+                    'account' => $identData['Account'] ?? 'unknown',
+                ];
+            }
+        }
+
+        // Build the choice list
+        $choices = [];
+        $selectableMap = []; // index => profile name
+        $idx = 0;
+        $hasSelectable = false;
+
+        foreach ($profileResults as $profile => $result) {
+            if (!$result['auth']) {
+                $output->writeln("  <fg=gray>  {$profile} — invalid credentials</>");
+                continue;
+            }
+
+            if ($result['sm']) {
+                // Selectable — has Secrets Manager access
+                $label = "{$profile} — {$result['arn']}";
+                $choices[$idx] = $label;
+                $selectableMap[$idx] = $profile;
+                $output->writeln("  <info>✓</info> {$label}");
+                $hasSelectable = true;
+            } else {
+                // Greyed out — no Secrets Manager access
+                $output->writeln("  <fg=gray>✗ {$profile} — {$result['arn']} (no Secrets Manager access)</>");
+            }
+            $idx++;
+        }
+
+        // Always add "Configure new credentials"
+        $newCredsIdx = $idx;
+        $choices[$newCredsIdx] = 'Configure new credentials';
+        $output->writeln('');
+
+        if (empty($profileResults) || (!$hasSelectable && count($profileResults) === 0)) {
+            $output->writeln('  <comment>No AWS profiles found.</comment>');
             $output->writeln('');
-            $output->writeln('  Running <fg=cyan>aws configure</> to set up credentials...');
+        }
+
+        // Prompt selection
+        $question = new ChoiceQuestion('  Select credentials to use:', $choices);
+        $selected = $helper->ask($input, $output, $question);
+        $output->writeln('');
+
+        $selectedProfile = null;
+        $account = 'unknown';
+        $arn = 'unknown';
+
+        if ($selected === 'Configure new credentials') {
+            $profileQ = new Question('  New profile name (or "default"): ', 'default');
+            $newProfile = $helper->ask($input, $output, $profileQ);
+            $output->writeln('');
+            $output->writeln("  Running <fg=cyan>aws configure --profile {$newProfile}</>...");
+            $output->writeln('');
+            Shell::passthru('aws configure --profile ' . escapeshellarg($newProfile));
             $output->writeln('');
 
-            Shell::passthru('aws configure');
-            $output->writeln('');
-
-            // Verify after configuration
-            $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
+            // Verify the new profile
+            $profileFlag = ($newProfile === 'default') ? '' : ' --profile ' . escapeshellarg($newProfile);
+            $identity = Shell::run("aws sts get-caller-identity{$profileFlag} 2>&1", $returnVar);
             if ($returnVar !== 0) {
-                $output->writeln('  <error>AWS authentication failed. Check your credentials and try again.</error>');
-                $output->writeln("  <fg=gray>{$identity}</>");
+                $output->writeln('  <error>Authentication failed for new profile.</error>');
                 return Command::FAILURE;
             }
 
             $identityData = json_decode($identity, true);
             $account = $identityData['Account'] ?? 'unknown';
             $arn = $identityData['Arn'] ?? 'unknown';
+
+            // Test SM access
+            $smTest = Shell::run("aws secretsmanager list-secrets --max-results 1{$profileFlag} 2>&1", $smReturn);
+            if ($smReturn !== 0) {
+                $output->writeln('  <error>Profile authenticated but lacks Secrets Manager access.</error>');
+                $output->writeln('');
+                $this->showRequiredPolicy($output, $account);
+                return Command::FAILURE;
+            }
+
+            $selectedProfile = ($newProfile === 'default') ? null : $newProfile;
+        } else {
+            // Find which profile was selected
+            $selectedKey = array_search($selected, $choices);
+            $selectedProfile = $selectableMap[$selectedKey] ?? null;
+
+            if ($selectedProfile === '(instance role)' || $selectedProfile === 'default') {
+                $selectedProfile = ($selectedProfile === '(instance role)') ? null : null;
+            }
+
+            $result = $profileResults[$selectableMap[$selectedKey]] ?? null;
+            if ($result) {
+                $account = $result['account'];
+                $arn = $result['arn'];
+            }
         }
 
-        $output->writeln("  <info>✓</info> Authenticated as: <fg=white>{$arn}</>");
+        // Save profile to protocol.json
+        if ($selectedProfile && $selectedProfile !== 'default' && $selectedProfile !== '(instance role)') {
+            Json::write('aws.profile', $selectedProfile, $repoDir);
+            putenv("AWS_PROFILE={$selectedProfile}");
+        }
+
+        $output->writeln("  <info>✓</info> Using: <fg=white>{$arn}</>");
         $output->writeln("  <info>✓</info> Account: <fg=white>{$account}</>");
+        $output->writeln("  <info>✓</info> Secrets Manager access confirmed");
         $output->writeln('');
 
         // ── Step 2: Configure Region & Secret Name ───────────────────
@@ -165,66 +221,22 @@ class AwsSecretsInit extends Command
         $secretName = $helper->ask($input, $output, $question);
         $output->writeln('');
 
-        // ── Step 3: Test Secrets Manager Access ──────────────────────
-        $output->writeln('  <fg=white;options=bold>Step 3/3:</> Test Secrets Manager Access');
+        // ── Step 3: Check Secret ─────────────────────────────────────
+        $output->writeln('  <fg=white;options=bold>Step 3/3:</> Check Secret');
         $output->writeln('');
 
-        $accessGranted = false;
-        while (!$accessGranted) {
-            $testCmd = 'aws secretsmanager describe-secret'
-                . ' --secret-id ' . escapeshellarg($secretName)
-                . ' --region ' . escapeshellarg($region)
-                . ' 2>&1';
-            $testResult = Shell::run($testCmd, $testReturn);
+        $testCmd = 'aws secretsmanager describe-secret'
+            . ' --secret-id ' . escapeshellarg($secretName)
+            . ' --region ' . escapeshellarg($region)
+            . ' 2>&1';
+        $testResult = Shell::run($testCmd, $testReturn);
 
-            if ($testReturn === 0) {
-                $output->writeln("  <info>✓</info> Secret exists: <fg=white>{$secretName}</>");
-                $accessGranted = true;
-            } elseif (strpos($testResult, 'ResourceNotFoundException') !== false) {
-                // Secret doesn't exist yet but we have permission to check — that's fine
-                $output->writeln("  <info>✓</info> Access confirmed — secret will be created on first <fg=cyan>aws:push</>");
-                $accessGranted = true;
-            } elseif (strpos($testResult, 'AccessDeniedException') !== false) {
-                $output->writeln('  <error>✗ Access denied — this identity cannot access Secrets Manager.</error>');
-                $output->writeln('');
-                $output->writeln('  <fg=white>Add this IAM policy to the role/user shown above:</>');
-                $output->writeln('');
-                $output->writeln('  <fg=gray>{</>');
-                $output->writeln('    <fg=gray>"Version": "2012-10-17",</>');
-                $output->writeln('    <fg=gray>"Statement": [{</>');
-                $output->writeln('      <fg=gray>"Effect": "Allow",</>');
-                $output->writeln('      <fg=gray>"Action": [</>');
-                $output->writeln('        <fg=gray>"secretsmanager:CreateSecret",</>');
-                $output->writeln('        <fg=gray>"secretsmanager:PutSecretValue",</>');
-                $output->writeln('        <fg=gray>"secretsmanager:GetSecretValue",</>');
-                $output->writeln('        <fg=gray>"secretsmanager:DescribeSecret",</>');
-                $output->writeln('        <fg=gray>"secretsmanager:ListSecrets"</>');
-                $output->writeln('      <fg=gray>],</>');
-                $output->writeln("      <fg=gray>\"Resource\": \"arn:aws:secretsmanager:{$region}:{$account}:secret:protocol/*\"</>");
-                $output->writeln('    <fg=gray>}]</>');
-                $output->writeln('  <fg=gray>}</>');
-                $output->writeln('');
-
-                $retryQ = new ConfirmationQuestion('  Retry after updating permissions? [Y/n] ', true);
-                if (!$helper->ask($input, $output, $retryQ)) {
-                    $output->writeln('');
-                    $output->writeln('  <comment>Configuration saved but access test failed.</comment>');
-                    $output->writeln('  Update IAM permissions and re-run <fg=cyan>protocol aws:init</>');
-                    $output->writeln('');
-
-                    // Still save the config so they don't have to re-enter region/name
-                    Json::write('aws.region', $region, $repoDir);
-                    Json::write('aws.secret_name', $secretName, $repoDir);
-                    Json::save($repoDir);
-                    return Command::FAILURE;
-                }
-                $output->writeln('');
-                $output->writeln('  Retrying...');
-                $output->writeln('');
-            } else {
-                $output->writeln("  <comment>⚠ Unexpected response:</comment> <fg=gray>{$testResult}</>");
-                $accessGranted = true; // Don't loop on unknown errors
-            }
+        if ($testReturn === 0) {
+            $output->writeln("  <info>✓</info> Secret exists: <fg=white>{$secretName}</>");
+        } elseif (strpos($testResult, 'ResourceNotFoundException') !== false) {
+            $output->writeln("  <info>✓</info> Secret will be created on first <fg=cyan>protocol aws:push</>");
+        } else {
+            $output->writeln("  <comment>⚠</comment> <fg=gray>{$testResult}</>");
         }
 
         $output->writeln('');
@@ -246,5 +258,69 @@ class AwsSecretsInit extends Command
         $output->writeln('');
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Discover AWS profiles from ~/.aws/credentials and ~/.aws/config.
+     */
+    private function discoverProfiles(): array
+    {
+        $profiles = [];
+
+        // Parse ~/.aws/credentials
+        $credFile = ($_SERVER['HOME'] ?? getenv('HOME')) . '/.aws/credentials';
+        if (is_file($credFile)) {
+            $lines = file($credFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (preg_match('/^\[(.+)\]$/', $line, $m)) {
+                    $profiles[] = $m[1];
+                }
+            }
+        }
+
+        // Parse ~/.aws/config (profiles are prefixed with "profile ")
+        $configFile = ($_SERVER['HOME'] ?? getenv('HOME')) . '/.aws/config';
+        if (is_file($configFile)) {
+            $lines = file($configFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (preg_match('/^\[profile\s+(.+)\]$/', $line, $m)) {
+                    if (!in_array($m[1], $profiles)) {
+                        $profiles[] = $m[1];
+                    }
+                } elseif (preg_match('/^\[default\]$/', $line)) {
+                    if (!in_array('default', $profiles)) {
+                        $profiles[] = 'default';
+                    }
+                }
+            }
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * Display the required IAM policy for Secrets Manager access.
+     */
+    private function showRequiredPolicy(OutputInterface $output, string $account): void
+    {
+        $output->writeln('  <fg=white>Attach this IAM policy to the role/user:</>');
+        $output->writeln('');
+        $output->writeln('  <fg=gray>{</>');
+        $output->writeln('    <fg=gray>"Version": "2012-10-17",</>');
+        $output->writeln('    <fg=gray>"Statement": [{</>');
+        $output->writeln('      <fg=gray>"Effect": "Allow",</>');
+        $output->writeln('      <fg=gray>"Action": [</>');
+        $output->writeln('        <fg=gray>"secretsmanager:CreateSecret",</>');
+        $output->writeln('        <fg=gray>"secretsmanager:PutSecretValue",</>');
+        $output->writeln('        <fg=gray>"secretsmanager:GetSecretValue",</>');
+        $output->writeln('        <fg=gray>"secretsmanager:DescribeSecret",</>');
+        $output->writeln('        <fg=gray>"secretsmanager:ListSecrets"</>');
+        $output->writeln('      <fg=gray>],</>');
+        $output->writeln("      <fg=gray>\"Resource\": \"arn:aws:secretsmanager:*:{$account}:secret:protocol/*\"</>");
+        $output->writeln('    <fg=gray>}]</>');
+        $output->writeln('  <fg=gray>}</>');
+        $output->writeln('');
     }
 }
