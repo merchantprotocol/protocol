@@ -140,21 +140,26 @@ Class GitPull extends Command {
             return Command::FAILURE;
         }
 
-        // resets the master branch to what you just fetched. 
+        // resets the master branch to what you just fetched.
         // The --hard option changes all the files in your working tree to match the files in origin/master
-        $response = Shell::run("git -C '$repo_dir' reset --hard $remote/$branch");
+        $logMsg("running git reset --hard {$remote}/{$branch}");
+        $response = Shell::run("git -C " . escapeshellarg($repo_dir) . " reset --hard $remote/$branch");
+        $logMsg("reset done");
         if ($response) $output->writeln($response);
-        $response = Shell::run("git -C '$repo_dir' reset --hard HEAD");
+        $response = Shell::run("git -C " . escapeshellarg($repo_dir) . " reset --hard HEAD");
         if ($response) $output->writeln($response);
-
 
         // run composer install
+        $logMsg("running composer:install");
         $command = $this->getApplication()->find('composer:install');
         $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
+        $logMsg("composer:install done exit={$returnCode}");
 
         // Update the submodules
-        $command = "git -C '$repo_dir' submodule update --init --recursive";
+        $logMsg("running submodule update");
+        $command = "GIT_TERMINAL_PROMPT=0 timeout 60 git -C " . escapeshellarg($repo_dir) . " submodule update --init --recursive";
         $response = Shell::run($command);
+        $logMsg("submodule update done");
         if ($response) $output->writeln($response);
 
         return Command::SUCCESS;
