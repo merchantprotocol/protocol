@@ -193,6 +193,10 @@ Class ProtocolStart extends Command {
             }
 
             $configRemote = Json::read('configuration.remote', false, $repo_dir);
+            // On slave nodes, fall back to node config for the config repo remote
+            if (!$configRemote && $nodeConfig) {
+                $configRemote = $nodeData['configuration']['remote'] ?? false;
+            }
             $configRepo = Config::repo($repo_dir);
             $hasConfigRepo = $configRemote || is_dir($configRepo);
 
@@ -206,7 +210,7 @@ Class ProtocolStart extends Command {
                 }
             }
 
-            $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no'));
+            $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no') . " configRemote=" . ($configRemote ?: 'none'));
 
             if ($strategy === 'release') {
                 // Release-based deployment mode
