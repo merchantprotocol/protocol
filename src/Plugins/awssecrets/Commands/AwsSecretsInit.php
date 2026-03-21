@@ -6,6 +6,8 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Console\Question\ConfirmationQuestion;
+use Symfony\Component\Console\Question\ChoiceQuestion;
 use Gitcd\Plugins\awssecrets\AwsSecretsHelper;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
@@ -49,19 +51,96 @@ class AwsSecretsInit extends Command
         $output->writeln('');
 
         $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
-        if ($returnVar !== 0) {
-            $output->writeln('  <error>AWS CLI is not configured or not installed.</error>');
-            $output->writeln("  <fg=gray>{$identity}</>");
+
+        if ($returnVar === 0) {
+            $identityData = json_decode($identity, true);
+            $account = $identityData['Account'] ?? 'unknown';
+            $arn = $identityData['Arn'] ?? 'unknown';
+            $userId = $identityData['UserId'] ?? 'unknown';
+            $output->writeln("  Current AWS identity:");
+            $output->writeln("    Account: <fg=white>{$account}</>");
+            $output->writeln("    ARN:     <fg=white>{$arn}</>");
+            $output->writeln("    User ID: <fg=white>{$userId}</>");
             $output->writeln('');
-            $output->writeln('  Install the AWS CLI and configure credentials:');
-            $output->writeln('    <fg=cyan>aws configure</>');
+
+            $question = new ConfirmationQuestion('  Use this identity? [<fg=cyan>Y</>/n]: ', true);
+            $useExisting = $helper->ask($input, $output, $question);
             $output->writeln('');
-            return Command::FAILURE;
+
+            if (!$useExisting) {
+                $output->writeln('  <fg=white>How would you like to configure AWS credentials?</>');
+                $output->writeln('');
+                $choice = new ChoiceQuestion('  Select method:', [
+                    '1' => 'Run "aws configure" (access key + secret key)',
+                    '2' => 'Set a named profile (aws configure --profile <name>)',
+                    '3' => 'Cancel — I\'ll configure credentials manually',
+                ], '1');
+                $method = $helper->ask($input, $output, $choice);
+                $output->writeln('');
+
+                if ($method === '3' || str_contains($method, 'Cancel')) {
+                    $output->writeln('  Configure your credentials and re-run <fg=cyan>protocol aws:init</>');
+                    $output->writeln('');
+                    return Command::FAILURE;
+                }
+
+                if ($method === '2' || str_contains($method, 'profile')) {
+                    $profileQ = new Question('  Profile name: ', '');
+                    $profile = $helper->ask($input, $output, $profileQ);
+                    if (!$profile) {
+                        $output->writeln('  <error>Profile name is required.</error>');
+                        return Command::FAILURE;
+                    }
+                    $output->writeln('');
+                    $output->writeln("  Running <fg=cyan>aws configure --profile {$profile}</>...");
+                    $output->writeln('');
+                    Shell::passthru("aws configure --profile " . escapeshellarg($profile));
+                    // Set the profile for subsequent AWS calls in this session
+                    putenv("AWS_PROFILE={$profile}");
+                    // Save profile to protocol.json so deploy uses the right one
+                    Json::write('aws.profile', $profile, $repoDir);
+                } else {
+                    $output->writeln('  Running <fg=cyan>aws configure</>...');
+                    $output->writeln('');
+                    Shell::passthru('aws configure');
+                }
+
+                $output->writeln('');
+
+                // Re-verify after configuration
+                $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
+                if ($returnVar !== 0) {
+                    $output->writeln('  <error>AWS authentication failed after configuration.</error>');
+                    $output->writeln("  <fg=gray>{$identity}</>");
+                    return Command::FAILURE;
+                }
+
+                $identityData = json_decode($identity, true);
+                $account = $identityData['Account'] ?? 'unknown';
+                $arn = $identityData['Arn'] ?? 'unknown';
+            }
+        } else {
+            $output->writeln('  <comment>No AWS credentials found.</comment>');
+            $output->writeln('');
+            $output->writeln('  Running <fg=cyan>aws configure</> to set up credentials...');
+            $output->writeln('');
+
+            Shell::passthru('aws configure');
+            $output->writeln('');
+
+            // Verify after configuration
+            $identity = Shell::run('aws sts get-caller-identity 2>&1', $returnVar);
+            if ($returnVar !== 0) {
+                $output->writeln('  <error>AWS authentication failed. Check your credentials and try again.</error>');
+                $output->writeln("  <fg=gray>{$identity}</>");
+                return Command::FAILURE;
+            }
+
+            $identityData = json_decode($identity, true);
+            $account = $identityData['Account'] ?? 'unknown';
+            $arn = $identityData['Arn'] ?? 'unknown';
         }
 
-        $identityData = json_decode($identity, true);
-        $account = $identityData['Account'] ?? 'unknown';
-        $arn = $identityData['Arn'] ?? 'unknown';
         $output->writeln("  <info>✓</info> Authenticated as: <fg=white>{$arn}</>");
         $output->writeln("  <info>✓</info> Account: <fg=white>{$account}</>");
         $output->writeln('');
