@@ -171,16 +171,27 @@ class NodeConfig
         $strategy = $data['deployment']['strategy'] ?? 'branch';
         $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
         $currentRelease = $data['release']['current'] ?? null;
-        $currentBranch = $data['deployment']['branch'] ?? null;
+        $currentBranch = $data['deployment']['branch'] ?? $data['git']['branch'] ?? null;
 
         // Resolve the active directory (where code, docker-compose, lock files live)
         $activeDir = $repoDir;
+
+        // Try strategy-specific resolution first
         if ($strategy === 'release' && $currentRelease && $releasesDir) {
             $dir = rtrim($releasesDir, '/') . '/' . $currentRelease;
             if (is_dir($dir)) {
                 $activeDir = $dir;
             }
         } elseif ($strategy === 'branch' && $currentBranch && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+            if (is_dir($dir)) {
+                $activeDir = $dir;
+            }
+        }
+
+        // Fallback: if primary resolution didn't find a directory (e.g. release
+        // strategy but no release deployed yet), try the branch directory
+        if ($activeDir === $repoDir && $currentBranch && $releasesDir) {
             $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
             if (is_dir($dir)) {
                 $activeDir = $dir;
