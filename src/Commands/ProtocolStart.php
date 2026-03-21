@@ -48,6 +48,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\SecurityAudit;
@@ -300,10 +301,18 @@ Class ProtocolStart extends Command {
                 }
             }
 
-            // Rebuild containers
+            // Rebuild containers (inject secrets if encrypted or AWS mode)
             $dockerCommand = Docker::getDockerCommand();
-            $runner->log("{$dockerCommand} up --build -d");
-            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
+            $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
+            $envFlag = $tmpEnv ? ' --env-file ' . escapeshellarg($tmpEnv) : '';
+
+            $runner->log("{$dockerCommand}{$envFlag} up --build -d");
+            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand}{$envFlag} up --build -d 2>&1");
+
+            if ($tmpEnv) {
+                unlink($tmpEnv);
+                $runner->log("Secrets temp file cleaned up");
+            }
 
             // Run composer install inside container if needed
             if (file_exists(rtrim($repo_dir, '/') . '/composer.json')) {

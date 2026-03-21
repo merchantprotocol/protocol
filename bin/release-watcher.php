@@ -15,6 +15,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
@@ -149,25 +150,13 @@ while (true) {
                 JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
                 JsonLock::save($repo_dir);
 
-                // Handle encrypted secrets
-                $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
-                $configRepo = Config::repo($repo_dir);
+                // Handle secrets (encrypted or AWS Secrets Manager)
+                $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
 
-                if ($secretsMode === 'encrypted' && $configRepo) {
-                    $encFile = $configRepo . '.env.enc';
-                    if (is_file($encFile) && Secrets::hasKey()) {
-                        $tmpEnv = Secrets::decryptToTempFile($encFile);
-                        if ($tmpEnv) {
-                            Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
-                            unlink($tmpEnv);
-                            echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt with decrypted secrets\n";
-                        } else {
-                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to decrypt secrets\n";
-                        }
-                    } else {
-                        Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
-                        echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
-                    }
+                if ($tmpEnv) {
+                    Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+                    unlink($tmpEnv);
+                    echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt with secrets\n";
                 } else {
                     Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
                     echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
