@@ -39,6 +39,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class GitSlave extends BaseSlaveCommand {
 
@@ -94,7 +95,7 @@ Class GitSlave extends BaseSlaveCommand {
         // execute command
         $command = SCRIPT_DIR."git-repo-watcher -d '$repo_dir' -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
 
-        return $this->runSlaveCommand(
+        $result = $this->runSlaveCommand(
             $command,
             $daemon,
             $increment,
@@ -109,6 +110,14 @@ Class GitSlave extends BaseSlaveCommand {
             $repo_dir,
             $output
         );
+
+        // Also write unified watcher PID
+        $pid = JsonLock::read('slave.pid', null, $repo_dir);
+        if ($pid) {
+            DeploymentState::setWatcherPid($repo_dir, (int)$pid);
+        }
+
+        return $result;
     }
 
 }

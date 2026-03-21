@@ -58,6 +58,7 @@ use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
@@ -363,11 +364,9 @@ Class ProtocolStart extends Command {
             }
 
             // Check watcher is running
-            if ($strategy === 'release') {
-                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
-                if ($pid && !Shell::isRunning($pid)) {
-                    throw new \RuntimeException('Release watcher is not running');
-                }
+            $watcherPid = DeploymentState::watcherPid($repo_dir);
+            if ($watcherPid && !Shell::isRunning($watcherPid)) {
+                throw new \RuntimeException('Deployment watcher is not running');
             }
         }, 'PASS');
 
@@ -383,14 +382,14 @@ Class ProtocolStart extends Command {
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
-        $version = JsonLock::read('release.current', null, $repo_dir)
+        $curDeploy = DeploymentState::current($repo_dir);
+        $version = ($curDeploy['version'] ?? null)
             ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
         $secretsStatus = Secrets::hasKey() ? 'decrypted' : 'no key found';
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
 
-        $watcherType = $strategy === 'release' ? 'release' : 'git';
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
-        $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
+        $watcherType = DeploymentState::strategy($repo_dir);
+        $watcherPid = DeploymentState::watcherPid($repo_dir);
         $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
 
         $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);

@@ -48,6 +48,7 @@ use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class NodeDeploy extends Command {
 
@@ -101,19 +102,17 @@ Class NodeDeploy extends Command {
             return Command::FAILURE;
         }
 
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $current = DeploymentState::current($repo_dir);
+        $currentRelease = $current['version'] ?? null;
         $output->writeln("<info>Deploying {$version} on this node</info>");
 
         // Checkout the tag (detached HEAD)
         Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($version) . " 2>&1");
         $output->writeln(" - Checked out {$version}");
 
-        // Update lock file
-        JsonLock::write('release.previous', $currentRelease, $repo_dir);
-        JsonLock::write('release.current', $version, $repo_dir);
-        JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-        JsonLock::save($repo_dir);
-        $output->writeln(' - Updated protocol.lock');
+        // Update deployment state
+        DeploymentState::setCurrent($repo_dir, $version, $repo_dir);
+        $output->writeln(' - Updated deployment state');
 
         // Handle secrets (encrypted or AWS Secrets Manager)
         $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);

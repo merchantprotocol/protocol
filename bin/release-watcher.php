@@ -20,6 +20,7 @@ use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\GitHubApp;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -38,7 +39,8 @@ $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', 
 while (true) {
     try {
         $activeRelease = GitHub::getVariable($pointerName, $repo_dir);
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $cur = DeploymentState::current($repo_dir);
+        $currentRelease = $cur['version'] ?? null;
 
         if ($activeRelease && $activeRelease !== $currentRelease) {
             echo "[" . date('Y-m-d H:i:s') . "] New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")\n";
@@ -132,10 +134,7 @@ while (true) {
                 }
 
                 // Update release tracking
-                JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                JsonLock::write('release.current', $activeRelease, $repo_dir);
-                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                JsonLock::save($repo_dir);
+                DeploymentState::setCurrent($repo_dir, $activeRelease, $releaseDir);
 
             } else {
                 // ── Standard in-place deployment ─────────────────
@@ -145,10 +144,7 @@ while (true) {
                 echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
 
                 // Update lock file
-                JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                JsonLock::write('release.current', $activeRelease, $repo_dir);
-                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                JsonLock::save($repo_dir);
+                DeploymentState::setCurrent($repo_dir, $activeRelease, $repo_dir);
 
                 // Handle secrets (encrypted or AWS Secrets Manager)
                 $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
