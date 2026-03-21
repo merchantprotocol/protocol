@@ -158,46 +158,55 @@ Class ProtocolStart extends Command {
         });
 
         // ── Stage 2: Infrastructure provisioning ────────────────
-        $runner->run('Infrastructure provisioning', function() use ($app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
+        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
 
             $configRemote = Json::read('configuration.remote', false, $repo_dir);
             $configRepo = Config::repo($repo_dir);
             $hasConfigRepo = $configRemote || is_dir($configRepo);
+            $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no'));
 
             if ($strategy === 'release') {
                 // Release-based deployment mode
                 if ($hasConfigRepo) {
                     if ($configRemote) {
+                        $runner->log("Running config:slave");
                         $app->find('config:slave')->run($arrInput, $nullOutput);
                     }
+                    $runner->log("Running config:link");
                     $app->find('config:link')->run($arrInput, $nullOutput);
                 }
 
                 // Start the release watcher daemon
+                $runner->log("Running deploy:slave");
                 $app->find('deploy:slave')->run($arrInput, $nullOutput);
 
             } else {
                 // Legacy branch-based deployment mode
                 if (!$isDev) {
+                    $runner->log("Running git:pull");
                     $app->find('git:pull')->run($arrInput, $nullOutput);
+                    $runner->log("Running git:slave");
                     $app->find('git:slave')->run($arrInput, $nullOutput);
                 }
 
                 if ($hasConfigRepo) {
                     if (!$isDev && $configRemote) {
+                        $runner->log("Running config:slave");
                         $app->find('config:slave')->run($arrInput, $nullOutput);
                     }
 
+                    $runner->log("Running config:link");
                     $app->find('config:link')->run($arrInput, $nullOutput);
                 }
             }
 
             // Add crontab restart command
+            $runner->log("Adding crontab restart");
             Crontab::addCrontabRestart($repo_dir);
         });
 
         // ── Stage 3: Container build & start ────────────────────
-        $runner->run('Container build & start', function() use ($repo_dir) {
+        $runner->run('Container build & start', function() use ($runner, $repo_dir) {
             // Shadow mode: start the active version's containers
             if (BlueGreen::isEnabled($repo_dir)) {
                 $activeVersion = BlueGreen::getActiveVersion($repo_dir);
@@ -224,16 +233,19 @@ Class ProtocolStart extends Command {
             $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
             if ($usesBuild) {
+                $runner->log("docker compose build");
                 Shell::run("docker compose -f " . escapeshellarg($composePath) . " build 2>&1");
             } else {
                 $image = Json::read('docker.image', false, $repo_dir);
                 if ($image) {
+                    $runner->log("docker pull {$image}");
                     Shell::run("docker pull " . escapeshellarg($image) . " 2>&1");
                 }
             }
 
             // Rebuild containers
             $dockerCommand = Docker::getDockerCommand();
+            $runner->log("{$dockerCommand} up --build -d");
             Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
 
             // Run composer install inside container if needed
