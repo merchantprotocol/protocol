@@ -49,6 +49,7 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\StageRunner;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
@@ -160,9 +161,38 @@ Class ProtocolStart extends Command {
         // ── Stage 2: Infrastructure provisioning ────────────────
         $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
 
+            // Refresh GitHub App credentials and fix remote URLs if needed
+            if (GitHubApp::isConfigured()) {
+                $creds = GitHubApp::loadCredentials();
+                $appOwner = $creds['owner'] ?? null;
+                if ($appOwner) {
+                    $runner->log("Refreshing GitHub App credentials for {$appOwner}");
+                    GitHubApp::refreshGitCredentials($appOwner);
+                }
+
+                // Update git remote URL in cloned repos to use HTTPS
+                $currentRemote = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " remote get-url origin 2>/dev/null") ?: '');
+                $resolvedRemote = GitHubApp::resolveUrl($currentRemote);
+                if ($currentRemote && $resolvedRemote !== $currentRemote) {
+                    $runner->log("Updating remote URL: {$currentRemote} → {$resolvedRemote}");
+                    Shell::run("git -C " . escapeshellarg($repo_dir) . " remote set-url origin " . escapeshellarg($resolvedRemote) . " 2>/dev/null");
+                }
+            }
+
             $configRemote = Json::read('configuration.remote', false, $repo_dir);
             $configRepo = Config::repo($repo_dir);
             $hasConfigRepo = $configRemote || is_dir($configRepo);
+
+            // Also fix config repo remote URL if it was cloned with SSH
+            if (GitHubApp::isConfigured() && is_dir($configRepo)) {
+                $configCurrentRemote = trim(Shell::run("git -C " . escapeshellarg($configRepo) . " remote get-url origin 2>/dev/null") ?: '');
+                $configResolvedRemote = GitHubApp::resolveUrl($configCurrentRemote);
+                if ($configCurrentRemote && $configResolvedRemote !== $configCurrentRemote) {
+                    $runner->log("Updating config repo remote: {$configCurrentRemote} → {$configResolvedRemote}");
+                    Shell::run("git -C " . escapeshellarg($configRepo) . " remote set-url origin " . escapeshellarg($configResolvedRemote) . " 2>/dev/null");
+                }
+            }
+
             $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no'));
 
             if ($strategy === 'release') {
