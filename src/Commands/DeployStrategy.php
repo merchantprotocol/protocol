@@ -107,9 +107,9 @@ class DeployStrategy extends Command
             if ($newStrategy === 'branch') {
                 $branch = Git::branch($repo_dir);
                 $nodeData['deployment']['branch'] = $branch;
-            } else {
-                unset($nodeData['deployment']['branch']);
             }
+            // Keep deployment.branch even when switching to release —
+            // protocol stop needs it to find containers started under branch strategy
 
             NodeConfig::save($projectName, $nodeData);
         }

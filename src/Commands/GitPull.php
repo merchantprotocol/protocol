@@ -214,10 +214,10 @@ Class GitPull extends Command {
                     $logMsg("Release detected: {$activeRelease} — switching to release strategy");
                     $output->writeln("<info>Release detected: {$activeRelease} — switching from branch to release strategy</info>");
 
-                    // Update node config
+                    // Update node config — keep deployment.branch so stop
+                    // can still find containers started under branch strategy
                     $nodeData['deployment']['strategy'] = 'release';
                     unset($nodeData['deployment']['awaiting_release']);
-                    unset($nodeData['deployment']['branch']);
                     NodeConfig::save($projectName, $nodeData);
 
                     // Update protocol.json in repo
