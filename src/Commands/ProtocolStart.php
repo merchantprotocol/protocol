@@ -39,8 +39,10 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
-use Symfony\Component\Console\Command\LockableTrait;
 use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Lock\Store\SemaphoreStore;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
@@ -61,7 +63,8 @@ use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStart extends Command {
 
-    use LockableTrait;
+    private ?\Symfony\Component\Lock\LockInterface $lock = null;
+    private const LOCK_TTL = 120; // 2 minutes — auto-expires stale locks
 
     protected static $defaultName = 'docker:start|start';
     protected static $defaultDescription = 'Starts a node so that the repo and docker image stay up to date and are running';
@@ -112,14 +115,16 @@ Class ProtocolStart extends Command {
 
         $helper = $this->getHelper('question');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
+        // command should only have one running instance (lock auto-expires after 2 min)
+        $store = SemaphoreStore::isSupported() ? new SemaphoreStore() : new FlockStore();
+        $this->lock = (new LockFactory($store))->createLock($this->getName(), self::LOCK_TTL);
+        if (!$this->lock->acquire()) {
             if ($input->getOption('force')) {
-                $this->release();
-                $this->lock();
+                $this->lock->acquire(true); // blocking acquire
                 $output->writeln('<comment>Forcing lock override...</comment>');
             } else {
                 $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                $output->writeln('<comment>Lock auto-expires after ' . self::LOCK_TTL . ' seconds.</comment>');
                 return Command::SUCCESS;
             }
         }

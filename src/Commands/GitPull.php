@@ -39,7 +39,9 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Lock\Store\SemaphoreStore;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
@@ -47,7 +49,8 @@ use Gitcd\Utils\Json;
 
 Class GitPull extends Command {
 
-    use LockableTrait;
+    private ?\Symfony\Component\Lock\LockInterface $lock = null;
+    private const LOCK_TTL = 120;
 
     // the name of the command (the part after "bin/console")
     protected static $defaultName = 'git:pull';
@@ -105,12 +108,13 @@ Class GitPull extends Command {
         $logMsg("enter execute() repo_dir={$repo_dir}");
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        // command should only have one running instance
+        // command should only have one running instance (lock auto-expires after 2 min)
+        $store = SemaphoreStore::isSupported() ? new SemaphoreStore() : new FlockStore();
+        $this->lock = (new LockFactory($store))->createLock($this->getName(), self::LOCK_TTL);
         $logMsg("acquiring lock...");
-        if (!$this->lock()) {
+        if (!$this->lock->acquire()) {
             if ($input->getOption('force')) {
-                $this->release();
-                $this->lock();
+                $this->lock->acquire(true);
                 $logMsg("lock forced");
             } else {
                 $logMsg("lock FAILED — another instance running");
