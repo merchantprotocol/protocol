@@ -53,7 +53,7 @@ while (true) {
 
             // Fetch latest tags
             $remote = Git::remoteName($repo_dir) ?: 'origin';
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+            Shell::run("GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
 
             // Verify tag exists
             if (!GitHub::tagExists($activeRelease, $repo_dir)) {

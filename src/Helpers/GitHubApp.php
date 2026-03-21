@@ -166,6 +166,7 @@ class GitHubApp
     {
         $creds = self::loadCredentials();
         if (!$creds) {
+            self::logError("No GitHub App credentials found");
             return null;
         }
 
@@ -174,21 +175,47 @@ class GitHubApp
         $owner = $owner ?? $creds['owner'] ?? null;
 
         if (!$appId || !$owner || !is_file($pemPath)) {
+            self::logError("Missing app_id={$appId}, owner={$owner}, pem=" . ($pemPath && is_file($pemPath) ? 'exists' : 'missing'));
             return null;
         }
 
         $pemContents = file_get_contents($pemPath);
         $jwt = self::generateJwt($appId, $pemContents);
         if (!$jwt) {
+            self::logError("JWT generation failed (check PEM key validity)");
             return null;
         }
 
         $installationId = self::getInstallationId($jwt, $owner);
         if (!$installationId) {
+            self::logError("Could not find GitHub App installation for owner '{$owner}'");
             return null;
         }
 
-        return self::generateInstallationToken($jwt, $installationId);
+        $token = self::generateInstallationToken($jwt, $installationId);
+        if (!$token) {
+            self::logError("Failed to generate installation token for installation {$installationId}");
+            return null;
+        }
+
+        return $token;
+    }
+
+    /**
+     * Log an error to the protocol log file.
+     */
+    private static function logError(string $message): void
+    {
+        $logFile = '/var/log/protocol/protocol-start.log';
+        if (!is_file($logFile)) {
+            $fallbackDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
+            $logFile = $fallbackDir . 'protocol-start.log';
+        }
+        @file_put_contents(
+            $logFile,
+            "[" . date('H:i:s') . "] [GitHubApp] {$message}\n",
+            FILE_APPEND | LOCK_EX
+        );
     }
 
     /**
