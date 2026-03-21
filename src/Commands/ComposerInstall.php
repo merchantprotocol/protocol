@@ -100,8 +100,15 @@ Class ComposerInstall extends Command {
             . " --ignore-platform-reqs"
             . " --no-interaction"
             . " --no-ansi";
-        $response = Shell::run($command, $return_var);
-        if ($response) $output->writeln($response);
+
+        if ($output->isVerbose()) {
+            // Stream output live so hangs are visible
+            $output->writeln("  > {$command}");
+            passthru($command . " 2>&1", $return_var);
+        } else {
+            $response = Shell::run($command, $return_var);
+            if ($response) $output->writeln($response);
+        }
         if ($return_var) {
             $output->writeln("<error>Composer install failed (exit code {$return_var})</error>");
         }
