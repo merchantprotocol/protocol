@@ -39,13 +39,17 @@ class StageRunner
     {
         $logDir = '/var/log/protocol/';
         if (!is_dir($logDir)) {
-            @mkdir($logDir, 0755, true);
+            // /var/log is typically root-owned; use sudo to create
+            Shell::run("sudo mkdir -p /var/log/protocol 2>/dev/null");
         }
-        // Fall back to NODE_DATA_DIR if /var/log/protocol isn't writable
+        if (is_dir($logDir) && !is_writable($logDir)) {
+            Shell::run("sudo chmod 1777 /var/log/protocol 2>/dev/null");
+        }
+        // Fallback if /var/log/protocol still isn't available
         if (!is_dir($logDir) || !is_writable($logDir)) {
             $logDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
             if (!is_dir($logDir)) {
-                mkdir($logDir, 0700, true);
+                @mkdir($logDir, 0755, true);
             }
         }
         $this->logFile = $logDir . 'protocol-start.log';

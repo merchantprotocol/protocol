@@ -167,7 +167,11 @@ Class ProtocolStart extends Command {
                 $appOwner = $creds['owner'] ?? null;
                 if ($appOwner) {
                     $runner->log("Refreshing GitHub App credentials for {$appOwner}");
-                    GitHubApp::refreshGitCredentials($appOwner);
+                    $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                    if (!$refreshed) {
+                        throw new \RuntimeException("GitHub App credential refresh failed for {$appOwner} — cannot authenticate git operations");
+                    }
+                    $runner->log("Credentials refreshed successfully");
                 }
 
                 // Update git remote URL in cloned repos to use HTTPS
