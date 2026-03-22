@@ -219,8 +219,8 @@ Class ProtocolStart extends Command {
 
             $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no') . " configRemote=" . ($configRemote ?: 'none'));
 
-            if ($strategy === 'release') {
-                // Release-based deployment mode
+            if (in_array($strategy, ['release', 'bluegreen'])) {
+                // Release/bluegreen deployment mode — both use the release watcher
                 if ($hasConfigRepo) {
                     if ($configRemote) {
                         $runner->log("Running config:slave");
@@ -270,21 +270,39 @@ Class ProtocolStart extends Command {
         });
 
         // ── Stage 3: Container build & start ────────────────────
-        $runner->run('Container build & start', function() use ($runner, $repo_dir) {
-            // Shadow mode: start the active version's containers
+        // Handles all three strategies:
+        //   "release"   — Start the active release's containers on production ports
+        //   "bluegreen" — Start the active version's containers (may be on shadow or production ports)
+        //   "branch"    — Standard in-place build from repo_dir
+        $runner->run('Container build & start', function() use ($runner, $repo_dir, $strategy) {
+            // Release and bluegreen strategies both use release directories.
+            // Start the active version's containers from the release dir.
             if (BlueGreen::isEnabled($repo_dir)) {
                 $activeVersion = BlueGreen::getActiveVersion($repo_dir);
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                     if (is_dir($releaseDir)) {
+                        $runner->log("Starting active release {$activeVersion} from {$releaseDir}");
+
+                        // For release strategy, ensure production ports are set
+                        if ($strategy === 'release') {
+                            BlueGreen::writeReleaseEnv(
+                                $releaseDir,
+                                BlueGreen::PRODUCTION_HTTP,
+                                BlueGreen::PRODUCTION_HTTPS,
+                                $activeVersion
+                            );
+                        }
+
                         BlueGreen::startContainers($releaseDir);
                         return;
                     }
                 }
                 // No active version yet — fall through to standard build
+                $runner->log("No active release version found, falling back to standard build");
             }
 
-            // Standard single-container mode
+            // Standard single-container mode (branch strategy or fallback)
             $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
 
             if (!file_exists($composePath)) {
@@ -292,7 +310,6 @@ Class ProtocolStart extends Command {
             }
 
             // Pull or build the Docker image
-            $usesBuild = false;
             $content = file_get_contents($composePath);
             $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
@@ -372,7 +389,27 @@ Class ProtocolStart extends Command {
 
         // ── Stage 6: Health checks ──────────────────────────────
         $runner->run('Health checks', function() use ($repo_dir, $strategy) {
-            // Check Docker containers are running
+            // For release/bluegreen, check the active release's container
+            if (BlueGreen::isEnabled($repo_dir)) {
+                $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                if ($activeVersion) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
+                    $containerName = BlueGreen::getContainerName($releaseDir);
+                    if ($containerName) {
+                        if (!Docker::isDockerContainerRunning($containerName)) {
+                            throw new \RuntimeException("Container '{$containerName}' is not running");
+                        }
+                        // Container is running — skip the fallback check below
+                        $watcherPid = DeploymentState::watcherPid($repo_dir);
+                        if ($watcherPid && !Shell::isRunning($watcherPid)) {
+                            throw new \RuntimeException('Deployment watcher is not running');
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Branch strategy or fallback: check containers from compose file in repo_dir
             $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
             foreach ($containerNames as $name) {
                 if (!Docker::isDockerContainerRunning($name)) {
@@ -409,7 +446,22 @@ Class ProtocolStart extends Command {
         $watcherPid = DeploymentState::watcherPid($repo_dir);
         $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
 
-        $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+        // Collect container names from all known dirs (includes release dirs)
+        $containerNames = [];
+        foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
+            $containerNames = array_merge($containerNames, Docker::getContainerNamesFromDockerComposeFile($dir));
+        }
+        // Also check release dirs for patched container names
+        if (BlueGreen::isEnabled($repo_dir)) {
+            $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+            if ($activeVersion) {
+                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
+                $envName = BlueGreen::getContainerName($releaseDir);
+                if ($envName && !in_array($envName, $containerNames)) {
+                    $containerNames[] = $envName;
+                }
+            }
+        }
         $runningCount = 0;
         foreach ($containerNames as $name) {
             if (Docker::isDockerContainerRunning($name)) $runningCount++;

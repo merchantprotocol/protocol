@@ -17,7 +17,7 @@ use Gitcd\Utils\NodeConfig;
 class DeployStrategy extends Command
 {
     protected static $defaultName = 'deploy:strategy';
-    protected static $defaultDescription = 'View or change the deployment strategy (branch, release)';
+    protected static $defaultDescription = 'View or change the deployment strategy (branch, release, bluegreen)';
 
     protected function configure(): void
     {
@@ -26,8 +26,14 @@ class DeployStrategy extends Command
             View or switch the deployment strategy for this node.
 
             Strategies:
-              branch   — Tip-of-branch polling (git-repo-watcher)
-              release  — Release tag polling via PROTOCOL_ACTIVE_RELEASE (release-watcher)
+              branch    — Tip-of-branch polling (git-repo-watcher). In-place
+                          checkout + rebuild. No release directories.
+              release   — Release tag polling (release-watcher). Clones each tag
+                          into its own release directory. One container at a time
+                          on production ports (80/443). No shadow ports.
+              bluegreen — Zero-downtime deployment (release-watcher). Builds on
+                          shadow ports, runs health checks, then promotes. Old
+                          version stays on standby for instant rollback.
 
             After switching, run `protocol restart` to activate the new watcher.
 
@@ -35,9 +41,10 @@ class DeployStrategy extends Command
               protocol deploy:strategy              # Show current, prompt to change
               protocol deploy:strategy release       # Switch to release strategy
               protocol deploy:strategy branch        # Switch to branch strategy
+              protocol deploy:strategy bluegreen     # Switch to bluegreen strategy
 
             HELP)
-            ->addArgument('strategy', InputArgument::OPTIONAL, 'Target strategy: branch, release')
+            ->addArgument('strategy', InputArgument::OPTIONAL, 'Target strategy: branch, release, bluegreen')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
         ;
     }
@@ -72,7 +79,7 @@ class DeployStrategy extends Command
         }
         $output->writeln('');
 
-        $validStrategies = ['branch', 'release'];
+        $validStrategies = ['branch', 'release', 'bluegreen'];
         $newStrategy = $input->getArgument('strategy');
 
         if (!$newStrategy) {

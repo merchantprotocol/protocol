@@ -46,9 +46,9 @@ $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', 
 wlog("  pointer:   {$pointerName}");
 
 // Log initial state
-$bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
-wlog("  bluegreen: " . ($bluegreenEnabled ? 'enabled' : 'disabled'));
-if ($bluegreenEnabled) {
+$strategy = BlueGreen::getStrategy($repo_dir);
+wlog("  strategy:  {$strategy}");
+if (BlueGreen::isEnabled($repo_dir)) {
     wlog("  releases:  " . BlueGreen::getReleasesDir($repo_dir));
 }
 
@@ -128,10 +128,100 @@ while (true) {
         }
         wlog("Tag {$activeRelease} verified");
 
-        // ── Blue-green mode ──────────────────────────────────
-        $bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
+        // ── Determine strategy ────────────────────────────────
+        // Re-read strategy each cycle in case it changed.
+        $strategy = BlueGreen::getStrategy($repo_dir);
 
-        if ($bluegreenEnabled) {
+        if ($strategy === 'release') {
+            // ─────────────────────────────────────────────────────
+            // RELEASE STRATEGY — Simple one-at-a-time deployment
+            //
+            // Clones the tag into its own release directory, patches
+            // the compose file and container name, then starts on
+            // production ports (80/443). Only ONE container runs at
+            // a time. No shadow ports, no health checks.
+            // ─────────────────────────────────────────────────────
+            wlog("Release deploy: cloning {$activeRelease} into releases dir");
+
+            $gitRemote = BlueGreen::getGitRemote($repo_dir);
+            $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeRelease);
+            wlog("  remote:      {$gitRemote}");
+            wlog("  release dir: {$releaseDir}");
+
+            // Initialize release directory with git clone
+            wlog("Cloning into {$releaseDir}...");
+            if (!BlueGreen::initReleaseDir($repo_dir, $activeRelease, $gitRemote)) {
+                wlog("ERROR: Git clone failed for {$activeRelease} into {$releaseDir}");
+                wlog("  Check: git remote accessible? Credentials valid? Disk space?");
+                sleep($interval);
+                continue;
+            }
+            wlog("Clone complete");
+
+            // Checkout version tag
+            if (!BlueGreen::checkoutVersion($releaseDir, $activeRelease)) {
+                wlog("ERROR: Failed to checkout tag {$activeRelease} in {$releaseDir}");
+                sleep($interval);
+                continue;
+            }
+            wlog("Checked out {$activeRelease}");
+
+            // Patch compose file for parameterized ports and container name
+            if (!BlueGreen::patchComposeFile($releaseDir)) {
+                wlog("ERROR: docker-compose.yml not found in {$releaseDir}");
+                sleep($interval);
+                continue;
+            }
+
+            // Write production port config (80/443) — no shadow ports for release strategy
+            BlueGreen::writeReleaseEnv(
+                $releaseDir,
+                BlueGreen::PRODUCTION_HTTP,
+                BlueGreen::PRODUCTION_HTTPS,
+                $activeRelease
+            );
+
+            // Stop the PREVIOUS release's containers before starting the new one.
+            // Release strategy = one container at a time on production ports.
+            if ($currentRelease && $currentRelease !== $activeRelease) {
+                $oldReleaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+                if (is_dir($oldReleaseDir)) {
+                    wlog("Stopping previous release {$currentRelease}...");
+                    BlueGreen::stopContainers($oldReleaseDir);
+                }
+            }
+
+            // Build and start containers on production ports
+            wlog("Building containers on production ports (80/443)...");
+            if (!BlueGreen::buildContainers($releaseDir)) {
+                wlog("ERROR: Docker build failed for {$activeRelease}");
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'failed');
+                AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'failure', 'release-watcher');
+                sleep($interval);
+                continue;
+            }
+
+            // Update state
+            BlueGreen::setActiveVersion($repo_dir, $activeRelease);
+            BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'serving');
+            JsonLock::write('release.previous', $currentRelease, $repo_dir);
+            JsonLock::write('release.current', $activeRelease, $repo_dir);
+            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+            JsonLock::save($repo_dir);
+
+            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
+            wlog("Release deploy complete: {$activeRelease} serving on production ports");
+
+        } elseif ($strategy === 'bluegreen') {
+            // ─────────────────────────────────────────────────────
+            // BLUEGREEN STRATEGY — Zero-downtime shadow deployment
+            //
+            // Clones the tag into its own release directory, builds
+            // containers on SHADOW ports (18080-18280), runs health
+            // checks, then promotes by swapping to production ports.
+            // Old version stays on standby for instant rollback.
+            // Two containers may run simultaneously during swap.
+            // ─────────────────────────────────────────────────────
             wlog("Blue-green deploy: cloning {$activeRelease} into releases dir");
 
             $gitRemote = BlueGreen::getGitRemote($repo_dir);
@@ -166,7 +256,7 @@ while (true) {
                 continue;
             }
 
-            // Find available shadow ports
+            // Find available shadow ports (bluegreen builds on shadow, not production)
             [$shadowHttp, $shadowHttps] = BlueGreen::findAvailableShadowPorts();
 
             // Write shadow port config
@@ -183,7 +273,7 @@ while (true) {
             }
             wlog("Shadow containers built on port {$shadowHttp}");
 
-            // Run health checks
+            // Run health checks (bluegreen-only — release strategy skips this)
             $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
             wlog("Running health checks (" . count($healthChecks) . " configured)...");
             $healthy = BlueGreen::runHealthChecks($repo_dir, $shadowHttp, $healthChecks, $activeRelease);
@@ -222,9 +312,15 @@ while (true) {
                 wlog("ERROR: Health check FAILED for {$activeRelease} — will retry next cycle");
             }
 
-
         } else {
-            // ── Standard in-place deployment ─────────────────
+            // ─────────────────────────────────────────────────────
+            // BRANCH STRATEGY (fallback) — In-place deployment
+            //
+            // Checks out the tag directly in repo_dir (detached HEAD)
+            // and rebuilds containers in-place. No release directories.
+            // This is the legacy mode used when strategy is "branch"
+            // or any unrecognized value.
+            // ─────────────────────────────────────────────────────
             wlog("In-place deploy: checking out {$activeRelease} in {$repo_dir}");
 
             // Checkout the tag (detached HEAD)

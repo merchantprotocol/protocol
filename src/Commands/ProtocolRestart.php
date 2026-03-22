@@ -43,6 +43,8 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
 
@@ -77,10 +79,19 @@ Class ProtocolRestart extends Command {
     }
 
     /**
-     * When the node is relaunched after sleeping through assumed changes
+     * Restart a node by stopping whatever is currently running and starting
+     * the active release.
+     *
+     * For release/bluegreen strategies, this detects which release's containers
+     * are actually running (which may differ from the active release if the
+     * pointer changed while the old containers were still up), stops them,
+     * then starts the active release's containers.
+     *
+     * For branch strategy, this simply calls stop + start.
+     *
      * Install this command in the crontab as:
-     * @reboot /opt/protocol/pipeline node:update
-     * 
+     * @reboot /opt/protocol/pipeline restart
+     *
      * @param InputInterface $input
      * @param OutputInterface $output
      * @return integer
@@ -111,9 +122,13 @@ Class ProtocolRestart extends Command {
                 '--dir' => $repo_dir
             ]);
 
+        // Stop everything — `protocol stop` handles all strategies and finds
+        // all running containers across all release dirs
         $command = $this->getApplication()->find('stop');
         $returnCode = $command->run($arrInput, $output);
 
+        // Start the active release — `protocol start` reads the current active
+        // version and starts its containers
         $command = $this->getApplication()->find('start');
         $returnCode = $command->run($arrInput, $output);
 

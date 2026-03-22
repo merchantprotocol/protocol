@@ -1,17 +1,31 @@
 <?php
 /**
- * Shadow Deployment Helper (Facade).
+ * Release Directory Deployment Helper (Facade).
  *
- * Manages version-named release directories for zero-downtime deployments.
- * Each release (<project>-releases/v1.2.0/) is a fully self-contained git
- * clone with its own config and Docker containers named with the release tag.
- * Only one release serves production traffic at a time. Rollback swaps to
- * the previous version's pre-built containers.
+ * Shared infrastructure for both "release" and "bluegreen" deployment
+ * strategies. Both strategies clone version-tagged releases into dedicated
+ * directories (<project>-releases/v1.2.0/), patch container names with
+ * version suffixes, and generate per-release .env.bluegreen files.
+ *
+ * STRATEGY DIFFERENCES
+ * --------------------
+ * "release"   — Simple one-at-a-time deployment. Clones tag, patches compose,
+ *               starts on production ports (80/443). Stops old container first.
+ *               No shadow ports. No health checks. No dual containers.
+ *
+ * "bluegreen" — Zero-downtime deployment. Builds on shadow ports (18080-18280),
+ *               runs health checks, then promotes by swapping to production
+ *               ports. Old version stays on standby for instant rollback.
+ *               Two containers may run simultaneously during swap.
+ *
+ * Use isEnabled() to check if EITHER strategy is active (shared infra).
+ * Use isBlueGreenStrategy() to check for bluegreen-only behavior.
+ * Use isReleaseStrategy() to check for release-only behavior.
  *
  * This class is a thin facade that delegates to focused sub-classes:
- *   - BlueGreen\ReleaseState   (state management)
+ *   - BlueGreen\ReleaseState   (state management, strategy detection)
  *   - BlueGreen\ReleaseBuilder (file system, git, Docker, env)
- *   - BlueGreen\HealthChecker  (health check verification)
+ *   - BlueGreen\HealthChecker  (health check verification — bluegreen only)
  *
  * MIT License
  * Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
@@ -53,12 +67,42 @@ class BlueGreen
         return [self::SHADOW_PORT_RANGE_START, self::SHADOW_PORT_RANGE_START + 1];
     }
 
-    // ─── State management (delegated to ReleaseState) ─────────────────
+    // ─── Strategy detection (delegated to ReleaseState) ────────────────
 
+    /**
+     * Check if release-directory-based deployment is enabled.
+     * True for both "release" and "bluegreen" strategies.
+     */
     public static function isEnabled(string $repo_dir): bool
     {
         return ReleaseState::isEnabled($repo_dir);
     }
+
+    /**
+     * Get the deployment strategy: "branch", "release", or "bluegreen".
+     */
+    public static function getStrategy(string $repo_dir): string
+    {
+        return ReleaseState::getStrategy($repo_dir);
+    }
+
+    /**
+     * True only for "bluegreen" strategy (shadow ports + health checks).
+     */
+    public static function isBlueGreenStrategy(string $repo_dir): bool
+    {
+        return ReleaseState::isBlueGreenStrategy($repo_dir);
+    }
+
+    /**
+     * True only for "release" strategy (simple one-at-a-time, production ports).
+     */
+    public static function isReleaseStrategy(string $repo_dir): bool
+    {
+        return ReleaseState::isReleaseStrategy($repo_dir);
+    }
+
+    // ─── State management (delegated to ReleaseState) ─────────────────
 
     public static function getActiveVersion(string $repo_dir): ?string
     {
@@ -250,12 +294,18 @@ class BlueGreen
     // ─── Orchestration (stays in facade — coordinates sub-classes) ────
 
     /**
-     * Promote a shadow version to production.
+     * Promote a shadow version to production (BLUEGREEN STRATEGY ONLY).
      *
-     * 1. Stop the currently active containers
-     * 2. Rewrite env files with production ports for the new version
-     * 3. Start the new version on production ports (instant -- image pre-built)
-     * 4. Update state
+     * This method is specific to the "bluegreen" strategy where a shadow
+     * version has been pre-built and health-checked on shadow ports. It:
+     *
+     * 1. Rewrites env files with production ports for the new version
+     * 2. Starts the new version on production ports (instant — image pre-built)
+     * 3. Stops the old version and restarts it on shadow ports for standby rollback
+     * 4. Updates state
+     *
+     * For the "release" strategy, use the simpler flow in release-watcher.php:
+     * stop old → writeReleaseEnv with production ports → startContainers.
      *
      * Returns the promoted version string, or null on failure.
      */

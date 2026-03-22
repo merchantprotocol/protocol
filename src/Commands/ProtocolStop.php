@@ -167,6 +167,9 @@ Class ProtocolStop extends Command {
         });
 
         // ── Stage 3: Stopping containers ────────────────────────
+        // Stops ALL containers across all known directories AND all release
+        // directories. Works for both "release" and "bluegreen" strategies.
+        // allKnownDirs() now scans release dirs too, so we get full coverage.
         $runner->run('Stopping containers', function() use ($repo_dir) {
             $dirs = DeploymentState::allKnownDirs($repo_dir);
             foreach ($dirs as $dir) {
@@ -174,11 +177,12 @@ Class ProtocolStop extends Command {
                 Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
             }
 
-            // Also stop blue-green releases if enabled
+            // Also stop any release dir containers not captured by allKnownDirs.
+            // This catches orphaned releases that aren't tracked in deploy state.
             if (BlueGreen::isEnabled($repo_dir)) {
                 foreach (BlueGreen::listReleases($repo_dir) as $release) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
-                    if (is_dir($releaseDir)) {
+                    if (is_dir($releaseDir) && !in_array(rtrim($releaseDir, '/') . '/', $dirs)) {
                         BlueGreen::stopContainers($releaseDir);
                     }
                 }
@@ -215,11 +219,23 @@ Class ProtocolStop extends Command {
         // ── Summary ─────────────────────────────────────────────
         $environment = Config::read('env', 'unknown');
 
+        // Collect container names from all known dirs (includes release dirs)
         $containerNames = [];
         foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
             $composePath = rtrim($dir, '/') . '/docker-compose.yml';
             if (file_exists($composePath)) {
                 $containerNames = array_merge($containerNames, Docker::getContainerNamesFromDockerComposeFile($dir));
+            }
+        }
+        // Also check release dirs for .env.bluegreen container names
+        // (patched containers won't show their real name from compose alone)
+        if (BlueGreen::isEnabled($repo_dir)) {
+            foreach (BlueGreen::listReleases($repo_dir) as $release) {
+                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
+                $envName = BlueGreen::getContainerName($releaseDir);
+                if ($envName && !in_array($envName, $containerNames)) {
+                    $containerNames[] = $envName;
+                }
             }
         }
         $stoppedCount = 0;
