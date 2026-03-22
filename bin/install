@@ -431,39 +431,51 @@ else
 
       section "Docker"
 
-      if command_exists docker; then
+      if command_exists docker && docker compose version >/dev/null 2>&1; then
         step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
+        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
       else
-        start_spinner "Installing Docker..."
+        start_spinner "Installing Docker CE..."
         if command_exists amazon-linux-extras; then
-          # Amazon Linux 2
-          run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
-            && step_ok "Docker installed" \
+          # Amazon Linux 2 — no Docker CE repo available, use amazon-linux-extras
+          run_silent "docker" bash -c "
+            sudo amazon-linux-extras enable docker
+            sudo yum install -y docker
+          " && step_ok "Docker installed" \
             || step_fail "Failed to install Docker"
         else
-          # Amazon Linux 2023
-          run_silent "docker" sudo dnf install -y docker \
-            && step_ok "Docker installed" \
-            || step_fail "Failed to install Docker"
+          # Amazon Linux 2023 — install Docker CE from official Fedora repo
+          # AL2023 is Fedora-based; the CentOS repo does not work
+          run_silent "docker" bash -c "
+            sudo dnf remove -y docker 2>/dev/null || true
+            sudo dnf install -y dnf-plugins-core
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            sudo sed -i 's/\\\$releasever/39/g' /etc/yum.repos.d/docker-ce.repo
+            sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+          " && step_ok "Docker CE installed" \
+            || step_fail "Failed to install Docker CE"
         fi
-      fi
 
-      start_spinner "Enabling Docker service..."
-      run_silent "docker service" bash -c "sudo systemctl enable docker.service && sudo systemctl start docker.service"
-      sudo groupadd docker 2>/dev/null || true
-      sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
-      step_ok "Docker service running"
+        start_spinner "Enabling Docker service..."
+        run_silent "docker service" bash -c "sudo systemctl enable docker.service && sudo systemctl start docker.service"
+        sudo groupadd docker 2>/dev/null || true
+        sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
+        step_ok "Docker service running"
 
-      # Docker Compose — check both plugin (v2) and standalone
-      if command_exists docker && docker compose version >/dev/null 2>&1; then
-        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
-      elif command_exists docker-compose; then
-        step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
-      else
-        start_spinner "Installing Docker Compose..."
-        run_silent "docker-compose" bash -c "curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /tmp/docker-compose && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose" \
-          && step_ok "Docker Compose installed" \
-          || step_fail "Failed to install Docker Compose"
+        # Verify compose is available (AL2 won't have the plugin)
+        if command_exists docker && docker compose version >/dev/null 2>&1; then
+          step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
+        elif command_exists docker-compose; then
+          step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
+        else
+          start_spinner "Installing Docker Compose standalone..."
+          run_silent "docker-compose" bash -c "
+            curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /tmp/docker-compose \
+              && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose \
+              && sudo chmod +x /usr/local/bin/docker-compose
+          " && step_ok "Docker Compose installed" \
+            || step_fail "Failed to install Docker Compose"
+        fi
       fi
 
       section "Dependencies"
@@ -535,10 +547,11 @@ else
 
       section "Docker"
 
-      if command_exists docker; then
+      if command_exists docker && docker compose version >/dev/null 2>&1; then
         step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
+        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
       else
-        start_spinner "Installing Docker..."
+        start_spinner "Installing Docker CE..."
         run_silent "docker" bash -c "
           sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
           sudo apt-get install -y ca-certificates curl gnupg lsb-release
@@ -546,35 +559,20 @@ else
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
           echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update -y
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-        " && step_ok "Docker installed" \
-          || step_fail "Failed to install Docker"
-      fi
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        " && step_ok "Docker CE installed" \
+          || step_fail "Failed to install Docker CE"
 
-      start_spinner "Enabling Docker service..."
-      run_silent "docker service" bash -c "
-        sudo groupadd docker 2>/dev/null || true
-        sudo usermod -aG docker ${USER:-\$(whoami)} 2>/dev/null || true
-        sudo systemctl enable docker.service
-        sudo systemctl enable containerd.service
-        sudo systemctl start docker.service
-        sudo systemctl start containerd.service
-      "
-      step_ok "Docker service running"
-
-      # Docker Compose — check both plugin (v2) and standalone
-      if command_exists docker && docker compose version >/dev/null 2>&1; then
-        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
-      elif command_exists docker-compose; then
-        step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
-      else
-        start_spinner "Installing Docker Compose..."
-        run_silent "docker-compose" bash -c "
-          sudo curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-        " && step_ok "Docker Compose installed" \
-          || step_fail "Failed to install Docker Compose"
+        start_spinner "Enabling Docker service..."
+        run_silent "docker service" bash -c "
+          sudo groupadd docker 2>/dev/null || true
+          sudo usermod -aG docker ${USER:-\$(whoami)} 2>/dev/null || true
+          sudo systemctl enable docker.service
+          sudo systemctl enable containerd.service
+          sudo systemctl start docker.service
+          sudo systemctl start containerd.service
+        "
+        step_ok "Docker service running"
       fi
 
       section "Dependencies"
