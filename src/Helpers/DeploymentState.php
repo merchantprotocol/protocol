@@ -392,6 +392,19 @@ class DeploymentState
             }
         }
 
+        // Scan ALL release directories for running containers.
+        // This ensures `protocol stop` finds containers regardless of which
+        // strategy created them (release or bluegreen).
+        $strategy = self::strategy($repoDir);
+        if (in_array($strategy, ['release', 'bluegreen'], true)) {
+            if (class_exists(BlueGreen::class)) {
+                $releases = BlueGreen::listReleases($repoDir);
+                foreach ($releases as $release) {
+                    $dirs[] = BlueGreen::getReleaseDir($repoDir, $release);
+                }
+            }
+        }
+
         // Deduplicate and filter to existing directories with docker-compose
         $unique = [];
         foreach (array_unique($dirs) as $dir) {
