@@ -47,6 +47,43 @@ function wlog(string $msg): void {
     echo "[" . date('Y-m-d H:i:s') . "] {$msg}\n";
 }
 
+/**
+ * Self-restart the watcher daemon to pick up code changes from the new release.
+ *
+ * After a successful deploy, the watcher's PHP code in memory is stale — any
+ * fixes or changes included in the new tag won't take effect until the process
+ * restarts. This function spawns a fresh watcher process with the same arguments,
+ * updates the stored PID, and exits the current process.
+ */
+function selfRestart(string $repo_dir, int $interval): void
+{
+    wlog("Self-restarting watcher to pick up code from new release...");
+
+    $watcherScript = __FILE__;
+    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
+    $logFile = $logDir . 'release-watcher.log';
+
+    $cmd = "nohup php " . escapeshellarg($watcherScript)
+        . " --dir=" . escapeshellarg($repo_dir)
+        . " --interval=" . escapeshellarg((string) $interval)
+        . " >> " . escapeshellarg($logFile) . " 2>&1 & echo $!";
+
+    wlog("Spawn command: {$cmd}");
+    $newPid = trim(Shell::run($cmd));
+
+    if ($newPid && is_numeric($newPid)) {
+        JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
+        JsonLock::write('deploy.watcher_pid', (int) $newPid, $repo_dir);
+        JsonLock::save($repo_dir);
+        wlog("New watcher spawned (PID: {$newPid}). Old process (PID: " . getmypid() . ") exiting.");
+    } else {
+        wlog("WARNING: Failed to spawn new watcher (got: '{$newPid}'). Continuing with current process.");
+        return;
+    }
+
+    exit(0);
+}
+
 wlog("Release watcher started (PID: " . getmypid() . ")");
 wlog("  inherited cwd: " . ($inheritedCwd ?: 'FALSE (invalid/deleted directory!)'));
 wlog("  --dir arg:     " . ($rawDir ?: '(not set, used cwd)'));
@@ -235,6 +272,9 @@ while (true) {
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
             wlog("Release deploy complete: {$activeRelease} serving on production ports");
 
+            // Self-restart to pick up any code changes in the new release
+            selfRestart($repo_dir, $interval);
+
         } elseif ($strategy === 'bluegreen') {
             // ─────────────────────────────────────────────────────
             // BLUEGREEN STRATEGY — Zero-downtime shadow deployment
@@ -323,6 +363,9 @@ while (true) {
                         JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
                         JsonLock::save($repo_dir);
                         wlog("Release state updated: current={$activeRelease}");
+
+                        // Self-restart to pick up any code changes in the new release
+                        selfRestart($repo_dir, $interval);
                     } else {
                         wlog("ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle");
                     }
@@ -385,6 +428,9 @@ while (true) {
             // Audit log
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
             wlog("Deploy complete: {$activeRelease}");
+
+            // Self-restart to pick up any code changes in the new release
+            selfRestart($repo_dir, $interval);
         }
     } catch (\Exception $e) {
         wlog("ERROR: " . $e->getMessage());
