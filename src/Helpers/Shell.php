@@ -32,7 +32,6 @@
  */
 namespace Gitcd\Helpers;
 
-use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
@@ -207,12 +206,7 @@ Class Shell
      */
     public static function background( $command )
     {
-        $outputfile = Config::read('shell.outputfile');
-        // PHP does not expand ~ — resolve to actual home directory
-        if (str_starts_with($outputfile, '~/')) {
-            $home = getenv('HOME') ?: ($_SERVER['HOME'] ?? '/tmp');
-            $outputfile = $home . substr($outputfile, 1);
-        }
+        $outputfile = '/var/log/protocol/background_process.log';
         if (!file_exists($outputfile)) {
             $dir = dirname($outputfile);
             if (!is_dir($dir)) {
