@@ -121,12 +121,22 @@ Class NodeDeploy extends Command {
         if ($tmpEnv) {
             $output->writeln(' - Secrets resolved to temp file');
 
-            // Rebuild docker with env file
-            $dockerCommand = Docker::getDockerCommand();
-            Shell::passthru("{$dockerCommand} -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
-
-            // Delete temp file immediately
+            // Write secrets into the project dir and generate compose override
+            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+            $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
+            copy($tmpEnv, $secretsFile);
+            chmod($secretsFile, 0600);
             unlink($tmpEnv);
+
+            $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+            $dockerCommand = Docker::getDockerCommand();
+
+            Shell::passthru("{$dockerCommand} -f " . escapeshellarg($composePath)
+                . " -f " . escapeshellarg($overrideFile)
+                . " up -d --build 2>&1");
+
+            unlink($secretsFile);
+            unlink($overrideFile);
             $output->writeln(' - Docker containers rebuilt (secrets injected and cleaned)');
         } else {
             // Rebuild docker normally (file mode or no secrets)
