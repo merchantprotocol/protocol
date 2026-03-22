@@ -68,18 +68,43 @@ Class ProtocolStatus extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         $nodeConfig = null;
         $nodeData = [];
+        $activeDir = null;
+        $issues = [];
+        $wazuhRunning = false;
+        $wazuhInstalled = false;
 
         // Detect slave node mode so status works from anywhere
         $projectArg = $input->getArgument('project');
-        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        $resolveError = null;
+        try {
+            $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        } catch (\RuntimeException $e) {
+            $resolved = null;
+            $resolveError = $e->getMessage();
+        }
         if ($resolved) {
             [$nodeConfig, $nodeData, $activeDir] = $resolved;
-            $repo_dir = $nodeData['repo_dir'] ?? $repo_dir;
+            $repo_dir = $activeDir ?? $repo_dir;
         }
 
         // For non-slave nodes, require a git repo as before
-        if (!$nodeConfig) {
+        if (!$nodeConfig && !$resolveError) {
             Git::checkInitializedRepo($output, $repo_dir);
+        }
+
+        // If resolve failed but we have node configs, load the first one for partial status display
+        if ($resolveError && !$nodeConfig) {
+            $projects = NodeConfig::listProjects();
+            $project = ($projectArg && NodeConfig::exists($projectArg)) ? $projectArg : ($projects[0] ?? null);
+            if ($project) {
+                $nodeConfig = $project;
+                $nodeData = NodeConfig::load($project);
+                // Try to set activeDir from releases_dir even though full resolve failed
+                $relDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+                if ($relDir && is_dir($relDir)) {
+                    $activeDir = rtrim($relDir, '/') . '/';
+                }
+            }
         }
 
         // Read config: slave nodes use NodeConfig, others use protocol.json
@@ -105,6 +130,9 @@ Class ProtocolStatus extends Command {
             $gitRemote = null;
             $activeDir = $repo_dir;
         }
+
+        // Config repo path (may be null if repo not set up)
+        $configrepo = Config::repo($repo_dir);
 
         $output->writeln('');
 
@@ -183,8 +211,14 @@ Class ProtocolStatus extends Command {
         }
 
         // Active directory
-        if ($nodeConfig && $activeDir !== $repo_dir) {
-            $this->writeLine($output, 'Active dir', "<fg=white>{$activeDir}/</>");
+        if ($nodeConfig && $activeDir && $activeDir !== $repo_dir) {
+            $this->writeLine($output, 'Active dir', "<fg=white>{$activeDir}</>");
+        }
+
+        // Show resolve error as a setup issue, not a crash
+        if ($resolveError) {
+            $this->writeLine($output, 'Deploy status', '<fg=yellow>not deployed yet</>');
+            $issues[] = $resolveError;
         }
 
         // Uptime
@@ -198,9 +232,11 @@ Class ProtocolStatus extends Command {
         $this->writeSection($output, 'Services');
 
         // Deploy watcher — check lock files in the active directory
-        $lockDir = $nodeConfig ? $activeDir : $repo_dir;
+        $lockDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
 
-        if ($strategy === 'release') {
+        if (!$lockDir || !is_dir($lockDir)) {
+            $this->writeService($output, 'watchers', 'stopped', 'no active deployment directory');
+        } elseif ($strategy === 'release') {
             $pid = JsonLock::read('release.slave.pid', null, $lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
@@ -227,7 +263,7 @@ Class ProtocolStatus extends Command {
         }
 
         // Config watcher
-        if (Git::isInitializedRepo($configrepo)) {
+        if ($configrepo && Git::isInitializedRepo($configrepo)) {
             $pid = JsonLock::read('configuration.slave.pid', null, $lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
@@ -270,8 +306,8 @@ Class ProtocolStatus extends Command {
         }
 
         // ── Docker ───────────────────────────────────────────────
-        $dockerDir = $nodeConfig ? $activeDir : $repo_dir;
-        if (Docker::isDockerInitialized($dockerDir)) {
+        $dockerDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
+        if ($dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
             $output->writeln('');
             $this->writeSection($output, 'Docker');
 
@@ -306,7 +342,7 @@ Class ProtocolStatus extends Command {
         $output->writeln('');
         $this->writeSection($output, 'Configuration');
 
-        if (Git::isInitializedRepo($configrepo)) {
+        if ($configrepo && Git::isInitializedRepo($configrepo)) {
             $branch = Git::branch($configrepo);
             $envMatch = Config::read('env', 'not set') === $branch;
             $branchColor = $envMatch ? 'green' : 'yellow';
@@ -351,21 +387,26 @@ Class ProtocolStatus extends Command {
         $this->writeSection($output, 'Security');
 
         // SOC 2 checks
-        $soc2 = new Soc2Check($activeDir);
-        $soc2->runAll();
-        $soc2Results = $soc2->getResults();
-        $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
-        $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
+        $soc2Dir = $activeDir ?: $repo_dir;
+        if ($soc2Dir && is_dir($soc2Dir)) {
+            $soc2 = new Soc2Check($soc2Dir);
+            $soc2->runAll();
+            $soc2Results = $soc2->getResults();
+            $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
+            $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
 
-        if (empty($soc2Failures) && empty($soc2Warns)) {
-            $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
-        } elseif (empty($soc2Failures)) {
-            $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
-        } else {
-            $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
-            foreach ($soc2Failures as $f) {
-                $issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
+            if (empty($soc2Failures) && empty($soc2Warns)) {
+                $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
+            } elseif (empty($soc2Failures)) {
+                $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
+            } else {
+                $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
+                foreach ($soc2Failures as $f) {
+                    $issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
+                }
             }
+        } else {
+            $this->writeLine($output, 'SOC 2', '<fg=gray>skipped (no active directory)</>');
         }
 
         // SIEM
