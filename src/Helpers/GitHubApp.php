@@ -237,7 +237,34 @@ class GitHubApp
         chmod($credentialFile, 0600);
 
         // Configure git to use our credential file
-        Shell::run("git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
+        // Ensure HOME is set so git finds ~/.gitconfig (daemons may not have HOME)
+        $home = getenv('HOME') ?: (function_exists('posix_getpwuid') ? (posix_getpwuid(posix_geteuid())['dir'] ?? '') : '');
+        $homePrefix = $home ? "HOME=" . escapeshellarg($home) . " " : "";
+        Shell::run("{$homePrefix}git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
+    }
+
+    /**
+     * Write the GitHub App token to composer's global auth.json
+     * so composer can access GitHub API without rate-limit prompts.
+     */
+    public static function writeComposerAuth(string $token): void
+    {
+        $composerHome = getenv('COMPOSER_HOME') ?: (getenv('HOME') ?: getenv('USERPROFILE')) . '/.config/composer';
+        $authFile = $composerHome . '/auth.json';
+
+        $auth = [];
+        if (is_file($authFile)) {
+            $auth = json_decode(file_get_contents($authFile), true) ?: [];
+        }
+
+        $auth['github-oauth'] = $auth['github-oauth'] ?? [];
+        $auth['github-oauth']['github.com'] = $token;
+
+        if (!is_dir($composerHome)) {
+            mkdir($composerHome, 0700, true);
+        }
+        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+        chmod($authFile, 0600);
     }
 
     /**

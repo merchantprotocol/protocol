@@ -544,7 +544,7 @@ Class ProtocolInit extends Command {
         $nodeData['name'] = $projectName;
         $nodeData['node_type'] = 'slave';
         $nodeData['environment'] = $environment;
-        $nodeData['repo_dir'] = $repo_dir;
+        // repo_dir is not set — releases_dir is the source of truth for all paths
         $nodeData['git'] = $nodeData['git'] ?? [];
         $nodeData['git']['remote'] = $gitRemote;
         $nodeData['deployment'] = $nodeData['deployment'] ?? [];
