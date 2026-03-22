@@ -38,8 +38,34 @@ use Gitcd\Helpers\Config;
 Class Crontab
 {
     /**
+     * Ensure crontab is available on the system.
+     * Installs cronie if missing (Amazon Linux / RHEL / Debian).
+     */
+    public static function ensureInstalled(): bool
+    {
+        if (Shell::run("which crontab 2>/dev/null")) {
+            return true;
+        }
+
+        // Try to install cronie
+        if (Shell::run("which yum 2>/dev/null")) {
+            Shell::run("sudo yum install -y cronie 2>/dev/null");
+        } elseif (Shell::run("which dnf 2>/dev/null")) {
+            Shell::run("sudo dnf install -y cronie 2>/dev/null");
+        } elseif (Shell::run("which apt-get 2>/dev/null")) {
+            Shell::run("sudo apt-get install -y cron 2>/dev/null");
+        }
+
+        // Enable and start the service
+        Shell::run("sudo systemctl enable crond 2>/dev/null || sudo systemctl enable cron 2>/dev/null");
+        Shell::run("sudo systemctl start crond 2>/dev/null || sudo systemctl start cron 2>/dev/null");
+
+        return (bool) Shell::run("which crontab 2>/dev/null");
+    }
+
+    /**
      * This command will cause protocol to be restarted when the server is restarted
-     * 
+     *
      *
      * @param [type] $repo_dir
      * @return void
@@ -63,6 +89,9 @@ Class Crontab
      */
     public static function addCrontabRestart( $repo_dir )
     {
+        if (!self::ensureInstalled()) {
+            return false;
+        }
         $body = self::restartcommand( $repo_dir ).PHP_EOL;
         self::appendCrontab( $body );
         return true;
@@ -111,7 +140,11 @@ Class Crontab
      */
     public static function appendCrontab( $toappend )
     {
-        $existing = Shell::run("crontab -l 2>/dev/null") ?: '';
+        $existing = Shell::run("crontab -l", $returnVar);
+        // If crontab -l fails (no crontab), start fresh
+        if ($returnVar !== 0) {
+            $existing = '';
+        }
         $newCrontab = rtrim($existing) . PHP_EOL . $toappend;
         return self::overwriteCrontab($newCrontab);
     }
@@ -126,7 +159,14 @@ Class Crontab
     {
         $tmpFile = tempnam(sys_get_temp_dir(), 'crontab_');
         file_put_contents($tmpFile, $tooverwrite);
-        $result = Shell::run("crontab " . escapeshellarg($tmpFile));
+        $result = Shell::run("crontab " . escapeshellarg($tmpFile), $returnVar);
+        if ($returnVar !== 0) {
+            // Log failure for debugging
+            $logFile = is_writable('/var/log/protocol/') ? '/var/log/protocol/protocol-start.log' : null;
+            if ($logFile) {
+                @file_put_contents($logFile, "[" . date('H:i:s') . "] [crontab] overwrite failed (exit={$returnVar}): {$result}\n[crontab] content: " . str_replace("\n", "\\n", $tooverwrite) . "\n", FILE_APPEND | LOCK_EX);
+            }
+        }
         unlink($tmpFile);
         return $result;
     }

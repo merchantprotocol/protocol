@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 
 Class ComposerInstall extends Command {
@@ -95,9 +96,35 @@ Class ComposerInstall extends Command {
         }
 
         Shell::run("chmod +x ".SCRIPT_DIR."composer.phar");
-        $command = SCRIPT_DIR."composer.phar install --working-dir='$repo_dir' --ignore-platform-reqs";
-        $response = Shell::run($command);
-        if ($response) $output->writeln($response);
+
+        // If GitHub App is configured, inject the token into composer's config
+        // so it can authenticate to private GitHub repos via HTTPS
+        if (GitHubApp::isConfigured()) {
+            $token = GitHubApp::getAccessToken();
+            if ($token) {
+                Shell::run(SCRIPT_DIR . "composer.phar config --global github-oauth.github.com " . escapeshellarg($token) . " 2>/dev/null");
+            }
+        }
+
+        // Suppress PHP deprecation notices from old composer.phar on PHP 8.4+
+        $phpFlags = "php -d error_reporting=E_ALL\\&~E_DEPRECATED -d display_errors=0";
+        $command = "timeout 120 {$phpFlags} " . SCRIPT_DIR . "composer.phar install"
+            . " --working-dir=" . escapeshellarg($repo_dir)
+            . " --ignore-platform-reqs"
+            . " --no-interaction"
+            . " --no-ansi";
+
+        if ($output->isVerbose()) {
+            // Stream output live so hangs are visible
+            $output->writeln("  > {$command}");
+            passthru($command . " 2>&1", $return_var);
+        } else {
+            $response = Shell::run($command, $return_var);
+            if ($response) $output->writeln($response);
+        }
+        if ($return_var) {
+            $output->writeln("<error>Composer install failed (exit code {$return_var})</error>");
+        }
 
         return Command::SUCCESS;
     }

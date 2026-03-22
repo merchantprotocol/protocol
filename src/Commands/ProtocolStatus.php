@@ -238,7 +238,7 @@ Class ProtocolStatus extends Command {
         }
 
         // Crontab
-        $hasCron = Crontab::hasCrontabRestart($activeDir);
+        $hasCron = Crontab::hasCrontabRestart($repo_dir);
         if ($hasCron) {
             $this->writeService($output, 'crontab', 'installed');
         } else {
@@ -313,23 +313,27 @@ Class ProtocolStatus extends Command {
             $this->writeLine($output, 'Config branch', "<fg={$branchColor}>{$branch}</>");
 
             // Secrets status
-            $decryptedFiles = JsonLock::read('configuration.decrypted_files', [], $lockDir);
-            if (!empty($decryptedFiles)) {
-                $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
-            } elseif (Secrets::hasKey()) {
-                $encFiles = glob(rtrim($configrepo, '/') . '/*.enc');
-                if (!empty($encFiles)) {
-                    $this->writeLine($output, 'Secrets', '<fg=yellow>encrypted but not linked</>');
-                    $issues[] = 'Encrypted secrets not decrypted — run protocol start';
-                } else {
-                    $this->writeLine($output, 'Secrets', '<fg=green>key present</>');
-                }
+            if ($secretsMode === 'aws') {
+                $this->writeLine($output, 'Secrets', '<fg=green>AWS Secrets Manager</>');
             } else {
-                if ($secretsMode === 'encrypted') {
-                    $this->writeLine($output, 'Secrets', '<fg=red>encrypted but key MISSING</>');
-                    $issues[] = 'Encryption key missing — run protocol secrets:setup';
+                $decryptedFiles = JsonLock::read('configuration.decrypted_files', [], $lockDir);
+                if (!empty($decryptedFiles)) {
+                    $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
+                } elseif (Secrets::hasKey()) {
+                    $encFiles = glob(rtrim($configrepo, '/') . '/*.enc');
+                    if (!empty($encFiles)) {
+                        $this->writeLine($output, 'Secrets', '<fg=yellow>encrypted but not linked</>');
+                        $issues[] = 'Encrypted secrets not decrypted — run protocol start';
+                    } else {
+                        $this->writeLine($output, 'Secrets', '<fg=green>key present</>');
+                    }
                 } else {
-                    $this->writeLine($output, 'Secrets', '<fg=white>plaintext</>');
+                    if ($secretsMode === 'encrypted') {
+                        $this->writeLine($output, 'Secrets', '<fg=red>encrypted but key MISSING</>');
+                        $issues[] = 'Encryption key missing — run protocol secrets:setup';
+                    } else {
+                        $this->writeLine($output, 'Secrets', '<fg=white>plaintext</>');
+                    }
                 }
             }
 

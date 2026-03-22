@@ -56,10 +56,13 @@ Class SecretsSetup extends Command {
             With an argument, stores the provided key on this node.
             Example: protocol secrets:setup "your-hex-key-here"
 
+            The storage location is determined by the environment set via
+            config:env. Production environments store the key globally in
+            protocol's .node/key. All other environments (local, dev, staging)
+            store the key per-project in the current working directory's .node/key.
+
             The key is also read automatically from the PROTOCOL_ENCRYPTION_KEY
             environment variable, so CI/CD workflows can pass it from GitHub secrets.
-
-            The key is stored at ~/.protocol/.node/key with 0600 permissions.
 
             HELP)
         ;
@@ -86,8 +89,12 @@ Class SecretsSetup extends Command {
             }
         }
 
+        $keyPath = Secrets::keyPath();
+        $scope = Secrets::isGlobal() ? 'global' : 'project';
+        $output->writeln("<comment>Environment scope: {$scope}</comment>");
+
         if (Secrets::hasKey() && !$providedKey) {
-            $output->writeln('<comment>Encryption key already exists at: ' . Secrets::keyPath() . '</comment>');
+            $output->writeln('<comment>Encryption key already exists at: ' . $keyPath . '</comment>');
             $output->writeln('To replace it, delete the existing key first.');
             return Command::SUCCESS;
         }
@@ -101,7 +108,7 @@ Class SecretsSetup extends Command {
             }
 
             if (Secrets::storeKey($providedKey)) {
-                $output->writeln('<info>Encryption key stored at: ' . Secrets::keyPath() . '</info>');
+                $output->writeln('<info>Encryption key stored at: ' . $keyPath . '</info>');
             } else {
                 $output->writeln('<error>Failed to store encryption key.</error>');
                 return Command::FAILURE;
@@ -117,7 +124,7 @@ Class SecretsSetup extends Command {
                 $output->writeln('<comment>Copy this key to other nodes:</comment>');
                 $output->writeln("  protocol secrets:setup \"{$hexKey}\"");
                 $output->writeln('');
-                $output->writeln('Stored at: ' . Secrets::keyPath());
+                $output->writeln('Stored at: ' . $keyPath);
             } else {
                 $output->writeln('<error>Failed to generate encryption key.</error>');
                 return Command::FAILURE;

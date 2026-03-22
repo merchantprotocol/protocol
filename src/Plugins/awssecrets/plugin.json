@@ -1,0 +1,13 @@
+{
+    "name": "AWS Secrets Manager",
+    "description": "Push and pull secrets via AWS Secrets Manager (SOC 2 compliant)",
+    "version": "1.0.0",
+    "commands": {
+        "aws:init": "Configure AWS Secrets Manager for this project",
+        "aws:push": "Push local .env secrets to AWS Secrets Manager",
+        "aws:pull": "Pull secrets from AWS Secrets Manager to local .env",
+        "aws:status": "Show secret metadata (version, last modified, ARN)"
+    },
+    "config_keys": {},
+    "verify_command": "aws sts get-caller-identity"
+}

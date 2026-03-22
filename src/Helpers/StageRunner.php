@@ -19,15 +19,17 @@ class StageRunner
 
     private OutputInterface $output;
     private bool $isTty;
+    private bool $verbose;
     private array $completedStages = [];
     private float $startTime;
     private ?string $logFile = null;
     private ?string $currentStage = null;
 
-    public function __construct(OutputInterface $output)
+    public function __construct(OutputInterface $output, bool $verbose = false)
     {
         $this->output = $output;
-        $this->isTty = self::isTty();
+        $this->verbose = $verbose;
+        $this->isTty = $verbose ? false : self::isTty();
         $this->startTime = microtime(true);
         $this->initLog();
     }
@@ -39,13 +41,17 @@ class StageRunner
     {
         $logDir = '/var/log/protocol/';
         if (!is_dir($logDir)) {
-            @mkdir($logDir, 0755, true);
+            // /var/log is typically root-owned; use sudo to create
+            Shell::run("sudo mkdir -p /var/log/protocol 2>/dev/null");
         }
-        // Fall back to NODE_DATA_DIR if /var/log/protocol isn't writable
+        if (is_dir($logDir) && !is_writable($logDir)) {
+            Shell::run("sudo chmod 1777 /var/log/protocol 2>/dev/null");
+        }
+        // Fallback if /var/log/protocol still isn't available
         if (!is_dir($logDir) || !is_writable($logDir)) {
             $logDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
             if (!is_dir($logDir)) {
-                mkdir($logDir, 0700, true);
+                @mkdir($logDir, 0755, true);
             }
         }
         $this->logFile = $logDir . 'protocol-start.log';
@@ -63,15 +69,20 @@ class StageRunner
      */
     public function log(string $message): void
     {
-        if (!$this->logFile) return;
-
         $timestamp = date('H:i:s');
         $prefix = $this->currentStage ? "[{$this->currentStage}] " : '';
-        @file_put_contents(
-            $this->logFile,
-            "[{$timestamp}] {$prefix}{$message}\n",
-            FILE_APPEND | LOCK_EX
-        );
+
+        if ($this->logFile) {
+            @file_put_contents(
+                $this->logFile,
+                "[{$timestamp}] {$prefix}{$message}\n",
+                FILE_APPEND | LOCK_EX
+            );
+        }
+
+        if ($this->verbose) {
+            $this->output->writeln("[{$timestamp}] {$prefix}{$message}");
+        }
     }
 
     /**

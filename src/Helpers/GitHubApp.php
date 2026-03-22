@@ -166,6 +166,7 @@ class GitHubApp
     {
         $creds = self::loadCredentials();
         if (!$creds) {
+            self::logError("No GitHub App credentials found");
             return null;
         }
 
@@ -174,21 +175,47 @@ class GitHubApp
         $owner = $owner ?? $creds['owner'] ?? null;
 
         if (!$appId || !$owner || !is_file($pemPath)) {
+            self::logError("Missing app_id={$appId}, owner={$owner}, pem=" . ($pemPath && is_file($pemPath) ? 'exists' : 'missing'));
             return null;
         }
 
         $pemContents = file_get_contents($pemPath);
         $jwt = self::generateJwt($appId, $pemContents);
         if (!$jwt) {
+            self::logError("JWT generation failed (check PEM key validity)");
             return null;
         }
 
         $installationId = self::getInstallationId($jwt, $owner);
         if (!$installationId) {
+            self::logError("Could not find GitHub App installation for owner '{$owner}'");
             return null;
         }
 
-        return self::generateInstallationToken($jwt, $installationId);
+        $token = self::generateInstallationToken($jwt, $installationId);
+        if (!$token) {
+            self::logError("Failed to generate installation token for installation {$installationId}");
+            return null;
+        }
+
+        return $token;
+    }
+
+    /**
+     * Log an error to the protocol log file.
+     */
+    private static function logError(string $message): void
+    {
+        $logFile = '/var/log/protocol/protocol-start.log';
+        if (!is_file($logFile)) {
+            $fallbackDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
+            $logFile = $fallbackDir . 'protocol-start.log';
+        }
+        @file_put_contents(
+            $logFile,
+            "[" . date('H:i:s') . "] [GitHubApp] {$message}\n",
+            FILE_APPEND | LOCK_EX
+        );
     }
 
     /**
@@ -210,7 +237,58 @@ class GitHubApp
         chmod($credentialFile, 0600);
 
         // Configure git to use our credential file
-        Shell::run("git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
+        // Ensure HOME is set so git finds ~/.gitconfig (daemons may not have HOME)
+        $home = getenv('HOME') ?: (function_exists('posix_getpwuid') ? (posix_getpwuid(posix_geteuid())['dir'] ?? '') : '');
+        $homePrefix = $home ? "HOME=" . escapeshellarg($home) . " " : "";
+        Shell::run("{$homePrefix}git config --global credential.helper 'store --file=" . escapeshellarg($credentialFile) . "'");
+    }
+
+    /**
+     * Write the GitHub App token to composer's global auth.json
+     * so composer can access GitHub API without rate-limit prompts.
+     */
+    public static function writeComposerAuth(string $token): void
+    {
+        $composerHome = getenv('COMPOSER_HOME') ?: (getenv('HOME') ?: getenv('USERPROFILE')) . '/.config/composer';
+        $authFile = $composerHome . '/auth.json';
+
+        $auth = [];
+        if (is_file($authFile)) {
+            $auth = json_decode(file_get_contents($authFile), true) ?: [];
+        }
+
+        $auth['github-oauth'] = $auth['github-oauth'] ?? [];
+        $auth['github-oauth']['github.com'] = $token;
+
+        if (!is_dir($composerHome)) {
+            mkdir($composerHome, 0700, true);
+        }
+        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+        chmod($authFile, 0600);
+    }
+
+    /**
+     * Write the GitHub App token to composer's global auth.json
+     * so composer can access GitHub API without rate-limit prompts.
+     */
+    public static function writeComposerAuth(string $token): void
+    {
+        $composerHome = getenv('COMPOSER_HOME') ?: (getenv('HOME') ?: getenv('USERPROFILE')) . '/.config/composer';
+        $authFile = $composerHome . '/auth.json';
+
+        $auth = [];
+        if (is_file($authFile)) {
+            $auth = json_decode(file_get_contents($authFile), true) ?: [];
+        }
+
+        $auth['github-oauth'] = $auth['github-oauth'] ?? [];
+        $auth['github-oauth']['github.com'] = $token;
+
+        if (!is_dir($composerHome)) {
+            mkdir($composerHome, 0700, true);
+        }
+        file_put_contents($authFile, json_encode($auth, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+        chmod($authFile, 0600);
     }
 
     /**
@@ -224,6 +302,7 @@ class GitHubApp
             return false;
         }
         self::writeGitCredentials($token);
+        self::writeComposerAuth($token);
         return true;
     }
 

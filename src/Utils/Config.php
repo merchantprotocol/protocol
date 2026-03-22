@@ -190,9 +190,7 @@ Class Config
 		
 		if (file_exists($file)) {
 			if (fileperms($file) !== 33279) {
-				if (!chmod($file, 0755)) {
-					@unlink($file);
-				}
+				chmod($file, 0755);
 			}
 		}
 		

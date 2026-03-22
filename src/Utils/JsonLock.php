@@ -77,8 +77,16 @@ Class JsonLock extends Json
 			}
 		}
 		$raw = file_get_contents($file);
+		if ($raw === false) {
+			throw new \RuntimeException("Failed to read lock file: {$file}");
+		}
 
 		$this->data = json_decode($raw, true);
+		if ($this->data === null && json_last_error() !== JSON_ERROR_NONE) {
+			throw new \RuntimeException(
+				"Corrupt lock file: {$file} — " . json_last_error_msg()
+			);
+		}
 	}
 
 	/**

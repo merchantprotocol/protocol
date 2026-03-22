@@ -33,68 +33,64 @@
 namespace Gitcd\Commands;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Gitcd\Helpers\Dir;
-use Gitcd\Helpers\Git;
-use Gitcd\Helpers\AuditLog;
-use Gitcd\Helpers\DeploymentState;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\GitHubApp;
 
-Class NodeRollback extends Command {
+Class GitHubToken extends Command {
 
-    protected static $defaultName = 'node:rollback';
-    protected static $defaultDescription = 'Roll back THIS node only to the previous release';
+    protected static $defaultName = 'github:token';
+    protected static $defaultDescription = 'Refresh GitHub App credentials for git operations';
 
     protected function configure(): void
     {
         $this
             ->setHelp(<<<HELP
-            Rolls back this node to its previous release.
-            Does NOT affect the global pointer or other nodes.
+            Refreshes the GitHub App installation access token and writes it to the
+            git-credentials file. Tokens expire after 1 hour, so this command should
+            be called before git operations that require authentication.
 
-            For rolling back all nodes, use: protocol deploy:rollback
+            This command is designed to be called by long-running watcher scripts
+            (git:slave, config:slave) before each git fetch cycle.
+
+            Exit codes:
+              0  Token refreshed successfully (or no GitHub App configured)
+              1  Token refresh failed
 
             HELP)
-        ;
-        $this
-            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
         ;
     }
 
     /**
      * @param InputInterface $input
      * @param OutputInterface $output
-     * @return int
+     * @return integer
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo($output, $repo_dir);
+        if (!GitHubApp::isConfigured()) {
+            return Command::SUCCESS;
+        }
 
-        $prev = DeploymentState::previous($repo_dir);
-        $previousRelease = $prev['version'] ?? null;
-        if (!$previousRelease) {
-            $output->writeln('<error>No previous release found in protocol.lock.</error>');
+        $creds = GitHubApp::loadCredentials();
+        $owner = $creds['owner'] ?? null;
+
+        if (!$owner) {
+            $output->writeln('<error>GitHub App credentials missing owner field</error>');
             return Command::FAILURE;
         }
 
-        $cur = DeploymentState::current($repo_dir);
-        $currentRelease = $cur['version'] ?? null;
-        $output->writeln("<comment>Rolling back this node from {$currentRelease} to {$previousRelease}</comment>");
+        $refreshed = GitHubApp::refreshGitCredentials($owner);
 
-        $command = $this->getApplication()->find('node:deploy');
-        $returnCode = $command->run(new ArrayInput([
-            'version' => $previousRelease,
-            '--dir' => $repo_dir,
-        ]), $output);
-
-        if ($returnCode === Command::SUCCESS) {
-            AuditLog::logRollback($repo_dir, $currentRelease, $previousRelease, 'success', 'node');
+        if (!$refreshed) {
+            $output->writeln('<error>Failed to refresh GitHub App token</error>');
+            return Command::FAILURE;
         }
 
-        return $returnCode;
+        if ($output->isVerbose()) {
+            $output->writeln('<info>GitHub App token refreshed</info>');
+        }
+
+        return Command::SUCCESS;
     }
 }
