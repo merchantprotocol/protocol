@@ -53,6 +53,7 @@ class GitHub
 
         $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
 
+
         $result = Shell::run($cmd);
         if (!$result) return null;
 
@@ -77,6 +78,7 @@ class GitHub
             . " -H 'Accept: application/vnd.github+json'"
             . " -H 'X-GitHub-Api-Version: 2022-11-28'"
             . " " . escapeshellarg($url) . " 2>/dev/null";
+
 
         $result = Shell::run($cmd);
         return $result ?: null;

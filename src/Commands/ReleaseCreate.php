@@ -161,7 +161,7 @@ Class ReleaseCreate extends Command {
             if (GitHub::createRelease($version, $title, $draft, $repo_dir)) {
                 $output->writeln(" - Created GitHub Release" . ($draft ? ' (draft)' : ''));
             } else {
-                $output->writeln("<comment> - Could not create GitHub Release (gh CLI may not be available)</comment>");
+                $output->writeln("<comment> - Could not create GitHub Release (check gh auth status or GitHub App credentials)</comment>");
             }
         } else {
             $output->writeln(" - Skipped push (--no-push)");

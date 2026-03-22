@@ -65,6 +65,7 @@ while (true) {
         JsonLock::clearInstances();
         Json::clearInstances();
 
+
         // Refresh credentials before each poll (tokens expire after 1 hour)
         if (GitHubApp::isConfigured()) {
             $creds = GitHubApp::loadCredentials();
@@ -217,6 +218,7 @@ while (true) {
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 wlog("ERROR: Health check FAILED for {$activeRelease} — will retry next cycle");
             }
+
 
         } else {
             // ── Standard in-place deployment ─────────────────

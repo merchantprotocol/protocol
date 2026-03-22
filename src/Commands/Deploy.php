@@ -89,6 +89,7 @@ Class Deploy extends Command {
             return Command::FAILURE;
         }
 
+
         // Verify tag exists
         if (!GitHub::tagExists($version, $repo_dir)) {
             // Check GitHub releases as fallback

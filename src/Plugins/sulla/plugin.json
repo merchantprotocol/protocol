@@ -1,0 +1,15 @@
+{
+    "name": "Sulla",
+    "description": "Install and manage the Sulla AI agent with Enterprise Gateway and MCP integration",
+    "version": "1.0.0",
+    "commands": {
+        "sulla:install": "Download and install the Sulla agent for the current OS",
+        "sulla:init": "Setup wizard — configure Enterprise Gateway connection and MCP servers",
+        "sulla:start": "Start the Sulla agent in the background",
+        "sulla:stop": "Stop the running Sulla agent",
+        "sulla:status": "Show Sulla agent status and configuration",
+        "mcp:serve": "Start an MCP server over stdio — exposes all Protocol commands as tools"
+    },
+    "config_keys": {},
+    "verify_command": ""
+}
