@@ -106,10 +106,18 @@ while (true) {
         // ── New release detected ─────────────────────────────
         wlog("New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")");
 
-        // Fetch latest tags
-        $remote = Git::remoteName($repo_dir) ?: 'origin';
-        wlog("Fetching tags from {$remote}...");
-        Shell::run("GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+        // Fetch latest tags — use resolved HTTPS URL so the GitHub App
+        // credential helper works (the remote may point to an SSH URL).
+        $gitRemote = BlueGreen::getGitRemote($repo_dir) ?: Git::RemoteUrl($repo_dir);
+        $fetchUrl = GitHubApp::resolveUrl($gitRemote);
+        wlog("Fetching tags from {$fetchUrl}...");
+        $fetchResult = Shell::run(
+            "GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch " . escapeshellarg($fetchUrl) . " --tags 2>&1",
+            $fetchReturn
+        );
+        if ($fetchReturn !== 0) {
+            wlog("WARNING: Tag fetch failed (exit {$fetchReturn}): " . trim($fetchResult));
+        }
 
         // Verify tag exists
         if (!GitHub::tagExists($activeRelease, $repo_dir)) {
