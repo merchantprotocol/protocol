@@ -63,6 +63,17 @@ SPINNER_PID=""
 # Log file for suppressed output
 INSTALL_LOG="/tmp/protocol-install.log"
 : > "$INSTALL_LOG"
+{
+  echo "=== Protocol Installer ==="
+  echo "Date: $(date)"
+  echo "OS: $(uname -s) $(uname -r) $(uname -m)"
+  echo "Shell: $SHELL (running as $(ps -p $$ -o comm= 2>/dev/null || echo unknown))"
+  echo "User: $(whoami)"
+  echo "PATH: $PATH"
+  echo "Stdin is terminal: $([ -t 0 ] && echo yes || echo no)"
+  echo "Args: $*"
+  echo "==========================="
+} >> "$INSTALL_LOG"
 
 # ---------------------------------------------------------------------------
 # Terminal UI — Primitives
@@ -107,14 +118,24 @@ stop_spinner() {
   clear_line
 }
 
+log() {
+  printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$INSTALL_LOG"
+}
+
 step_ok() {
   stop_spinner
   printf "  ${CHECK}  %s\n" "$1"
+  log "OK: $1"
 }
 
 step_fail() {
   stop_spinner
   printf "  ${CROSS}  %s\n" "$1"
+  log "FAIL: $1"
+  log "PATH=$PATH"
+  log "OS=$(uname -s) $(uname -m)"
+  log "Shell: $SHELL (running as $(ps -p $$ -o comm= 2>/dev/null || echo unknown))"
+  log "Stdin is terminal: $([ -t 0 ] && echo yes || echo no)"
   INSTALL_FAILED=true
   show_cursor
   printf "\n  ${RED}${BOLD}Installation failed.${RESET}\n"
@@ -125,6 +146,7 @@ step_fail() {
 step_warn() {
   stop_spinner
   printf "  ${WARN_SYM}  %s\n" "$1"
+  log "WARN: $1"
 }
 
 section() {
@@ -167,6 +189,31 @@ require_sudo() {
     step_fail "sudo authentication failed"
   fi
 }
+
+# ---------------------------------------------------------------------------
+# PATH Bootstrap — ensure common binary locations are reachable
+# ---------------------------------------------------------------------------
+# When running via curl | bash, the shell is non-interactive and PATH is
+# minimal. Homebrew (Apple Silicon), Linuxbrew, and other tools won't be
+# found without this.
+# ---------------------------------------------------------------------------
+bootstrap_path() {
+  local candidates=(
+    /opt/homebrew/bin /opt/homebrew/sbin       # macOS Homebrew — Apple Silicon
+    /usr/local/bin /usr/local/sbin             # macOS Homebrew — Intel
+    /home/linuxbrew/.linuxbrew/bin             # Linuxbrew
+    "$HOME/.composer/vendor/bin"               # Composer global
+    "$HOME/.config/composer/vendor/bin"        # Composer global (XDG)
+    /usr/bin /usr/sbin /bin /sbin
+  )
+  for dir in "${candidates[@]}"; do
+    case ":$PATH:" in
+      *":$dir:"*) continue ;;
+    esac
+    [ -d "$dir" ] && export PATH="$dir:$PATH"
+  done
+}
+bootstrap_path
 
 # ---------------------------------------------------------------------------
 # Dependency helpers
@@ -609,6 +656,7 @@ else
             sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
           " && step_ok "Docker Compose installed" \
             || step_fail "Failed to install Docker Compose"
+        fi
       fi
 
       # Crontab (cron) — needed for reboot recovery
