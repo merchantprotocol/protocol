@@ -150,8 +150,10 @@ class ReleaseBuilder
 
         // Always re-read the original from git so patching is idempotent
         $dir = escapeshellarg(rtrim($releaseDir, '/'));
-        $original = trim(Shell::run("git -C {$dir} show HEAD:docker-compose.yml 2>/dev/null"));
-        $content = $original ?: file_get_contents($composePath);
+        $original = Shell::run("git -C {$dir} show HEAD:docker-compose.yml 2>/dev/null");
+        $content = (!empty($original) && strpos($original, 'fatal:') === false)
+            ? $original
+            : file_get_contents($composePath);
 
         // Strip ALL existing port mappings and replace with only the
         // two shadow-configurable ports (HTTP → 80, HTTPS → 443).
