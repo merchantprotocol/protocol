@@ -264,9 +264,9 @@ class BlueGreen
         return ReleaseBuilder::patchComposeFile($releaseDir);
     }
 
-    public static function buildContainers(string $releaseDir): bool
+    public static function buildContainers(string $releaseDir, ?string &$output = null): bool
     {
-        return ReleaseBuilder::buildContainers($releaseDir);
+        return ReleaseBuilder::buildContainers($releaseDir, $output);
     }
 
     public static function startContainers(string $releaseDir): bool

@@ -181,8 +181,12 @@ class ReleaseBuilder
 
     /**
      * Build containers for a release (slow operation).
+     *
+     * @param string $releaseDir  Path to the release directory
+     * @param string|null &$output  Optional — receives the docker compose output for caller logging
+     * @return bool  True on success
      */
-    public static function buildContainers(string $releaseDir): bool
+    public static function buildContainers(string $releaseDir, ?string &$output = null): bool
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
@@ -214,6 +218,7 @@ class ReleaseBuilder
             "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand} --env-file " . escapeshellarg($envFile) . " up --build -d 2>&1",
             $returnVar
         );
+        $output = $result;
 
         // Run composer install if needed
         if (file_exists(rtrim($releaseDir, '/') . '/composer.json')) {

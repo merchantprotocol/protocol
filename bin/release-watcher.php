@@ -248,8 +248,10 @@ while (true) {
 
             // Build and start containers on production ports
             wlog("Building containers on production ports (80/443)...");
-            if (!BlueGreen::buildContainers($releaseDir)) {
+            $buildOutput = null;
+            if (!BlueGreen::buildContainers($releaseDir, $buildOutput)) {
                 wlog("ERROR: Docker build failed for {$activeRelease}");
+                wlog("BUILD OUTPUT: " . trim($buildOutput ?? '(no output)'));
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'failed');
                 AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'failure', 'release-watcher');
                 sleep($interval);
@@ -327,8 +329,10 @@ while (true) {
 
             // Build containers on shadow ports (slow step)
             wlog("Building containers on shadow ports ({$shadowHttp}/{$shadowHttps})...");
-            if (!BlueGreen::buildContainers($releaseDir)) {
+            $buildOutput = null;
+            if (!BlueGreen::buildContainers($releaseDir, $buildOutput)) {
                 wlog("ERROR: Docker build failed for {$activeRelease}");
+                wlog("BUILD OUTPUT: " . trim($buildOutput ?? '(no output)'));
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 sleep($interval);
