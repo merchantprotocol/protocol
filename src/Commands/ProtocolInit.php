@@ -753,8 +753,10 @@ Class ProtocolInit extends Command {
                 Json::write('deployment.strategy', 'release', $repo_dir);
                 Json::save($repo_dir);
 
-                // Clear awaiting_release flag in node config
+                // Update node config with deployment state
                 $nodeData['deployment']['strategy'] = 'release';
+                $nodeData['release'] = $nodeData['release'] ?? [];
+                $nodeData['release']['current'] = $selectedTag;
                 unset($nodeData['deployment']['awaiting_release']);
                 unset($nodeData['deployment']['branch']);
                 NodeConfig::save($projectName, $nodeData);
