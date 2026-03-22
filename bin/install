@@ -446,11 +446,13 @@ else
         else
           # Amazon Linux 2023 — install Docker CE from official Fedora repo
           # AL2023 is Fedora-based; the CentOS repo does not work
+          # Use Fedora 37 — Fedora 39 ships runc built against GLIBC_2.38
+          # which AL2023 does not have
           run_silent "docker" bash -c "
             sudo dnf remove -y docker 2>/dev/null || true
             sudo dnf install -y dnf-plugins-core
             sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-            sudo sed -i 's/\\\$releasever/39/g' /etc/yum.repos.d/docker-ce.repo
+            sudo sed -i 's/\\\$releasever/37/g' /etc/yum.repos.d/docker-ce.repo
             sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
           " && step_ok "Docker CE installed" \
             || step_fail "Failed to install Docker CE"
