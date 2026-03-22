@@ -18,7 +18,7 @@ class ProtocolApplication extends Application
         $commandName = $this->getCommandName($input);
 
         // Skip banner for dashboard/status commands and help/list to avoid noise
-        $skipBanner = ['incident:status', 'incident:report', 'incident:snapshot', 'top', 'help', 'list', ''];
+        $skipBanner = ['incident:status', 'incident:report', 'incident:snapshot', 'top', 'help', 'list', 'mcp:serve', ''];
         if (!in_array($commandName, $skipBanner)) {
             $this->showIncidentBanner($output);
         }
