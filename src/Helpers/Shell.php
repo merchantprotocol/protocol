@@ -165,6 +165,11 @@ Class Shell
      */
     public static function passthru( $command )
     {
+        // Recover from invalid cwd before spawning a shell
+        if (@getcwd() === false) {
+            @chdir('/tmp');
+        }
+
         $descriptorSpec = array(
             0 => STDIN,
             1 => STDOUT,
@@ -187,6 +192,23 @@ Class Shell
      */
     public static function run( $command, &$return_var = null )
     {
+        // Detect invalid cwd BEFORE spawning a shell. When the current
+        // working directory has been deleted (e.g. a release dir removed by
+        // a previous cycle), every exec() call prints:
+        //   shell-init: error retrieving current directory: getcwd: ...
+        // Recover by chdir'ing to /tmp so the shell can initialize cleanly.
+        $cwd = @getcwd();
+        if ($cwd === false) {
+            $fallback = '/tmp';
+            @chdir($fallback);
+            // Log so the caller can see what happened
+            file_put_contents(
+                'php://stderr',
+                "[Shell::run] WARNING: cwd was invalid (deleted?), recovered to {$fallback}. Command: {$command}\n",
+                FILE_APPEND
+            );
+        }
+
         $response = null;
         exec($command, $response, $return_var);
 
@@ -206,6 +228,11 @@ Class Shell
      */
     public static function background( $command )
     {
+        // Recover from invalid cwd before spawning a shell
+        if (@getcwd() === false) {
+            @chdir('/tmp');
+        }
+
         $outputfile = '/var/log/protocol/background_process.log';
         if (!file_exists($outputfile)) {
             $dir = dirname($outputfile);
