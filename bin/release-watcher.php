@@ -15,6 +15,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
@@ -29,157 +30,199 @@ $interval = (int) ($options['interval'] ?? 60);
 
 $repo_dir = realpath($repo_dir) . DIRECTORY_SEPARATOR;
 
-echo "[" . date('Y-m-d H:i:s') . "] Release watcher started for: {$repo_dir}\n";
-echo "[" . date('Y-m-d H:i:s') . "] Poll interval: {$interval}s\n";
+/**
+ * Log a message with timestamp.
+ */
+function wlog(string $msg): void {
+    echo "[" . date('Y-m-d H:i:s') . "] {$msg}\n";
+}
+
+wlog("Release watcher started");
+wlog("  repo_dir:  {$repo_dir}");
+wlog("  interval:  {$interval}s");
 
 $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
+wlog("  pointer:   {$pointerName}");
+
+// Log initial state
+$bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
+wlog("  bluegreen: " . ($bluegreenEnabled ? 'enabled' : 'disabled'));
+if ($bluegreenEnabled) {
+    wlog("  releases:  " . BlueGreen::getReleasesDir($repo_dir));
+}
+
+$currentRelease = JsonLock::read('release.current', null, $repo_dir);
+wlog("  current:   " . ($currentRelease ?: 'none'));
+
+$pollCount = 0;
 
 while (true) {
+    $pollCount++;
+
     try {
+        // Refresh credentials before each poll (tokens expire after 1 hour)
+        if (GitHubApp::isConfigured()) {
+            $creds = GitHubApp::loadCredentials();
+            $appOwner = $creds['owner'] ?? null;
+            if ($appOwner) {
+                GitHubApp::refreshGitCredentials($appOwner);
+            }
+        }
+
         $activeRelease = GitHub::getVariable($pointerName, $repo_dir);
         $currentRelease = JsonLock::read('release.current', null, $repo_dir);
 
-        if ($activeRelease && $activeRelease !== $currentRelease) {
-            echo "[" . date('Y-m-d H:i:s') . "] New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")\n";
+        // Log every poll cycle
+        if ($pollCount % 10 === 1) {
+            // Detailed log every 10th cycle
+            wlog("Poll #{$pollCount}: pointer={$pointerName} active=" . ($activeRelease ?: 'null') . " current=" . ($currentRelease ?: 'none'));
+        }
 
-            // Refresh GitHub App credentials if configured (tokens expire after 1 hour)
-            if (GitHubApp::isConfigured()) {
-                $creds = GitHubApp::loadCredentials();
-                $appOwner = $creds['owner'] ?? null;
-                if ($appOwner) {
-                    GitHubApp::refreshGitCredentials($appOwner);
-                }
+        if (!$activeRelease) {
+            if ($pollCount === 1) {
+                wlog("WARNING: Could not read {$pointerName} from GitHub — check API access / variable exists");
             }
+            sleep($interval);
+            continue;
+        }
 
-            // Fetch latest tags
-            $remote = Git::remoteName($repo_dir) ?: 'origin';
-            Shell::run("git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+        if ($activeRelease === $currentRelease) {
+            // Already deployed — quiet poll
+            if ($pollCount === 1) {
+                wlog("Already at {$activeRelease}, watching for changes...");
+            }
+            sleep($interval);
+            continue;
+        }
 
-            // Verify tag exists
-            if (!GitHub::tagExists($activeRelease, $repo_dir)) {
-                echo "[" . date('Y-m-d H:i:s') . "] WARNING: Tag {$activeRelease} not found. Skipping.\n";
+        // ── New release detected ─────────────────────────────
+        wlog("New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")");
+
+        // Fetch latest tags
+        $remote = Git::remoteName($repo_dir) ?: 'origin';
+        wlog("Fetching tags from {$remote}...");
+        Shell::run("GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+
+        // Verify tag exists
+        if (!GitHub::tagExists($activeRelease, $repo_dir)) {
+            wlog("WARNING: Tag {$activeRelease} not found locally after fetch. Skipping.");
+            sleep($interval);
+            continue;
+        }
+        wlog("Tag {$activeRelease} verified");
+
+        // ── Blue-green mode ──────────────────────────────────
+        $bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
+
+        if ($bluegreenEnabled) {
+            wlog("Blue-green deploy: cloning {$activeRelease} into releases dir");
+
+            $gitRemote = BlueGreen::getGitRemote($repo_dir);
+            $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeRelease);
+            wlog("  remote:      {$gitRemote}");
+            wlog("  release dir: {$releaseDir}");
+
+            // Initialize release directory with git clone
+            wlog("Cloning into {$releaseDir}...");
+            BlueGreen::initReleaseDir($repo_dir, $activeRelease, $gitRemote);
+
+            // Checkout version tag
+            if (!BlueGreen::checkoutVersion($releaseDir, $activeRelease)) {
+                wlog("ERROR: Failed to checkout {$activeRelease} in {$releaseDir}");
                 sleep($interval);
                 continue;
             }
+            wlog("Checked out {$activeRelease}");
 
-            // ── Blue-green mode ──────────────────────────────────
-            $bluegreenEnabled = BlueGreen::isEnabled($repo_dir);
+            // Patch compose file for parameterized ports
+            BlueGreen::patchComposeFile($releaseDir);
 
-            if ($bluegreenEnabled) {
-                echo "[" . date('Y-m-d H:i:s') . "] Shadow mode: building {$activeRelease}\n";
+            // Write shadow port config
+            BlueGreen::writeReleaseEnv($releaseDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
 
-                $gitRemote = BlueGreen::getGitRemote($repo_dir);
-                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeRelease);
-
-                // Initialize release directory with git clone
-                BlueGreen::initReleaseDir($repo_dir, $activeRelease, $gitRemote);
-
-                // Checkout version tag
-                if (!BlueGreen::checkoutVersion($releaseDir, $activeRelease)) {
-                    echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to checkout {$activeRelease}\n";
-                    sleep($interval);
-                    continue;
-                }
-                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
-
-                // Patch compose file for parameterized ports
-                BlueGreen::patchComposeFile($releaseDir);
-
-                // Write shadow port config
-                BlueGreen::writeReleaseEnv($releaseDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
-
-                // Build containers on shadow ports (slow step)
-                echo "[" . date('Y-m-d H:i:s') . "] Building containers on shadow ports...\n";
-                if (!BlueGreen::buildContainers($releaseDir)) {
-                    echo "[" . date('Y-m-d H:i:s') . "] ERROR: Docker build failed for {$activeRelease}\n";
-                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
-                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
-                    sleep($interval);
-                    continue;
-                }
-                echo "[" . date('Y-m-d H:i:s') . "] Shadow containers built on port " . BlueGreen::SHADOW_HTTP . "\n";
-
-                // Run health checks
-                $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
-                $healthy = BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $activeRelease);
-
-                if ($healthy) {
-                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
-                    BlueGreen::setShadowVersion($repo_dir, $activeRelease);
-                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
-                    echo "[" . date('Y-m-d H:i:s') . "] Shadow {$activeRelease} ready\n";
-
-                    // Auto-promote if configured
-                    $autoPromote = Json::read('bluegreen.auto_promote', false, $repo_dir);
-                    if ($autoPromote) {
-                        echo "[" . date('Y-m-d H:i:s') . "] Auto-promoting {$activeRelease} to production...\n";
-                        $promoted = BlueGreen::promote($repo_dir, $activeRelease);
-                        if ($promoted) {
-                            AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
-                            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
-                            echo "[" . date('Y-m-d H:i:s') . "] Auto-promoted {$activeRelease} to production\n";
-                        } else {
-                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Auto-promote failed\n";
-                        }
-                    } else {
-                        echo "[" . date('Y-m-d H:i:s') . "] Shadow ready. Run 'protocol shadow:start' to promote.\n";
-                    }
-                } else {
-                    BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
-                    AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
-                    echo "[" . date('Y-m-d H:i:s') . "] Health check FAILED for {$activeRelease}\n";
-                }
-
-                // Update release tracking
-                JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                JsonLock::write('release.current', $activeRelease, $repo_dir);
-                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                JsonLock::save($repo_dir);
-
-            } else {
-                // ── Standard in-place deployment ─────────────────
-
-                // Checkout the tag (detached HEAD)
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($activeRelease) . " 2>&1");
-                echo "[" . date('Y-m-d H:i:s') . "] Checked out {$activeRelease}\n";
-
-                // Update lock file
-                JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                JsonLock::write('release.current', $activeRelease, $repo_dir);
-                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                JsonLock::save($repo_dir);
-
-                // Handle encrypted secrets
-                $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
-                $configRepo = Config::repo($repo_dir);
-
-                if ($secretsMode === 'encrypted' && $configRepo) {
-                    $encFile = $configRepo . '.env.enc';
-                    if (is_file($encFile) && Secrets::hasKey()) {
-                        $tmpEnv = Secrets::decryptToTempFile($encFile);
-                        if ($tmpEnv) {
-                            Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
-                            unlink($tmpEnv);
-                            echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt with decrypted secrets\n";
-                        } else {
-                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Failed to decrypt secrets\n";
-                        }
-                    } else {
-                        Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
-                        echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
-                    }
-                } else {
-                    Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
-                    echo "[" . date('Y-m-d H:i:s') . "] Docker rebuilt\n";
-                }
-
-                // Audit log
-                AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
-                echo "[" . date('Y-m-d H:i:s') . "] Deploy complete: {$activeRelease}\n";
+            // Build containers on shadow ports (slow step)
+            wlog("Building containers on shadow ports (" . BlueGreen::SHADOW_HTTP . "/" . BlueGreen::SHADOW_HTTPS . ")...");
+            if (!BlueGreen::buildContainers($releaseDir)) {
+                wlog("ERROR: Docker build failed for {$activeRelease}");
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
+                sleep($interval);
+                continue;
             }
+            wlog("Shadow containers built on port " . BlueGreen::SHADOW_HTTP);
+
+            // Run health checks
+            $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
+            wlog("Running health checks (" . count($healthChecks) . " configured)...");
+            $healthy = BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $activeRelease);
+
+            if ($healthy) {
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
+                BlueGreen::setShadowVersion($repo_dir, $activeRelease);
+                AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
+                wlog("Shadow {$activeRelease} ready");
+
+                // Auto-promote if configured
+                $autoPromote = Json::read('bluegreen.auto_promote', false, $repo_dir);
+                if ($autoPromote) {
+                    wlog("Auto-promoting {$activeRelease} to production...");
+                    $promoted = BlueGreen::promote($repo_dir, $activeRelease);
+                    if ($promoted) {
+                        AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
+                        AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
+                        wlog("Auto-promoted {$activeRelease} to production");
+                    } else {
+                        wlog("ERROR: Auto-promote failed for {$activeRelease}");
+                    }
+                } else {
+                    wlog("Shadow ready. Run 'protocol shadow:start' to promote.");
+                }
+            } else {
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
+                wlog("ERROR: Health check FAILED for {$activeRelease}");
+            }
+
+            // Update release tracking
+            JsonLock::write('release.previous', $currentRelease, $repo_dir);
+            JsonLock::write('release.current', $activeRelease, $repo_dir);
+            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+            JsonLock::save($repo_dir);
+            wlog("Release state updated: current={$activeRelease}");
+
+        } else {
+            // ── Standard in-place deployment ─────────────────
+            wlog("In-place deploy: checking out {$activeRelease} in {$repo_dir}");
+
+            // Checkout the tag (detached HEAD)
+            Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($activeRelease) . " 2>&1");
+            wlog("Checked out {$activeRelease}");
+
+            // Update lock file
+            JsonLock::write('release.previous', $currentRelease, $repo_dir);
+            JsonLock::write('release.current', $activeRelease, $repo_dir);
+            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+            JsonLock::save($repo_dir);
+
+            // Handle secrets (encrypted or AWS Secrets Manager)
+            $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
+
+            if ($tmpEnv) {
+                wlog("Rebuilding Docker containers with secrets...");
+                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+                unlink($tmpEnv);
+            } else {
+                wlog("Rebuilding Docker containers...");
+                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
+            }
+
+            // Audit log
+            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
+            wlog("Deploy complete: {$activeRelease}");
         }
     } catch (\Exception $e) {
-        echo "[" . date('Y-m-d H:i:s') . "] ERROR: " . $e->getMessage() . "\n";
+        wlog("ERROR: " . $e->getMessage());
+        wlog("  " . $e->getFile() . ":" . $e->getLine());
     }
 
     sleep($interval);
