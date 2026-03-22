@@ -40,45 +40,48 @@ function wlog(string $msg): void {
 }
 
 /**
- * Run `protocol restart` to do a full stop+start cycle with all bootstrapping.
+ * Run `protocol stop` on the old directory, then `protocol start` on the new one.
  *
- * This replaces the old selfRestart approach. Instead of just respawning the
- * watcher, we run the full `protocol restart` which handles:
- *   - Config unlinking/relinking
- *   - Stopping ALL containers (including bare legacy ones)
- *   - Starting containers from the active release directory
- *   - Health checks
- *   - Crontab setup
- *   - Spawning a fresh watcher (which picks up new code)
+ * This ensures full bootstrapping on both sides:
+ *   - stop:  config unlinking, stopping ALL containers, crontab removal, watcher kill
+ *   - start: config linking, container build+start, health checks, crontab, fresh watcher
  *
- * The restart is spawned as a detached background process so this watcher
- * can exit immediately. `protocol stop` (part of restart) will clean up
- * any remaining watcher processes.
+ * Both commands are chained in a single background shell so that stop completes
+ * before start begins. This watcher will be killed by `protocol stop`, but the
+ * background shell continues and runs `protocol start` afterward.
+ *
+ * @param string $stopDir   Directory to stop (old release dir, or repo_dir for branch strategy)
+ * @param string $startDir  Directory to start (new release dir, or repo_dir for branch strategy)
  */
-function protocolRestart(string $repo_dir): void
+function protocolStopStart(string $stopDir, string $startDir): void
 {
     $protocolBin = dirname(__DIR__) . '/protocol';
     if (!is_file($protocolBin)) {
-        wlog("WARNING: protocol binary not found at {$protocolBin} — cannot restart");
+        wlog("WARNING: protocol binary not found at {$protocolBin} — cannot stop/start");
         return;
     }
 
-    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
+    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $startDir;
     $logFile = $logDir . 'protocol-restart.log';
 
-    // Run protocol restart as a detached background process.
-    // This watcher will be killed by `protocol stop` (part of restart),
-    // and a fresh watcher will be spawned by `protocol start`.
-    $cmd = "nohup php " . escapeshellarg($protocolBin)
-        . " restart --dir=" . escapeshellarg($repo_dir)
+    $phpBin = escapeshellarg($protocolBin);
+    $stopArg = escapeshellarg($stopDir);
+    $startArg = escapeshellarg($startDir);
+
+    // Chain stop then start in a background shell.
+    // protocol stop kills this watcher process, but the background shell survives
+    // and proceeds to run protocol start.
+    $cmd = "nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
         . " >> " . escapeshellarg($logFile) . " 2>&1 &";
 
-    wlog("Triggering protocol restart: {$cmd}");
+    wlog("protocol stop --dir={$stopDir}");
+    wlog("protocol start --dir={$startDir}");
+    wlog("Spawning: {$cmd}");
     Shell::run($cmd);
 
     // Give the background process a moment to start before we exit
     sleep(2);
-    wlog("Protocol restart spawned. Watcher (PID: " . getmypid() . ") exiting.");
+    wlog("Stop+start spawned. Watcher (PID: " . getmypid() . ") exiting.");
     exit(0);
 }
 
@@ -241,13 +244,19 @@ while (true) {
             JsonLock::save($repo_dir);
 
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
-            wlog("Release {$activeRelease} prepared. Running protocol restart for full bootstrapping...");
+            wlog("Release {$activeRelease} prepared. Running protocol stop+start for full bootstrapping...");
 
-            // Hand off to protocol restart for full stop+start cycle.
-            // This handles config linking, container start, health checks,
-            // crontab, and spawns a fresh watcher with updated code.
-            // This watcher exits as part of the restart.
-            protocolRestart($repo_dir);
+            // Stop the old release, start the new one.
+            // Stop dir: old release dir (or repo_dir if no previous release)
+            // Start dir: new release dir
+            $stopDir = $repo_dir;
+            if ($currentRelease) {
+                $oldReleaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+                if (is_dir($oldReleaseDir)) {
+                    $stopDir = $oldReleaseDir;
+                }
+            }
+            protocolStopStart($stopDir, $releaseDir);
 
         } elseif ($strategy === 'bluegreen') {
             // ─────────────────────────────────────────────────────
@@ -345,8 +354,15 @@ while (true) {
                         JsonLock::save($repo_dir);
                         wlog("Release state updated: current={$activeRelease}");
 
-                        // Full restart for bootstrapping + fresh watcher
-                        protocolRestart($repo_dir);
+                        // Stop old release, start new release with full bootstrapping
+                        $bgStopDir = $repo_dir;
+                        if ($currentRelease) {
+                            $oldDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+                            if (is_dir($oldDir)) {
+                                $bgStopDir = $oldDir;
+                            }
+                        }
+                        protocolStopStart($bgStopDir, $releaseDir);
                     } else {
                         wlog("ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle");
                     }
@@ -381,11 +397,10 @@ while (true) {
             JsonLock::save($repo_dir);
 
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
-            wlog("Tag {$activeRelease} checked out. Running protocol restart for full bootstrapping...");
+            wlog("Tag {$activeRelease} checked out. Running protocol stop+start for full bootstrapping...");
 
-            // Hand off to protocol restart for full stop+start cycle.
-            // Handles secrets, container build, config linking, crontab, etc.
-            protocolRestart($repo_dir);
+            // Branch strategy: stop and start both use repo_dir (in-place deploy)
+            protocolStopStart($repo_dir, $repo_dir);
         }
     } catch (\Exception $e) {
         wlog("ERROR: " . $e->getMessage());
