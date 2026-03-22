@@ -44,7 +44,9 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
+use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 Class DockerExec extends Command {
 
@@ -81,10 +83,27 @@ Class DockerExec extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
+
+        // Resolve slave node so `protocol exec` works from anywhere
+        $resolved = NodeConfig::resolveSlaveNode(null, $repo_dir ?: null);
+        if ($resolved) {
+            [, , $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        if (!$resolved) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         $cmd = $input->getArgument('cmd') ?: "/bin/sh";
-        $name = Json::read('docker.container_name', false, $repo_dir);
+
+        // For release/bluegreen strategy, use the versioned container name
+        // from .env.bluegreen (e.g. ghostagent-v0.1.0)
+        $name = BlueGreen::getContainerName($repo_dir);
+
+        if (!$name) {
+            $name = Json::read('docker.container_name', false, $repo_dir);
+        }
         if (!$name) {
             $names = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
             if (count($names) === 0) {
