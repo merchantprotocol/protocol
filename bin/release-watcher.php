@@ -22,14 +22,18 @@ use Gitcd\Utils\JsonLock;
 
 // Parse arguments
 $options = getopt('', ['dir:', 'interval:']);
-$repo_dir = $options['dir'] ?? getcwd();
+$rawDir = $options['dir'] ?? null;
 $interval = (int) ($options['interval'] ?? 60);
 
+// Diagnostic: log the inherited cwd and --dir before any changes.
+// This helps debug "shell-init: getcwd" errors — if the inherited cwd
+// is already invalid, every shell command will fail until we chdir.
+$inheritedCwd = @getcwd();
+$repo_dir = $rawDir ?? ($inheritedCwd ?: '/tmp');
 $repo_dir = realpath($repo_dir) . DIRECTORY_SEPARATOR;
 
-// Anchor working directory to repo_dir so that shell commands don't break
-// when a release directory is removed underneath us. This MUST happen before
-// any shell commands or file operations. Re-applied at the top of each cycle.
+// Anchor working directory to repo_dir so that shell commands don't break.
+// This MUST happen before any shell commands or file operations.
 chdir($repo_dir);
 
 /**
@@ -85,9 +89,13 @@ function protocolStopStart(string $stopDir, string $startDir): void
     exit(0);
 }
 
-wlog("Release watcher started");
-wlog("  repo_dir:  {$repo_dir}");
-wlog("  interval:  {$interval}s");
+wlog("Release watcher started (PID: " . getmypid() . ")");
+wlog("  inherited cwd: " . ($inheritedCwd ?: 'FALSE (invalid/deleted directory!)'));
+wlog("  --dir arg:     " . ($rawDir ?: '(not set, used cwd)'));
+wlog("  repo_dir:      {$repo_dir}");
+wlog("  repo_dir exists: " . (is_dir($repo_dir) ? 'yes' : 'NO'));
+wlog("  cwd after chdir: " . (getcwd() ?: 'FALSE'));
+wlog("  interval:      {$interval}s");
 
 $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
 wlog("  pointer:   {$pointerName}");
@@ -108,9 +116,14 @@ while (true) {
     $pollCount++;
 
     try {
-        // Re-anchor working directory every cycle. A previous cycle may have
-        // deleted the release dir we were sitting in, causing every subsequent
-        // shell command to fail with "getcwd: cannot access parent directories".
+        // Re-anchor working directory every cycle. If the cwd has become
+        // invalid, every shell command would fail with "getcwd: cannot
+        // access parent directories". Log the stale cwd so we can see
+        // which directory disappeared.
+        $cycleCwd = @getcwd();
+        if ($cycleCwd === false) {
+            wlog("WARNING: cwd is invalid at start of cycle #{$pollCount} — re-anchoring to {$repo_dir}");
+        }
         chdir($repo_dir);
 
         // Clear singleton caches so we re-read files from disk each cycle

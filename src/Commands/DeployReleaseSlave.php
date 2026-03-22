@@ -95,10 +95,18 @@ Class DeployReleaseSlave extends Command {
             return Command::SUCCESS;
         }
 
-        // Start as daemon
+        // Start as daemon — chdir to repo_dir first so the child process
+        // inherits a valid cwd. Without this, the watcher's shell commands
+        // may fail with "shell-init: getcwd" if the parent cwd is stale.
+        $parentCwd = @getcwd();
+        if ($parentCwd === false || !is_dir($parentCwd)) {
+            chdir($repo_dir);
+            $output->writeln("<comment>Parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}</comment>");
+        }
+
         $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
         $logFile = $logDir . 'release-watcher.log';
-        $cmd = "nohup php " . escapeshellarg($watcherScript)
+        $cmd = "cd " . escapeshellarg(rtrim($repo_dir, '/')) . " && nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"
             . " >> " . escapeshellarg($logFile) . " 2>&1 & echo $!";
