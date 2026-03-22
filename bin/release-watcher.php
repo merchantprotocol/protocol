@@ -13,10 +13,6 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
-use Gitcd\Helpers\Docker;
-use Gitcd\Helpers\Config;
-use Gitcd\Helpers\Secrets;
-use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
@@ -44,39 +40,45 @@ function wlog(string $msg): void {
 }
 
 /**
- * Self-restart the watcher daemon to pick up code changes from the new release.
+ * Run `protocol restart` to do a full stop+start cycle with all bootstrapping.
  *
- * After a successful deploy, the watcher's PHP code in memory is stale — any
- * fixes or changes included in the new tag won't take effect until the process
- * restarts. This function spawns a fresh watcher process with the same arguments,
- * updates the stored PID, and exits the current process.
+ * This replaces the old selfRestart approach. Instead of just respawning the
+ * watcher, we run the full `protocol restart` which handles:
+ *   - Config unlinking/relinking
+ *   - Stopping ALL containers (including bare legacy ones)
+ *   - Starting containers from the active release directory
+ *   - Health checks
+ *   - Crontab setup
+ *   - Spawning a fresh watcher (which picks up new code)
+ *
+ * The restart is spawned as a detached background process so this watcher
+ * can exit immediately. `protocol stop` (part of restart) will clean up
+ * any remaining watcher processes.
  */
-function selfRestart(string $repo_dir, int $interval): void
+function protocolRestart(string $repo_dir): void
 {
-    wlog("Self-restarting watcher to pick up code from new release...");
-
-    $watcherScript = __FILE__;
-    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
-    $logFile = $logDir . 'release-watcher.log';
-
-    $cmd = "nohup php " . escapeshellarg($watcherScript)
-        . " --dir=" . escapeshellarg($repo_dir)
-        . " --interval=" . escapeshellarg((string) $interval)
-        . " >> " . escapeshellarg($logFile) . " 2>&1 & echo $!";
-
-    wlog("Spawn command: {$cmd}");
-    $newPid = trim(Shell::run($cmd));
-
-    if ($newPid && is_numeric($newPid)) {
-        JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
-        JsonLock::write('deploy.watcher_pid', (int) $newPid, $repo_dir);
-        JsonLock::save($repo_dir);
-        wlog("New watcher spawned (PID: {$newPid}). Old process (PID: " . getmypid() . ") exiting.");
-    } else {
-        wlog("WARNING: Failed to spawn new watcher (got: '{$newPid}'). Continuing with current process.");
+    $protocolBin = dirname(__DIR__) . '/protocol';
+    if (!is_file($protocolBin)) {
+        wlog("WARNING: protocol binary not found at {$protocolBin} — cannot restart");
         return;
     }
 
+    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
+    $logFile = $logDir . 'protocol-restart.log';
+
+    // Run protocol restart as a detached background process.
+    // This watcher will be killed by `protocol stop` (part of restart),
+    // and a fresh watcher will be spawned by `protocol start`.
+    $cmd = "nohup php " . escapeshellarg($protocolBin)
+        . " restart --dir=" . escapeshellarg($repo_dir)
+        . " >> " . escapeshellarg($logFile) . " 2>&1 &";
+
+    wlog("Triggering protocol restart: {$cmd}");
+    Shell::run($cmd);
+
+    // Give the background process a moment to start before we exit
+    sleep(2);
+    wlog("Protocol restart spawned. Watcher (PID: " . getmypid() . ") exiting.");
     exit(0);
 }
 
@@ -183,10 +185,12 @@ while (true) {
             // ─────────────────────────────────────────────────────
             // RELEASE STRATEGY — Simple one-at-a-time deployment
             //
-            // Clones the tag into its own release directory, patches
-            // the compose file and container name, then starts on
-            // production ports (80/443). Only ONE container runs at
-            // a time. No shadow ports, no health checks.
+            // 1. Clone tag into release directory
+            // 2. Patch compose file + write env with versioned name
+            // 3. Update state so protocol start knows which release
+            // 4. Run `protocol restart` for full bootstrapping:
+            //    config linking, container stop/start, health checks,
+            //    crontab, and fresh watcher spawn
             // ─────────────────────────────────────────────────────
             wlog("Release deploy: cloning {$activeRelease} into releases dir");
 
@@ -228,49 +232,22 @@ while (true) {
                 $activeRelease
             );
 
-            // Stop the PREVIOUS release's containers before starting the new one.
-            // Release strategy = one container at a time on production ports.
-            if ($currentRelease && $currentRelease !== $activeRelease) {
-                $oldReleaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
-                if (is_dir($oldReleaseDir)) {
-                    wlog("Stopping previous release {$currentRelease}...");
-                    BlueGreen::stopContainers($oldReleaseDir);
-                }
-            }
-
-            // Always stop containers in THIS release dir before building.
-            // On retry after a failed build, containers from the previous attempt
-            // may still be running (occupying ports, holding the container name).
-            // Without this, "up --build" fails because it can't bind to ports
-            // that the stale container already holds.
-            wlog("Stopping any existing containers in {$releaseDir} before build...");
-            BlueGreen::stopContainers($releaseDir);
-
-            // Build and start containers on production ports
-            wlog("Building containers on production ports (80/443)...");
-            $buildOutput = null;
-            if (!BlueGreen::buildContainers($releaseDir, $buildOutput)) {
-                wlog("ERROR: Docker build failed for {$activeRelease}");
-                wlog("BUILD OUTPUT: " . trim($buildOutput ?? '(no output)'));
-                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'failed');
-                AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'failure', 'release-watcher');
-                sleep($interval);
-                continue;
-            }
-
-            // Update state
+            // Update state BEFORE restart so protocol start knows which release to boot
             BlueGreen::setActiveVersion($repo_dir, $activeRelease);
-            BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'serving');
+            BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'pending');
             JsonLock::write('release.previous', $currentRelease, $repo_dir);
             JsonLock::write('release.current', $activeRelease, $repo_dir);
             JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
             JsonLock::save($repo_dir);
 
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
-            wlog("Release deploy complete: {$activeRelease} serving on production ports");
+            wlog("Release {$activeRelease} prepared. Running protocol restart for full bootstrapping...");
 
-            // Self-restart to pick up any code changes in the new release
-            selfRestart($repo_dir, $interval);
+            // Hand off to protocol restart for full stop+start cycle.
+            // This handles config linking, container start, health checks,
+            // crontab, and spawns a fresh watcher with updated code.
+            // This watcher exits as part of the restart.
+            protocolRestart($repo_dir);
 
         } elseif ($strategy === 'bluegreen') {
             // ─────────────────────────────────────────────────────
@@ -361,15 +338,15 @@ while (true) {
                         AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
                         wlog("Auto-promoted {$activeRelease} to production");
 
-                        // Only update release.current on successful promotion
+                        // Update state
                         JsonLock::write('release.previous', $currentRelease, $repo_dir);
                         JsonLock::write('release.current', $activeRelease, $repo_dir);
                         JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
                         JsonLock::save($repo_dir);
                         wlog("Release state updated: current={$activeRelease}");
 
-                        // Self-restart to pick up any code changes in the new release
-                        selfRestart($repo_dir, $interval);
+                        // Full restart for bootstrapping + fresh watcher
+                        protocolRestart($repo_dir);
                     } else {
                         wlog("ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle");
                     }
@@ -403,38 +380,12 @@ while (true) {
             JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
             JsonLock::save($repo_dir);
 
-            // Handle secrets (encrypted or AWS Secrets Manager)
-            $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
-
-            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
-            $dockerCommand = Docker::getDockerCommand();
-
-            if ($tmpEnv) {
-                wlog("Rebuilding Docker containers with secrets...");
-                $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
-                copy($tmpEnv, $secretsFile);
-                chmod($secretsFile, 0600);
-                unlink($tmpEnv);
-
-                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
-
-                Shell::run("{$dockerCommand} -f " . escapeshellarg($composePath)
-                    . " -f " . escapeshellarg($overrideFile)
-                    . " up -d --build 2>&1");
-
-                unlink($secretsFile);
-                unlink($overrideFile);
-            } else {
-                wlog("Rebuilding Docker containers...");
-                Shell::run("{$dockerCommand} -f " . escapeshellarg($composePath) . " up -d --build 2>&1");
-            }
-
-            // Audit log
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
-            wlog("Deploy complete: {$activeRelease}");
+            wlog("Tag {$activeRelease} checked out. Running protocol restart for full bootstrapping...");
 
-            // Self-restart to pick up any code changes in the new release
-            selfRestart($repo_dir, $interval);
+            // Hand off to protocol restart for full stop+start cycle.
+            // Handles secrets, container build, config linking, crontab, etc.
+            protocolRestart($repo_dir);
         }
     } catch (\Exception $e) {
         wlog("ERROR: " . $e->getMessage());
