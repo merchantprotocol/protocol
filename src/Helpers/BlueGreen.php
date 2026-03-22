@@ -21,6 +21,7 @@ namespace Gitcd\Helpers;
 use Gitcd\Helpers\BlueGreen\ReleaseState;
 use Gitcd\Helpers\BlueGreen\ReleaseBuilder;
 use Gitcd\Helpers\BlueGreen\HealthChecker;
+use Gitcd\Helpers\Shell;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
@@ -29,8 +30,28 @@ class BlueGreen
 {
     const PRODUCTION_HTTP = 80;
     const PRODUCTION_HTTPS = 443;
-    const SHADOW_HTTP = 18080;
-    const SHADOW_HTTPS = 18443;
+    const SHADOW_PORT_RANGE_START = 18080;
+    const SHADOW_PORT_RANGE_END = 18280;
+
+    /**
+     * Find an available pair of ports (HTTP, HTTPS) for a shadow deploy.
+     * Scans from SHADOW_PORT_RANGE_START in steps of 2 until a free pair is found.
+     *
+     * @return array{int, int} [httpPort, httpsPort]
+     */
+    public static function findAvailableShadowPorts(): array
+    {
+        for ($http = self::SHADOW_PORT_RANGE_START; $http < self::SHADOW_PORT_RANGE_END; $http += 2) {
+            $https = $http + 1;
+            $httpInUse = Shell::run("ss -tlnp 'sport = :{$http}' 2>/dev/null | tail -n +2");
+            $httpsInUse = Shell::run("ss -tlnp 'sport = :{$https}' 2>/dev/null | tail -n +2");
+            if (empty(trim($httpInUse)) && empty(trim($httpsInUse))) {
+                return [$http, $https];
+            }
+        }
+        // Fallback if all ports are exhausted
+        return [self::SHADOW_PORT_RANGE_START, self::SHADOW_PORT_RANGE_START + 1];
+    }
 
     // ─── State management (delegated to ReleaseState) ─────────────────
 
@@ -259,10 +280,11 @@ class BlueGreen
             if (is_dir($activeDir)) {
                 self::stopContainers($activeDir);
                 // Rewrite old version to shadow ports for standby rollback
-                self::writeReleaseEnv($activeDir, self::SHADOW_HTTP, self::SHADOW_HTTPS, $activeVersion);
+                [$standbyHttp, $standbyHttps] = self::findAvailableShadowPorts();
+                self::writeReleaseEnv($activeDir, $standbyHttp, $standbyHttps, $activeVersion);
                 // Start old version on shadow ports for instant rollback
                 self::startContainers($activeDir);
-                self::setReleaseState($repo_dir, $activeVersion, self::SHADOW_HTTP, 'standby');
+                self::setReleaseState($repo_dir, $activeVersion, $standbyHttp, 'standby');
             }
         }
 

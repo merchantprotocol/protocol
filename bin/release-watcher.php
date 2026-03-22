@@ -166,27 +166,30 @@ while (true) {
                 continue;
             }
 
+            // Find available shadow ports
+            [$shadowHttp, $shadowHttps] = BlueGreen::findAvailableShadowPorts();
+
             // Write shadow port config
-            BlueGreen::writeReleaseEnv($releaseDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $activeRelease);
+            BlueGreen::writeReleaseEnv($releaseDir, $shadowHttp, $shadowHttps, $activeRelease);
 
             // Build containers on shadow ports (slow step)
-            wlog("Building containers on shadow ports (" . BlueGreen::SHADOW_HTTP . "/" . BlueGreen::SHADOW_HTTPS . ")...");
+            wlog("Building containers on shadow ports ({$shadowHttp}/{$shadowHttps})...");
             if (!BlueGreen::buildContainers($releaseDir)) {
                 wlog("ERROR: Docker build failed for {$activeRelease}");
-                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 sleep($interval);
                 continue;
             }
-            wlog("Shadow containers built on port " . BlueGreen::SHADOW_HTTP);
+            wlog("Shadow containers built on port {$shadowHttp}");
 
             // Run health checks
             $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
             wlog("Running health checks (" . count($healthChecks) . " configured)...");
-            $healthy = BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $activeRelease);
+            $healthy = BlueGreen::runHealthChecks($repo_dir, $shadowHttp, $healthChecks, $activeRelease);
 
             if ($healthy) {
-                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'ready');
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'ready');
                 BlueGreen::setShadowVersion($repo_dir, $activeRelease);
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
                 wlog("Shadow {$activeRelease} ready");
@@ -214,7 +217,7 @@ while (true) {
                     wlog("Shadow ready. Run 'protocol shadow:start' to promote.");
                 }
             } else {
-                BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
+                BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 wlog("ERROR: Health check FAILED for {$activeRelease} — will retry next cycle");
             }
