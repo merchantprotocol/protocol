@@ -77,9 +77,7 @@ Class Json extends Config
 		
 		if (file_exists($file)) {
 			if (fileperms($file) !== 33279) {
-				if (!chmod($file, 0755)) {
-					@unlink($file);
-				}
+				chmod($file, 0755);
 			}
 		}
 		$json_pretty = json_encode($this->data, JSON_PRETTY_PRINT);

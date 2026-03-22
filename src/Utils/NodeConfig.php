@@ -117,15 +117,24 @@ class NodeConfig
     }
 
     /**
-     * Find a node config by its repo directory path.
+     * Find a node config by matching a directory path.
+     * Checks releases_dir first, then repo_dir for legacy configs.
      */
     public static function findByRepoDir(string $repoDir): ?string
     {
         $repoDir = rtrim($repoDir, '/');
         foreach (self::listProjects() as $project) {
             $data = self::load($project);
+
+            // Primary: check if path is inside or matches releases_dir
+            $releasesDir = rtrim($data['bluegreen']['releases_dir'] ?? '', '/');
+            if ($releasesDir && ($repoDir === $releasesDir || str_starts_with($repoDir, $releasesDir . '/'))) {
+                return $project;
+            }
+
+            // Legacy: match repo_dir for configs that don't use releases_dir
             $nodeRepoDir = rtrim($data['repo_dir'] ?? '', '/');
-            if ($nodeRepoDir === $repoDir) {
+            if ($nodeRepoDir && $nodeRepoDir === $repoDir) {
                 return $project;
             }
         }
@@ -136,8 +145,7 @@ class NodeConfig
      * Resolve a slave node by project name or current directory.
      *
      * Returns [projectName, nodeData, activeDir] or null if no slave node found.
-     * If $projectName is provided, uses that; otherwise tries to match by $repoDir
-     * or falls back to the first configured slave project.
+     * All paths derive from releases_dir when configured.
      */
     public static function resolveSlaveNode(?string $projectName = null, ?string $repoDir = null): ?array
     {
@@ -167,46 +175,75 @@ class NodeConfig
             $projectName = $matched;
         }
 
-        $repoDir = $data['repo_dir'] ?? $repoDir;
-        $strategy = $data['deployment']['strategy'] ?? 'branch';
-        $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
-        $currentRelease = $data['release']['current'] ?? null;
-        $currentBranch = $data['deployment']['branch'] ?? $data['git']['branch'] ?? null;
-
-        // Resolve the active directory (where code, docker-compose, lock files live)
-        $activeDir = $repoDir;
-
-        // Try strategy-specific resolution first
-        if ($strategy === 'release' && $currentRelease && $releasesDir) {
-            $dir = rtrim($releasesDir, '/') . '/' . $currentRelease;
-            if (is_dir($dir)) {
-                $activeDir = $dir;
-            }
-        } elseif ($strategy === 'branch' && $currentBranch && $releasesDir) {
-            $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
-            if (is_dir($dir)) {
-                $activeDir = $dir;
-            }
-        }
-
-        // Fallback: if primary resolution didn't find a directory (e.g. release
-        // strategy but no release deployed yet), try the branch directory
-        if ($activeDir === $repoDir && $currentBranch && $releasesDir) {
-            $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
-            if (is_dir($dir)) {
-                $activeDir = $dir;
-            }
-        }
-
-        // Ensure trailing slash
-        $activeDir = rtrim($activeDir, '/') . '/';
+        $activeDir = self::resolveActiveDir($data);
 
         return [$projectName, $data, $activeDir];
     }
 
     /**
+     * Resolve the active directory from node config data.
+     * releases_dir is the source of truth.
+     *
+     * @throws \RuntimeException when the resolved directory does not exist
+     */
+    public static function resolveActiveDir(array $data): string
+    {
+        $strategy = $data['deployment']['strategy'] ?? 'branch';
+        $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
+        $currentRelease = $data['release']['current'] ?? null;
+        $currentBranch = $data['deployment']['branch'] ?? $data['git']['branch'] ?? null;
+        $projectName = $data['name'] ?? 'unknown';
+
+        if (!$releasesDir) {
+            throw new \RuntimeException(
+                "Node '{$projectName}' has no releases_dir configured. "
+                . "Run 'protocol init' to set up the releases directory."
+            );
+        }
+
+        if (!is_dir($releasesDir)) {
+            throw new \RuntimeException(
+                "Releases directory does not exist: {$releasesDir} "
+                . "(node: {$projectName}). Run 'protocol init' to set it up."
+            );
+        }
+
+        // Release strategy: expect the release version directory
+        if ($strategy === 'release' && $currentRelease) {
+            $dir = rtrim($releasesDir, '/') . '/' . $currentRelease;
+            if (!is_dir($dir)) {
+                throw new \RuntimeException(
+                    "Release directory not found: {$dir} "
+                    . "(strategy=release, current={$currentRelease}). "
+                    . "The release may not have been deployed yet."
+                );
+            }
+            return rtrim($dir, '/') . '/';
+        }
+
+        // Branch strategy: expect the branch directory
+        if ($currentBranch) {
+            $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
+            if (!is_dir($dir)) {
+                throw new \RuntimeException(
+                    "Branch directory not found: {$dir} "
+                    . "(strategy={$strategy}, branch={$currentBranch}). "
+                    . "Clone the branch into the releases directory first."
+                );
+            }
+            return rtrim($dir, '/') . '/';
+        }
+
+        throw new \RuntimeException(
+            "Cannot resolve active directory for node '{$projectName}': "
+            . "no current release or branch configured. "
+            . "Set deployment.branch or deploy a release."
+        );
+    }
+
+    /**
      * Find a slave node config by checking if a directory is inside
-     * any node's releases directory or matches a node's repo_dir.
+     * any node's releases directory.
      *
      * @return array|null [$projectName, $nodeData] or null
      */
@@ -218,13 +255,8 @@ class NodeConfig
             if (($data['node_type'] ?? '') !== 'slave') {
                 continue;
             }
-            // Check if activeDir is inside the releases directory
             $releasesDir = rtrim($data['bluegreen']['releases_dir'] ?? '', '/');
-            if ($releasesDir && str_starts_with($activeDir, $releasesDir)) {
-                return [$project, $data];
-            }
-            // Also match repo_dir directly
-            if (rtrim($data['repo_dir'] ?? '', '/') === $activeDir) {
+            if ($releasesDir && ($activeDir === $releasesDir || str_starts_with($activeDir, $releasesDir . '/'))) {
                 return [$project, $data];
             }
         }

@@ -544,9 +544,7 @@ Class ProtocolInit extends Command {
         $nodeData['name'] = $projectName;
         $nodeData['node_type'] = 'slave';
         $nodeData['environment'] = $environment;
-        // repo_dir should point to the releases directory base, not the cwd
-        // The branch checkout lives inside releases_dir (e.g., releases_dir/main/)
-        $nodeData['repo_dir'] = $releasesDir;
+        // repo_dir is not set — releases_dir is the source of truth for all paths
         $nodeData['git'] = $nodeData['git'] ?? [];
         $nodeData['git']['remote'] = $gitRemote;
         $nodeData['deployment'] = $nodeData['deployment'] ?? [];
@@ -1193,13 +1191,26 @@ Class ProtocolInit extends Command {
             $owner = $matches[1];
             $repo = $matches[2];
 
-            $json = Shell::run("gh api repos/" . escapeshellarg("{$owner}/{$repo}") . "/contents/protocol.json --jq '.content' 2>/dev/null");
-            if ($json && trim($json)) {
-                $decoded = base64_decode(trim($json));
-                if ($decoded) {
-                    $data = json_decode($decoded, true);
-                    if (is_array($data)) {
-                        return $data;
+            $token = GitHubApp::getAccessToken();
+            if ($token) {
+                $apiResult = Shell::run(
+                    "curl -s"
+                    . " -H " . escapeshellarg("Authorization: token {$token}")
+                    . " -H 'Accept: application/vnd.github+json'"
+                    . " " . escapeshellarg("https://api.github.com/repos/{$owner}/{$repo}/contents/protocol.json")
+                    . " 2>/dev/null"
+                );
+                if ($apiResult) {
+                    $apiData = json_decode($apiResult, true);
+                    $content = $apiData['content'] ?? null;
+                    if ($content) {
+                        $decoded = base64_decode($content);
+                        if ($decoded) {
+                            $data = json_decode($decoded, true);
+                            if (is_array($data)) {
+                                return $data;
+                            }
+                        }
                     }
                 }
             }
