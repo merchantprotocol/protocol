@@ -45,6 +45,8 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
@@ -161,18 +163,18 @@ Class ProtocolStatus extends Command {
         }
 
         // Release info
-        if ($strategy === 'release') {
-            if ($nodeConfig) {
-                $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
-            } else {
-                $currentRelease = JsonLock::read('release.current', null, $repo_dir);
-                $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
-                $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
+        if ($strategy === 'release' || $strategy === 'bluegreen') {
+            // Node config's release.current may be stale — the watcher writes
+            // to protocol.lock, so always check there too.
+            if (!$currentRelease) {
+                $currentRelease = BlueGreen::getActiveVersion($repo_dir);
+            }
+            $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
+            $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
 
-                if ($deployedAt) {
-                    $ago = $this->timeAgo($deployedAt);
-                    $releaseDisplay .= " <fg=gray>(deployed {$ago})</>";
-                }
+            if ($currentRelease && $deployedAt) {
+                $ago = $this->timeAgo($deployedAt);
+                $releaseDisplay .= " <fg=gray>(deployed {$ago})</>";
             }
             $this->writeLine($output, 'Release', $releaseDisplay);
         } else {
@@ -306,12 +308,37 @@ Class ProtocolStatus extends Command {
         }
 
         // ── Docker ───────────────────────────────────────────────
+        // For release/bluegreen strategies, the active container has a version
+        // suffix (e.g. ghostagent-v0.1.1) set via .env.bluegreen. We must read
+        // the patched name from that file, not from the compose file which has
+        // an unresolved ${CONTAINER_NAME:-ghostagent} variable.
         $dockerDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
-        if ($dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
+        $containers = [];
+        $releaseDockerDir = null;
+
+        if (BlueGreen::isEnabled($repo_dir)) {
+            $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+            if ($activeVersion) {
+                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
+                if (is_dir($releaseDir)) {
+                    $releaseDockerDir = $releaseDir;
+                    $envName = BlueGreen::getContainerName($releaseDir);
+                    if ($envName) {
+                        $containers[] = $envName;
+                    }
+                }
+            }
+        }
+
+        // Fallback: if no release containers found, use compose file from dockerDir
+        if (empty($containers) && $dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
+            $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
+        }
+
+        $effectiveDockerDir = $releaseDockerDir ?: $dockerDir;
+        if (!empty($containers) || ($effectiveDockerDir && is_dir($effectiveDockerDir) && Docker::isDockerInitialized($effectiveDockerDir))) {
             $output->writeln('');
             $this->writeSection($output, 'Docker');
-
-            $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
 
             foreach ($containers as $container) {
                 $running = Docker::isDockerContainerRunning($container);
@@ -326,7 +353,7 @@ Class ProtocolStatus extends Command {
             }
 
             // Image info
-            $image = $dockerImage ?: Json::read('docker.image', null, $dockerDir);
+            $image = $dockerImage ?: Json::read('docker.image', null, $effectiveDockerDir);
             if ($image) {
                 $this->writeLine($output, 'Image', "<fg=white>{$image}</>");
             }
