@@ -879,12 +879,17 @@ Class ProtocolInit extends Command {
      */
     protected function testRepoAccess(string $gitRemote): bool
     {
-        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1");
-        // ls-remote returns refs on success, error messages on failure
+        $returnVar = 0;
+        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1", $returnVar);
+        // ls-remote exits 0 on success (even for empty repos with no refs).
+        // On failure it exits non-zero and/or prints error messages.
+        if ($returnVar !== 0) {
+            return false;
+        }
         if (str_contains($result, 'fatal:') || str_contains($result, 'ERROR') || str_contains($result, 'Permission denied')) {
             return false;
         }
-        return !empty(trim($result));
+        return true;
     }
 
     /**
@@ -1128,6 +1133,12 @@ Class ProtocolInit extends Command {
             }
             $output->writeln("    <fg=green>✓</> Private key verified");
 
+            // Save credentials immediately — if init is interrupted after this
+            // point, the next run will find them via isConfigured() and skip
+            // the setup wizard entirely.
+            GitHubApp::saveCredentials($appId, $pemContents, $owner);
+            $output->writeln("    <fg=green>✓</> Credentials saved to <fg=white>" . GitHubApp::credentialsPath() . "</>");
+
             // ── Find installation — wait for user to install if needed ──
             $installationId = null;
             while (!$installationId) {
@@ -1191,11 +1202,8 @@ Class ProtocolInit extends Command {
 
             $output->writeln("    <fg=green>✓</> Access verified — read access to <fg=white>{$repo}</> confirmed");
 
-            // Save credentials and configure git
-            GitHubApp::saveCredentials($appId, $pemContents, $owner);
+            // Write git credentials for clone/fetch operations
             GitHubApp::writeGitCredentials($token);
-
-            $output->writeln("    <fg=green>✓</> Credentials stored in <fg=white>" . GitHubApp::credentialsPath() . "</>");
             $output->writeln('');
 
             return $gitRemote;
