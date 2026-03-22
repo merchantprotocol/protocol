@@ -56,6 +56,7 @@ use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\Lifecycle;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Helpers\DeploymentState;
@@ -406,16 +407,44 @@ Class ProtocolStart extends Command {
                 Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
             }
 
-            // Run composer install inside container if needed
-            if (file_exists(rtrim($repo_dir, '/') . '/composer.json')) {
-                $containerName = Json::read('docker.container_name', '', $repo_dir);
-                if ($containerName) {
-                    Shell::run("docker exec {$containerName} composer install --no-interaction 2>&1");
-                }
-            }
         });
 
-        // ── Stage 4: Security audit ─────────────────────────────
+        // ── Stage 4: Post-start lifecycle hooks ──────────────────
+        $runner->run('Post-start hooks', function() use ($runner, $repo_dir, $strategy) {
+            $postStart = Json::read('lifecycle.post_start', [], $repo_dir);
+            if (empty($postStart) || !is_array($postStart)) {
+                $runner->log("No post_start hooks configured");
+                return;
+            }
+
+            // For release/bluegreen, run hooks in the release dir
+            $hookDir = $repo_dir;
+            $envFile = null;
+            if (BlueGreen::isEnabled($repo_dir)) {
+                $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                if (!$activeVersion) {
+                    $curDeploy = DeploymentState::current($repo_dir);
+                    $activeVersion = $curDeploy['version'] ?? null;
+                }
+                if ($activeVersion) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
+                    if (is_dir($releaseDir)) {
+                        $hookDir = $releaseDir;
+                        $bgEnv = rtrim($releaseDir, '/') . '/.env.bluegreen';
+                        if (is_file($bgEnv)) {
+                            $envFile = $bgEnv;
+                        }
+                    }
+                }
+            }
+
+            $runner->log("Running " . count($postStart) . " post_start hook(s) in {$hookDir}");
+            Lifecycle::runPostStart($hookDir, function($msg) use ($runner) {
+                $runner->log($msg);
+            }, $envFile);
+        });
+
+        // ── Stage 5: Security audit ─────────────────────────────
         $runner->run('Running security audit', function() use ($repo_dir) {
             $audit = new SecurityAudit($repo_dir);
             $audit->runAll();
@@ -427,7 +456,7 @@ Class ProtocolStart extends Command {
             }
         }, 'PASS');
 
-        // ── Stage 5: SOC 2 readiness check ───────────────────────
+        // ── Stage 6: SOC 2 readiness check ───────────────────────
         $runner->run('SOC 2 readiness check', function() use ($repo_dir) {
             $check = new Soc2Check($repo_dir);
             $check->runAll();
@@ -439,7 +468,7 @@ Class ProtocolStart extends Command {
             }
         }, 'PASS');
 
-        // ── Stage 6: Health checks ──────────────────────────────
+        // ── Stage 7: Health checks ──────────────────────────────
         $runner->run('Health checks', function() use ($runner, $repo_dir, $strategy) {
             $runner->log("Health check: strategy={$strategy} isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
 
@@ -494,7 +523,7 @@ Class ProtocolStart extends Command {
             }
         }, 'PASS');
 
-        // ── Stage 7: Disk space check ──────────────────────────
+        // ── Stage 8: Disk space check ──────────────────────────
         $diskWarnings = [];
         $runner->run('Disk space check', function() use (&$diskWarnings) {
             $check = DiskCheck::check();
