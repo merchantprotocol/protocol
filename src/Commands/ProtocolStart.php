@@ -316,8 +316,13 @@ Class ProtocolStart extends Command {
                         return;
                     }
                 }
-                // No active version yet — fall through to standard build
-                $runner->log("No active release version found, falling back to standard build");
+                // No active version yet — do NOT fall through to standard build.
+                // Starting bare containers from repo_dir creates a container with
+                // the un-versioned name (e.g. "ghostagent" instead of "ghostagent-v0.1.0"),
+                // which conflicts with the release watcher's versioned containers.
+                // The watcher will handle building and starting the correct release.
+                $runner->log("No active release version found — skipping container start (watcher will deploy)");
+                return;
             }
 
             // Standard single-container mode (branch strategy or fallback)
