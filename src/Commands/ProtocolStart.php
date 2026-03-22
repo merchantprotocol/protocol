@@ -278,7 +278,15 @@ Class ProtocolStart extends Command {
             // Release and bluegreen strategies both use release directories.
             // Start the active version's containers from the release dir.
             if (BlueGreen::isEnabled($repo_dir)) {
+                // Try bluegreen.active_version first, then fall back to
+                // DeploymentState::current() which checks release.current
+                // and other legacy keys. This handles cases where the version
+                // was deployed before the strategy separation changes.
                 $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                if (!$activeVersion) {
+                    $curDeploy = DeploymentState::current($repo_dir);
+                    $activeVersion = $curDeploy['version'] ?? null;
+                }
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                     if (is_dir($releaseDir)) {
@@ -392,6 +400,10 @@ Class ProtocolStart extends Command {
             // For release/bluegreen, check the active release's container
             if (BlueGreen::isEnabled($repo_dir)) {
                 $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                if (!$activeVersion) {
+                    $curDeploy = DeploymentState::current($repo_dir);
+                    $activeVersion = $curDeploy['version'] ?? null;
+                }
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                     $containerName = BlueGreen::getContainerName($releaseDir);
@@ -454,6 +466,10 @@ Class ProtocolStart extends Command {
         // Also check release dirs for patched container names
         if (BlueGreen::isEnabled($repo_dir)) {
             $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+            if (!$activeVersion) {
+                $curDeploy = DeploymentState::current($repo_dir);
+                $activeVersion = $curDeploy['version'] ?? null;
+            }
             if ($activeVersion) {
                 $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                 $envName = BlueGreen::getContainerName($releaseDir);
