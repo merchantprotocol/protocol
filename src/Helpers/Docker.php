@@ -86,10 +86,54 @@ Class Docker
         $containerNames = [];
         foreach ($dockerServices as $services => $serviceConfigs) {
             if (array_key_exists('container_name', $serviceConfigs)) {
-                $containerNames[] = $serviceConfigs['container_name'];
+                $containerNames[] = self::resolveEnvVars($serviceConfigs['container_name'], $repo_dir);
             }
         }
         return $containerNames;
+    }
+
+    /**
+     * Resolve Docker-style environment variable references in a string.
+     * Supports ${VAR:-default}, ${VAR-default}, ${VAR}, and $VAR.
+     * Checks .env file in repo_dir first, then system environment.
+     */
+    public static function resolveEnvVars(string $value, $repo_dir = false): string
+    {
+        // Load .env file if present
+        $dotenv = [];
+        if ($repo_dir) {
+            $envFile = rtrim($repo_dir, '/') . '/.env';
+            if (is_file($envFile)) {
+                foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+                    $line = trim($line);
+                    if ($line === '' || $line[0] === '#') continue;
+                    if (strpos($line, '=') !== false) {
+                        [$k, $v] = explode('=', $line, 2);
+                        $dotenv[trim($k)] = trim($v, " \t\n\r\0\x0B\"'");
+                    }
+                }
+            }
+        }
+
+        // ${VAR:-default} — use default if VAR is unset or empty
+        $value = preg_replace_callback('/\$\{([^}:]+):-([^}]*)\}/', function ($m) use ($dotenv) {
+            $val = $dotenv[$m[1]] ?? (getenv($m[1]) ?: null);
+            return ($val !== null && $val !== '' && $val !== false) ? $val : $m[2];
+        }, $value);
+
+        // ${VAR-default} — use default only if VAR is unset
+        $value = preg_replace_callback('/\$\{([^}-]+)-([^}]*)\}/', function ($m) use ($dotenv) {
+            if (isset($dotenv[$m[1]])) return $dotenv[$m[1]];
+            $val = getenv($m[1]);
+            return ($val !== false) ? $val : $m[2];
+        }, $value);
+
+        // ${VAR}
+        $value = preg_replace_callback('/\$\{([^}]+)\}/', function ($m) use ($dotenv) {
+            return $dotenv[$m[1]] ?? (getenv($m[1]) ?: '');
+        }, $value);
+
+        return $value;
     }
 
     /**
