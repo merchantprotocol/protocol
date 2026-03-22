@@ -5,6 +5,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 class Soc2Check extends BaseAuditChecker
 {
@@ -73,8 +74,30 @@ class Soc2Check extends BaseAuditChecker
     {
         $strategy = Json::read('deployment.strategy', 'branch', $this->repoDir);
 
+        // On slave nodes the release directory's protocol.json may not have
+        // deployment.strategy set. Fall back to NodeConfig which stores the
+        // authoritative strategy for deployed projects.
+        if ($strategy === 'branch') {
+            $projectName = NodeConfig::findByRepoDir($this->repoDir);
+            if (!$projectName) {
+                $result = NodeConfig::findByActiveDir($this->repoDir);
+                if ($result) {
+                    $projectName = $result[0];
+                }
+            }
+            if ($projectName) {
+                $data = NodeConfig::load($projectName);
+                $nodeStrategy = $data['deployment']['strategy'] ?? null;
+                if ($nodeStrategy) {
+                    $strategy = $nodeStrategy;
+                }
+            }
+        }
+
         if ($strategy === 'release') {
             $this->addResult('Deploy strategy', 'pass', 'Release-based deployment (immutable tags, full audit trail)');
+        } elseif ($strategy === 'bluegreen') {
+            $this->addResult('Deploy strategy', 'pass', 'Blue-green deployment (zero-downtime, immutable tags, full audit trail)');
         } else {
             $this->addResult('Deploy strategy', 'warn', 'Branch-based deployment — no rollback history or approval gate');
         }
