@@ -243,40 +243,32 @@ class BlueGreen
         $activeVersion = self::getActiveVersion($repo_dir);
         $newDir = self::getReleaseDir($repo_dir, $newVersion);
 
-        // Stop current active containers
+        // Write production ports for new version
+        self::writeReleaseEnv($newDir, self::PRODUCTION_HTTP, self::PRODUCTION_HTTPS, $newVersion);
+
+        // Start new version on production ports FIRST (zero-downtime)
+        $started = self::startContainers($newDir);
+        if (!$started) {
+            // New version failed to start — old containers are still running, no damage done
+            return null;
+        }
+
+        // New version is serving — now stop the old containers
         if ($activeVersion) {
             $activeDir = self::getReleaseDir($repo_dir, $activeVersion);
             if (is_dir($activeDir)) {
                 self::stopContainers($activeDir);
-            }
-        }
-
-        // Write production ports for new version
-        self::writeReleaseEnv($newDir, self::PRODUCTION_HTTP, self::PRODUCTION_HTTPS, $newVersion);
-
-        // Start new version on production ports (near-instant)
-        $started = self::startContainers($newDir);
-        if (!$started) {
-            // Rollback: restart the original active version
-            if ($activeVersion) {
-                $activeDir = self::getReleaseDir($repo_dir, $activeVersion);
-                self::writeReleaseEnv($activeDir, self::PRODUCTION_HTTP, self::PRODUCTION_HTTPS, $activeVersion);
+                // Rewrite old version to shadow ports for standby rollback
+                self::writeReleaseEnv($activeDir, self::SHADOW_HTTP, self::SHADOW_HTTPS, $activeVersion);
+                // Start old version on shadow ports for instant rollback
                 self::startContainers($activeDir);
+                self::setReleaseState($repo_dir, $activeVersion, self::SHADOW_HTTP, 'standby');
             }
-            return null;
         }
 
         // Update state
         self::setActiveVersion($repo_dir, $newVersion);
         self::setReleaseState($repo_dir, $newVersion, self::PRODUCTION_HTTP, 'serving');
-        if ($activeVersion) {
-            self::setReleaseState($repo_dir, $activeVersion, self::SHADOW_HTTP, 'standby');
-            // Rewrite old active to shadow ports (keep it available for rollback)
-            $activeDir = self::getReleaseDir($repo_dir, $activeVersion);
-            if (is_dir($activeDir)) {
-                self::writeReleaseEnv($activeDir, self::SHADOW_HTTP, self::SHADOW_HTTPS, $activeVersion);
-            }
-        }
         self::setShadowVersion($repo_dir, null);
         JsonLock::write('bluegreen.promoted_at', date('Y-m-d\TH:i:sP'), $repo_dir);
         JsonLock::save($repo_dir);

@@ -60,12 +60,19 @@ while (true) {
     $pollCount++;
 
     try {
+        // Clear singleton caches so we re-read files from disk each cycle
+        JsonLock::clearInstances();
+        Json::clearInstances();
+
         // Refresh credentials before each poll (tokens expire after 1 hour)
         if (GitHubApp::isConfigured()) {
             $creds = GitHubApp::loadCredentials();
             $appOwner = $creds['owner'] ?? null;
             if ($appOwner) {
-                GitHubApp::refreshGitCredentials($appOwner);
+                $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                if (!$refreshed) {
+                    wlog("WARNING: Failed to refresh GitHub App credentials");
+                }
             }
         }
 
@@ -183,8 +190,15 @@ while (true) {
                         AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
                         AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
                         wlog("Auto-promoted {$activeRelease} to production");
+
+                        // Only update release.current on successful promotion
+                        JsonLock::write('release.previous', $currentRelease, $repo_dir);
+                        JsonLock::write('release.current', $activeRelease, $repo_dir);
+                        JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+                        JsonLock::save($repo_dir);
+                        wlog("Release state updated: current={$activeRelease}");
                     } else {
-                        wlog("ERROR: Auto-promote failed for {$activeRelease}");
+                        wlog("ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle");
                     }
                 } else {
                     wlog("Shadow ready. Run 'protocol shadow:start' to promote.");
@@ -192,15 +206,8 @@ while (true) {
             } else {
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
-                wlog("ERROR: Health check FAILED for {$activeRelease}");
+                wlog("ERROR: Health check FAILED for {$activeRelease} — will retry next cycle");
             }
-
-            // Update release tracking
-            JsonLock::write('release.previous', $currentRelease, $repo_dir);
-            JsonLock::write('release.current', $activeRelease, $repo_dir);
-            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-            JsonLock::save($repo_dir);
-            wlog("Release state updated: current={$activeRelease}");
 
         } else {
             // ── Standard in-place deployment ─────────────────
