@@ -221,24 +221,60 @@ class NodeConfig
             return rtrim($dir, '/') . '/';
         }
 
+        // Release strategy but no release.current: scan for deployed releases
+        if ($strategy === 'release') {
+            $found = self::scanReleasesDir($releasesDir);
+            if ($found) {
+                return $found;
+            }
+        }
+
         // Branch strategy: expect the branch directory
         if ($currentBranch) {
             $dir = rtrim($releasesDir, '/') . '/' . $currentBranch;
-            if (!is_dir($dir)) {
-                throw new \RuntimeException(
-                    "Branch directory not found: {$dir} "
-                    . "(strategy={$strategy}, branch={$currentBranch}). "
-                    . "Clone the branch into the releases directory first."
-                );
+            if (is_dir($dir)) {
+                return rtrim($dir, '/') . '/';
             }
-            return rtrim($dir, '/') . '/';
+        }
+
+        // Last resort: scan for any deployed directory
+        $found = self::scanReleasesDir($releasesDir);
+        if ($found) {
+            return $found;
         }
 
         throw new \RuntimeException(
-            "Cannot resolve active directory for node '{$projectName}': "
-            . "no current release or branch configured. "
-            . "Set deployment.branch or deploy a release."
+            "No deployed release or branch found in {$releasesDir} "
+            . "(node: {$projectName}). Run 'protocol init' or deploy a release."
         );
+    }
+
+    /**
+     * Scan releases directory for the most recent versioned deployment.
+     * Returns the directory path or null if none found.
+     */
+    private static function scanReleasesDir(string $releasesDir): ?string
+    {
+        $releasesDir = rtrim($releasesDir, '/');
+        $candidates = [];
+        foreach (scandir($releasesDir) as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $path = $releasesDir . '/' . $entry;
+            if (!is_dir($path)) continue;
+            // Skip config directories (e.g. ghostagent-config)
+            if (str_ends_with($entry, '-config')) continue;
+            // Prefer version-tagged directories (v0.1.0, v1.2.3, etc.)
+            if (preg_match('/^v?\d+\.\d+/', $entry)) {
+                $candidates[] = $entry;
+            }
+        }
+        if (empty($candidates)) {
+            return null;
+        }
+        // Sort versions descending, pick newest
+        usort($candidates, 'version_compare');
+        $best = array_pop($candidates);
+        return $releasesDir . '/' . $best . '/';
     }
 
     /**

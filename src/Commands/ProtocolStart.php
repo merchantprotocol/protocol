@@ -297,8 +297,9 @@ Class ProtocolStart extends Command {
             $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
             if ($usesBuild) {
-                $runner->log("docker compose build");
-                Shell::run("docker compose -f " . escapeshellarg($composePath) . " build 2>&1");
+                $dockerCmd = Docker::getDockerCommand();
+                $runner->log("{$dockerCmd} build");
+                Shell::run("{$dockerCmd} -f " . escapeshellarg($composePath) . " build 2>&1");
             } else {
                 $image = Json::read('docker.image', false, $repo_dir);
                 if ($image) {
