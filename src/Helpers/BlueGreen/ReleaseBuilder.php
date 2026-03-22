@@ -94,7 +94,7 @@ class ReleaseBuilder
             $fetchReturn
         );
         if ($fetchReturn !== 0) {
-            error_log("checkoutVersion: tag fetch failed (exit {$fetchReturn}) for {$releaseDir}");
+            // Tag fetch failed — caller logs the error context
         }
 
         $result = Shell::run(
@@ -102,7 +102,7 @@ class ReleaseBuilder
             $returnVar
         );
         if ($returnVar !== 0) {
-            error_log("checkoutVersion: checkout failed (exit {$returnVar}): " . trim($result));
+            // Checkout failed — caller logs the error context
         }
 
         return $returnVar === 0;
@@ -236,7 +236,6 @@ class ReleaseBuilder
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
-            error_log("startContainers: no docker-compose.yml in {$releaseDir}");
             return false;
         }
 
@@ -244,10 +243,7 @@ class ReleaseBuilder
         $dockerCommand = Docker::getDockerCommand();
 
         $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand} --env-file " . escapeshellarg($envFile) . " up -d 2>&1";
-        error_log("startContainers: cmd={$cmd}");
-
         $result = Shell::run($cmd, $returnVar);
-        error_log("startContainers: exit={$returnVar} output=" . trim($result));
 
         return $returnVar === 0;
     }
@@ -265,7 +261,6 @@ class ReleaseBuilder
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
-            error_log("stopContainers: no docker-compose.yml in {$releaseDir}");
             return false;
         }
 
@@ -274,10 +269,7 @@ class ReleaseBuilder
         $envFlag = file_exists($envFile) ? " --env-file " . escapeshellarg($envFile) : "";
 
         $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand}{$envFlag} down 2>&1";
-        error_log("stopContainers: cmd={$cmd} envFileExists=" . (file_exists($envFile) ? 'yes' : 'no'));
-
         $result = Shell::run($cmd, $returnVar);
-        error_log("stopContainers: exit={$returnVar} output=" . trim($result));
 
         return $returnVar === 0;
     }
