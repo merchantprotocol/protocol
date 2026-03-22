@@ -151,59 +151,123 @@ Class ProtocolStop extends Command {
 
         $runner = new StageRunner($output);
 
+        $runner->log("repo_dir={$repo_dir}");
+        $runner->log("strategy={$strategy}");
+        $runner->log("isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
+        $runner->log("activeVersion=" . (BlueGreen::getActiveVersion($repo_dir) ?: 'null'));
+
         // ── Stage 1: Stopping watchers ──────────────────────────
-        $runner->run('Stopping watchers', function() use ($app, $arrInput, $nullOutput) {
+        $runner->run('Stopping watchers', function() use ($runner, $app, $arrInput, $nullOutput) {
             // Stop all watchers regardless of strategy
-            try { $app->find('deploy:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
-            try { $app->find('git:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
-            try { $app->find('config:slave:stop')->run($arrInput, $nullOutput); } catch (\Throwable $e) {}
+            try { $app->find('deploy:slave:stop')->run($arrInput, $nullOutput); $runner->log("deploy:slave:stop done"); } catch (\Throwable $e) { $runner->log("deploy:slave:stop error: " . $e->getMessage()); }
+            try { $app->find('git:slave:stop')->run($arrInput, $nullOutput); $runner->log("git:slave:stop done"); } catch (\Throwable $e) { $runner->log("git:slave:stop error: " . $e->getMessage()); }
+            try { $app->find('config:slave:stop')->run($arrInput, $nullOutput); $runner->log("config:slave:stop done"); } catch (\Throwable $e) { $runner->log("config:slave:stop error: " . $e->getMessage()); }
         });
 
         // ── Stage 2: Unlinking configuration ────────────────────
-        $runner->run('Unlinking configuration', function() use ($app, $arrInput, $nullOutput, $repo_dir) {
-            if (Json::read('configuration.remote', false, $repo_dir)) {
+        $runner->run('Unlinking configuration', function() use ($runner, $app, $arrInput, $nullOutput, $repo_dir) {
+            $hasRemote = Json::read('configuration.remote', false, $repo_dir);
+            $runner->log("configuration.remote=" . ($hasRemote ?: 'false'));
+            if ($hasRemote) {
                 $app->find('config:unlink')->run($arrInput, $nullOutput);
+                $runner->log("config:unlink done");
             }
         });
 
         // ── Stage 3: Stopping containers ────────────────────────
-        // Stops ALL containers across all known directories AND all release
-        // directories. Works for both "release" and "bluegreen" strategies.
-        // allKnownDirs() now scans release dirs too, so we get full coverage.
-        $runner->run('Stopping containers', function() use ($repo_dir) {
+        // For release/bluegreen: uses BlueGreen::stopContainers() which passes
+        // --env-file .env.bluegreen so docker compose resolves the patched
+        // container name (e.g. ghostagent-v0.1.1 instead of bare ghostagent).
+        //
+        // For branch: uses raw docker compose down in repo_dir.
+        $runner->run('Stopping containers', function() use ($runner, $repo_dir) {
+            // 1. Stop containers in all dirs tracked by DeploymentState.
+            //    For dirs with .env.bluegreen, use BlueGreen::stopContainers()
+            //    so the patched container name is resolved correctly.
             $dirs = DeploymentState::allKnownDirs($repo_dir);
-            foreach ($dirs as $dir) {
-                $dockerCommand = Docker::getDockerCommand();
-                Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
-            }
+            $runner->log("allKnownDirs returned " . count($dirs) . " dirs: " . implode(', ', $dirs));
 
-            // Also stop any release dir containers not captured by allKnownDirs.
-            // This catches orphaned releases that aren't tracked in deploy state.
-            if (BlueGreen::isEnabled($repo_dir)) {
-                foreach (BlueGreen::listReleases($repo_dir) as $release) {
-                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
-                    if (is_dir($releaseDir) && !in_array(rtrim($releaseDir, '/') . '/', $dirs)) {
-                        BlueGreen::stopContainers($releaseDir);
-                    }
+            foreach ($dirs as $dir) {
+                $envFile = rtrim($dir, '/') . '/.env.bluegreen';
+                if (file_exists($envFile)) {
+                    $containerName = BlueGreen::getContainerName($dir);
+                    $runner->log("Stopping release dir {$dir} via BlueGreen::stopContainers (container={$containerName})");
+                    $stopped = BlueGreen::stopContainers($dir);
+                    $runner->log("  result=" . ($stopped ? 'ok' : 'failed'));
+                } else {
+                    $dockerCommand = Docker::getDockerCommand();
+                    $runner->log("Stopping dir {$dir} via {$dockerCommand} down (no .env.bluegreen)");
+                    $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
+                    $runner->log("  output=" . trim($result));
                 }
             }
+
+            // 2. Also iterate ALL release directories on disk.
+            //    This catches orphaned releases not tracked in deploy state,
+            //    and ensures we don't miss anything.
+            if (BlueGreen::isEnabled($repo_dir)) {
+                $releases = BlueGreen::listReleases($repo_dir);
+                $runner->log("listReleases returned " . count($releases) . " releases: " . implode(', ', $releases));
+                foreach ($releases as $release) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
+                    if (is_dir($releaseDir)) {
+                        $containerName = BlueGreen::getContainerName($releaseDir);
+                        $runner->log("Stopping release {$release} dir={$releaseDir} container={$containerName}");
+                        $stopped = BlueGreen::stopContainers($releaseDir);
+                        $runner->log("  result=" . ($stopped ? 'ok' : 'failed'));
+                    } else {
+                        $runner->log("Skipping release {$release} — dir does not exist: {$releaseDir}");
+                    }
+                }
+            } else {
+                $runner->log("BlueGreen not enabled, skipping release dir scan");
+            }
+
+            // 3. Nuclear option: check docker ps for any containers matching
+            //    the project name pattern and force-stop them.
+            $running = trim(Shell::run("docker ps --format '{{.Names}}' 2>/dev/null"));
+            $runner->log("docker ps after stop: " . ($running ?: '(none)'));
         });
 
         // ── Stage 4: Removing crontab ───────────────────────────
-        $runner->run('Removing crontab entry', function() use ($repo_dir) {
+        $runner->run('Removing crontab entry', function() use ($runner, $repo_dir) {
             Crontab::removeCrontabRestart($repo_dir);
+            $runner->log("Crontab entry removed");
         });
 
         // ── Stage 5: Verifying shutdown ─────────────────────────
-        $runner->run('Verifying shutdown', function() use ($repo_dir) {
-            // Verify containers are stopped in all known dirs
+        $runner->run('Verifying shutdown', function() use ($runner, $repo_dir) {
+            // Check release dir containers by their patched name from .env.bluegreen
+            if (BlueGreen::isEnabled($repo_dir)) {
+                $releases = BlueGreen::listReleases($repo_dir);
+                foreach ($releases as $release) {
+                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
+                    $containerName = BlueGreen::getContainerName($releaseDir);
+                    if ($containerName) {
+                        $isRunning = Docker::isDockerContainerRunning($containerName);
+                        $runner->log("Verify release {$release}: container={$containerName} running={$isRunning}");
+                        if ($isRunning) {
+                            throw new \RuntimeException("Container '{$containerName}' is still running");
+                        }
+                    }
+                }
+            }
+
+            // Check containers from compose files in non-release dirs
             $dirs = DeploymentState::allKnownDirs($repo_dir);
             foreach ($dirs as $dir) {
+                // Skip release dirs — already checked above by patched name
+                $envFile = rtrim($dir, '/') . '/.env.bluegreen';
+                if (file_exists($envFile)) {
+                    continue;
+                }
                 $composePath = rtrim($dir, '/') . '/docker-compose.yml';
                 if (file_exists($composePath)) {
                     $containerNames = Docker::getContainerNamesFromDockerComposeFile($dir);
                     foreach ($containerNames as $name) {
-                        if (Docker::isDockerContainerRunning($name)) {
+                        $isRunning = Docker::isDockerContainerRunning($name);
+                        $runner->log("Verify dir {$dir}: container={$name} running={$isRunning}");
+                        if ($isRunning) {
                             throw new \RuntimeException("Container '{$name}' is still running");
                         }
                     }
@@ -211,7 +275,9 @@ Class ProtocolStop extends Command {
             }
 
             // Verify watcher is stopped
-            if (DeploymentState::isWatcherRunning($repo_dir)) {
+            $watcherRunning = DeploymentState::isWatcherRunning($repo_dir);
+            $runner->log("Watcher running={$watcherRunning}");
+            if ($watcherRunning) {
                 throw new \RuntimeException('Deployment watcher is still running');
             }
         }, 'PASS');
@@ -219,25 +285,39 @@ Class ProtocolStop extends Command {
         // ── Summary ─────────────────────────────────────────────
         $environment = Config::read('env', 'unknown');
 
-        // Collect container names from all known dirs (includes release dirs)
+        // Collect container names: use patched names from .env.bluegreen
+        // for release dirs, compose file names for branch dirs.
         $containerNames = [];
-        foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
-            $composePath = rtrim($dir, '/') . '/docker-compose.yml';
-            if (file_exists($composePath)) {
-                $containerNames = array_merge($containerNames, Docker::getContainerNamesFromDockerComposeFile($dir));
-            }
-        }
-        // Also check release dirs for .env.bluegreen container names
-        // (patched containers won't show their real name from compose alone)
+
+        // Release dir containers (by patched name)
         if (BlueGreen::isEnabled($repo_dir)) {
             foreach (BlueGreen::listReleases($repo_dir) as $release) {
                 $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
                 $envName = BlueGreen::getContainerName($releaseDir);
-                if ($envName && !in_array($envName, $containerNames)) {
+                if ($envName) {
                     $containerNames[] = $envName;
+                    $runner->log("Summary: release {$release} container={$envName} running=" . (Docker::isDockerContainerRunning($envName) ? 'yes' : 'no'));
                 }
             }
         }
+
+        // Non-release dirs (branch strategy)
+        foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
+            if (file_exists(rtrim($dir, '/') . '/.env.bluegreen')) {
+                continue; // Already handled above
+            }
+            $composePath = rtrim($dir, '/') . '/docker-compose.yml';
+            if (file_exists($composePath)) {
+                $names = Docker::getContainerNamesFromDockerComposeFile($dir);
+                foreach ($names as $name) {
+                    if (!in_array($name, $containerNames)) {
+                        $containerNames[] = $name;
+                        $runner->log("Summary: dir {$dir} container={$name} running=" . (Docker::isDockerContainerRunning($name) ? 'yes' : 'no'));
+                    }
+                }
+            }
+        }
+
         $stoppedCount = 0;
         foreach ($containerNames as $name) {
             if (!Docker::isDockerContainerRunning($name)) $stoppedCount++;
@@ -246,6 +326,8 @@ Class ProtocolStop extends Command {
         $containerStatus = $containerTotal > 0
             ? "{$stoppedCount}/{$containerTotal} stopped"
             : 'none configured';
+
+        $runner->log("Summary totals: {$stoppedCount}/{$containerTotal} stopped, names=" . implode(',', $containerNames));
 
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'still installed' : 'removed';
 

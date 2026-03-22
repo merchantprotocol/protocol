@@ -228,32 +228,44 @@ class ReleaseBuilder
 
     /**
      * Start containers for a release (fast -- image already built).
+     *
+     * Uses --env-file .env.bluegreen so docker compose resolves the
+     * patched container name (e.g. ghostagent-v0.1.1) and port vars.
      */
     public static function startContainers(string $releaseDir): bool
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
+            error_log("startContainers: no docker-compose.yml in {$releaseDir}");
             return false;
         }
 
         $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
         $dockerCommand = Docker::getDockerCommand();
 
-        $result = Shell::run(
-            "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand} --env-file " . escapeshellarg($envFile) . " up -d 2>&1",
-            $returnVar
-        );
+        $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand} --env-file " . escapeshellarg($envFile) . " up -d 2>&1";
+        error_log("startContainers: cmd={$cmd}");
+
+        $result = Shell::run($cmd, $returnVar);
+        error_log("startContainers: exit={$returnVar} output=" . trim($result));
 
         return $returnVar === 0;
     }
 
     /**
      * Stop containers for a release.
+     *
+     * Uses --env-file .env.bluegreen (if it exists) so docker compose
+     * resolves the patched container name correctly. Without this flag,
+     * compose uses the default name from the compose file, which won't
+     * match the running container (e.g. stops 'ghostagent' instead of
+     * 'ghostagent-v0.1.1').
      */
     public static function stopContainers(string $releaseDir): bool
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
+            error_log("stopContainers: no docker-compose.yml in {$releaseDir}");
             return false;
         }
 
@@ -261,10 +273,11 @@ class ReleaseBuilder
         $dockerCommand = Docker::getDockerCommand();
         $envFlag = file_exists($envFile) ? " --env-file " . escapeshellarg($envFile) : "";
 
-        $result = Shell::run(
-            "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand}{$envFlag} down 2>&1",
-            $returnVar
-        );
+        $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand}{$envFlag} down 2>&1";
+        error_log("stopContainers: cmd={$cmd} envFileExists=" . (file_exists($envFile) ? 'yes' : 'no'));
+
+        $result = Shell::run($cmd, $returnVar);
+        error_log("stopContainers: exit={$returnVar} output=" . trim($result));
 
         return $returnVar === 0;
     }
