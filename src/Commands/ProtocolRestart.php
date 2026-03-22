@@ -44,6 +44,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 Class ProtocolRestart extends Command {
 
@@ -69,6 +70,7 @@ Class ProtocolRestart extends Command {
         $this
             // configure an argument
             ->addArgument('local', InputArgument::OPTIONAL, 'The path to your local git repo')
+            ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             // ...
         ;
@@ -86,7 +88,19 @@ Class ProtocolRestart extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
+
+        // Detect slave node mode so restart works from anywhere
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [$nodeConfig, $nodeData, $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        // For non-slave nodes, require a git repo as before
+        if (!$resolved) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         // command should only have one running instance
         if (!$this->lock()) {

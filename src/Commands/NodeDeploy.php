@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\SecretsProvider;
@@ -121,7 +122,8 @@ Class NodeDeploy extends Command {
             $output->writeln(' - Secrets resolved to temp file');
 
             // Rebuild docker with env file
-            Shell::passthru("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+            $dockerCommand = Docker::getDockerCommand();
+            Shell::passthru("{$dockerCommand} -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
 
             // Delete temp file immediately
             unlink($tmpEnv);

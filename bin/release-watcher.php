@@ -13,6 +13,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\SecretsProvider;
@@ -226,13 +227,14 @@ while (true) {
             // Handle secrets (encrypted or AWS Secrets Manager)
             $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
 
+            $dockerCommand = Docker::getDockerCommand();
             if ($tmpEnv) {
                 wlog("Rebuilding Docker containers with secrets...");
-                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+                Shell::run("{$dockerCommand} -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
                 unlink($tmpEnv);
             } else {
                 wlog("Rebuilding Docker containers...");
-                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
+                Shell::run("{$dockerCommand} -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
             }
 
             // Audit log
