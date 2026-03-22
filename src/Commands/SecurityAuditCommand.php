@@ -12,6 +12,7 @@ use Symfony\Component\Console\Helper\Table;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\SecurityAudit;
+use Gitcd\Utils\NodeConfig;
 
 class SecurityAuditCommand extends Command
 {
@@ -22,13 +23,24 @@ class SecurityAuditCommand extends Command
     {
         $this
             ->setHelp('Scans for malicious code patterns, checks file permissions, audits dependencies, inspects Docker configuration, and flags suspicious processes.')
+            ->addArgument('project', \Symfony\Component\Console\Input\InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder());
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo($output, $repo_dir);
+
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [, , $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        if (!$resolved) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         $output->writeln('');
         $output->writeln('<fg=white;options=bold>  Security Audit</>');

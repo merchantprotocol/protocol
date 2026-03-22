@@ -12,6 +12,7 @@ use Symfony\Component\Console\Helper\Table;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Soc2Check;
+use Gitcd\Utils\NodeConfig;
 
 class Soc2CheckCommand extends Command
 {
@@ -22,13 +23,26 @@ class Soc2CheckCommand extends Command
     {
         $this
             ->setHelp('Validates encrypted secrets, audit logging, release-based deployment, git integrity, reboot recovery, and key permissions against SOC 2 Type II requirements.')
+            ->addArgument('project', \Symfony\Component\Console\Input\InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder());
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
-        Git::checkInitializedRepo($output, $repo_dir);
+
+        // Detect slave node mode so soc2:check works from anywhere
+        $projectArg = $input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [, , $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        // For non-slave nodes, require a git repo as before
+        if (!$resolved) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         $output->writeln('');
         $output->writeln('<fg=white;options=bold>  SOC 2 Type II Readiness Check</>');
