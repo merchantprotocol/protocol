@@ -343,6 +343,12 @@ if [ "$OS" = "Darwin" ]; then
     fi
     step_ok "Updated Protocol"
   else
+    # Clean up any partial clone from a previous failed attempt
+    if [ -d "$INSTALL_DIR" ]; then
+      step_warn "Removing incomplete install at ${INSTALL_DIR}"
+      rm -rf "$INSTALL_DIR"
+    fi
+
     start_spinner "Cloning Protocol..."
     if [ "$USE_NIGHTLY" = true ]; then
       run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR" \
@@ -369,6 +375,7 @@ if [ "$OS" = "Darwin" ]; then
   # Install dependencies (clean vendor to avoid stale/partial installs)
   start_spinner "Installing dependencies..."
   cd "$PROTOCOL_DIR"
+  hash -r 2>/dev/null || true
   rm -rf vendor
   if run_silent "composer install" composer install --no-interaction --no-dev; then
     step_ok "Dependencies installed"
@@ -379,10 +386,16 @@ if [ "$OS" = "Darwin" ]; then
   # Make binary executable
   chmod +x "$PROTOCOL_DIR/$BINARY_NAME"
 
-  # Add to PATH
+  # Add to PATH — detect shell and write to appropriate rc files
   EXPORT_LINE="export PATH=\"$PROTOCOL_DIR:\$PATH\""
   FOUND=0
-  for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+  SHELL_NAME="$(basename "${SHELL:-/bin/zsh}")"
+  if [ "$SHELL_NAME" = "zsh" ]; then
+    RC_FILES=("$HOME/.zprofile" "$HOME/.zshrc")
+  else
+    RC_FILES=("$HOME/.bash_profile" "$HOME/.bashrc")
+  fi
+  for file in "${RC_FILES[@]}"; do
     if [ -f "$file" ] && grep -Fxq "$EXPORT_LINE" "$file" 2>/dev/null; then
       FOUND=1
     fi
@@ -390,14 +403,15 @@ if [ "$OS" = "Darwin" ]; then
   if [[ ":$PATH:" == *":$PROTOCOL_DIR:"* ]] || [ $FOUND -eq 1 ]; then
     step_ok "PATH already configured"
   else
-    for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+    for file in "${RC_FILES[@]}"; do
       [ ! -f "$file" ] && touch "$file"
       if ! grep -Fxq "$EXPORT_LINE" "$file" 2>/dev/null; then
         echo "$EXPORT_LINE" >> "$file"
       fi
     done
     export PATH="$PROTOCOL_DIR:$PATH"
-    step_ok "Added to PATH (.zprofile, .zshrc)"
+    RC_NAMES="$(printf '%s, ' "${RC_FILES[@]##*/}")"
+    step_ok "Added to PATH (${RC_NAMES%, })"
   fi
 
 else
@@ -421,22 +435,33 @@ else
         step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
       else
         start_spinner "Installing Docker..."
-        run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
-          && step_ok "Docker installed" \
-          || step_fail "Failed to install Docker"
+        if command_exists amazon-linux-extras; then
+          # Amazon Linux 2
+          run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
+            && step_ok "Docker installed" \
+            || step_fail "Failed to install Docker"
+        else
+          # Amazon Linux 2023
+          run_silent "docker" sudo dnf install -y docker \
+            && step_ok "Docker installed" \
+            || step_fail "Failed to install Docker"
+        fi
       fi
 
       start_spinner "Enabling Docker service..."
       run_silent "docker service" bash -c "sudo systemctl enable docker.service && sudo systemctl start docker.service"
       sudo groupadd docker 2>/dev/null || true
-      sudo usermod -aG docker "$USER" 2>/dev/null || true
+      sudo usermod -aG docker "${USER:-$(whoami)}" 2>/dev/null || true
       step_ok "Docker service running"
 
-      if command_exists docker-compose; then
+      # Docker Compose — check both plugin (v2) and standalone
+      if command_exists docker && docker compose version >/dev/null 2>&1; then
+        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
+      elif command_exists docker-compose; then
         step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
       else
         start_spinner "Installing Docker Compose..."
-        run_silent "docker-compose" bash -c "wget -q https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -O /tmp/docker-compose && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose" \
+        run_silent "docker-compose" bash -c "curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /tmp/docker-compose && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose" \
           && step_ok "Docker Compose installed" \
           || step_fail "Failed to install Docker Compose"
       fi
@@ -467,10 +492,19 @@ else
             && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
             || step_fail "Failed to install PHP >=${MIN_PHP_VERSION}. Amazon Linux 2 may require Amazon Linux 2023 for native PHP ${MIN_PHP_VERSION} support."
         else
-          # Amazon Linux 2023 — PHP 8.4 available from amazonlinux repo
+          # Amazon Linux 2023 — try native repo first, fall back to Remi
           run_silent "PHP" bash -c "
             sudo yum remove -y php-common php-cli php-fpm 2>/dev/null || true
-            sudo dnf install -y php8.4-cli php8.4-pdo php8.4-fpm php8.4-mysqlnd php8.4-mbstring php8.4-xml
+            # Try php8.4 packages first (may not exist yet in base repos)
+            if sudo dnf install -y php8.4-cli php8.4-pdo php8.4-fpm php8.4-mysqlnd php8.4-mbstring php8.4-xml 2>/dev/null; then
+              exit 0
+            fi
+            # Fall back to Remi repository
+            sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm 2>/dev/null || true
+            sudo dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm 2>/dev/null || true
+            sudo dnf module reset php -y 2>/dev/null || true
+            sudo dnf module enable php:remi-8.4 -y 2>/dev/null || true
+            sudo dnf install -y php-cli php-pdo php-fpm php-mysqlnd php-mbstring php-xml
           " && php_version_ok \
             && step_ok "PHP $(php -v 2>/dev/null | head -n1 | awk '{print $2}')" \
             || step_fail "Failed to install PHP >=${MIN_PHP_VERSION}"
@@ -520,7 +554,7 @@ else
       start_spinner "Enabling Docker service..."
       run_silent "docker service" bash -c "
         sudo groupadd docker 2>/dev/null || true
-        sudo usermod -aG docker $USER 2>/dev/null || true
+        sudo usermod -aG docker ${USER:-\$(whoami)} 2>/dev/null || true
         sudo systemctl enable docker.service
         sudo systemctl enable containerd.service
         sudo systemctl start docker.service
@@ -528,12 +562,15 @@ else
       "
       step_ok "Docker service running"
 
-      if command_exists docker-compose; then
+      # Docker Compose — check both plugin (v2) and standalone
+      if command_exists docker && docker compose version >/dev/null 2>&1; then
+        step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
+      elif command_exists docker-compose; then
         step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
       else
         start_spinner "Installing Docker Compose..."
         run_silent "docker-compose" bash -c "
-          sudo curl -L \"https://github.com/docker/compose/releases/download/1.29.2/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose
+          sudo curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /usr/local/bin/docker-compose
           sudo chmod +x /usr/local/bin/docker-compose
           sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
         " && step_ok "Docker Compose installed" \
@@ -605,6 +642,12 @@ else
       fi
     fi
   else
+    # Clean up any partial clone from a previous failed attempt
+    if [ -d "$INSTALL_DIR" ]; then
+      step_warn "Removing incomplete install at ${INSTALL_DIR}"
+      rm -rf "$INSTALL_DIR"
+    fi
+
     start_spinner "Cloning Protocol..."
     if [ "$USE_NIGHTLY" = true ]; then
       run_silent "git clone" git clone "$REPO_URL" "$INSTALL_DIR" \
@@ -629,6 +672,7 @@ else
   # Install dependencies (clean vendor to avoid stale/partial installs)
   start_spinner "Installing dependencies..."
   cd "$INSTALL_DIR"
+  hash -r 2>/dev/null || true
   rm -rf vendor
   if run_silent "composer install" composer install --no-interaction --no-dev; then
     step_ok "Dependencies installed"
