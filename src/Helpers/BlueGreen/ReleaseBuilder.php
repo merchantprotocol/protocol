@@ -129,7 +129,8 @@ class ReleaseBuilder
         $containerName = $baseName . '-' . $safeName;
 
         $content = "# Shadow deployment port configuration (auto-generated)\n";
-        $content .= "COMPOSE_PROJECT_NAME=protocol-{$safeName}\n";
+        $projectName = str_replace('.', '-', $safeName);
+        $content .= "COMPOSE_PROJECT_NAME=protocol-{$projectName}\n";
         $content .= "PROTOCOL_PORT_HTTP={$httpPort}\n";
         $content .= "PROTOCOL_PORT_HTTPS={$httpsPort}\n";
         $content .= "DOCKER_HOSTNAME={$containerName}\n";
