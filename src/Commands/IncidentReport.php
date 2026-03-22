@@ -14,6 +14,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\GitHub;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
@@ -515,9 +516,8 @@ MD;
             return null;
         }
 
-        $ghPath = trim(Shell::run('which gh 2>/dev/null') ?: '');
-        if (!$ghPath) {
-            $output->writeln('  <comment>Skipping GitHub issue — gh CLI not installed</comment>');
+        if (!GitHubApp::isConfigured()) {
+            $output->writeln('  <comment>Skipping GitHub issue — GitHub App not configured</comment>');
             return null;
         }
 
@@ -529,37 +529,49 @@ MD;
             $body = substr($body, 0, 60000) . "\n\n---\n\n*Report truncated. Full report saved locally.*";
         }
 
-        // Write body to temp file to avoid shell escaping issues with large content
-        $tmpFile = tempnam(sys_get_temp_dir(), 'incident-');
-        file_put_contents($tmpFile, $body);
+        // Create issue via GitHub REST API using App token
+        $token = GitHubApp::getAccessToken();
+        if (!$token) {
+            return null;
+        }
 
-        $cmd = "gh issue create --repo " . escapeshellarg($slug)
-            . " --title " . escapeshellarg($title)
-            . " --body-file " . escapeshellarg($tmpFile)
-            . " --label " . escapeshellarg('incident,' . strtolower($severity))
-            . " 2>&1";
+        $issueBody = [
+            'title' => $title,
+            'body' => $body,
+            'labels' => ['incident', strtolower($severity)],
+        ];
+
+        $cmd = "curl -s -X POST"
+            . " -H " . escapeshellarg("Authorization: token {$token}")
+            . " -H 'Accept: application/vnd.github+json'"
+            . " -H 'Content-Type: application/json'"
+            . " -d " . escapeshellarg(json_encode($issueBody))
+            . " " . escapeshellarg("https://api.github.com/repos/{$slug}/issues")
+            . " 2>/dev/null";
 
         $result = Shell::run($cmd, $error);
-        unlink($tmpFile);
 
-        if ($error) {
-            // Try without labels (labels may not exist)
-            $tmpFile = tempnam(sys_get_temp_dir(), 'incident-');
-            file_put_contents($tmpFile, $body);
-
-            $cmd = "gh issue create --repo " . escapeshellarg($slug)
-                . " --title " . escapeshellarg($title)
-                . " --body-file " . escapeshellarg($tmpFile)
-                . " 2>&1";
+        if ($error || !$result) {
+            // Retry without labels (labels may not exist in the repo)
+            $issueBody = ['title' => $title, 'body' => $body];
+            $cmd = "curl -s -X POST"
+                . " -H " . escapeshellarg("Authorization: token {$token}")
+                . " -H 'Accept: application/vnd.github+json'"
+                . " -H 'Content-Type: application/json'"
+                . " -d " . escapeshellarg(json_encode($issueBody))
+                . " " . escapeshellarg("https://api.github.com/repos/{$slug}/issues")
+                . " 2>/dev/null";
 
             $result = Shell::run($cmd, $error);
-            unlink($tmpFile);
         }
 
         if (!$error && $result) {
-            $url = trim($result);
-            $output->writeln("  <info>Created GitHub issue:</info> {$url}");
-            return $url;
+            $data = json_decode($result, true);
+            $url = $data['html_url'] ?? null;
+            if ($url) {
+                $output->writeln("  <info>Created GitHub issue:</info> {$url}");
+                return $url;
+            }
         }
 
         $output->writeln("  <comment>Could not create GitHub issue: {$result}</comment>");

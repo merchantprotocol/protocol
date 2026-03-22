@@ -42,6 +42,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class DeployStatus extends Command {
 
@@ -79,9 +80,11 @@ Class DeployStatus extends Command {
         if ($strategy === 'release') {
             $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
             $activePointer = GitHub::getVariable($pointerName, $repo_dir);
-            $currentRelease = JsonLock::read('release.current', null, $repo_dir);
-            $previousRelease = JsonLock::read('release.previous', null, $repo_dir);
-            $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
+            $cur = DeploymentState::current($repo_dir);
+            $currentRelease = $cur['version'] ?? null;
+            $deployedAt = $cur['deployed_at'] ?? null;
+            $prev = DeploymentState::previous($repo_dir);
+            $previousRelease = $prev['version'] ?? null;
 
             $rows[] = ['Active Pointer', $activePointer ? "<info>{$activePointer}</info>" : '<comment>not set</comment>'];
             $rows[] = ['This Node', $currentRelease ? "<info>{$currentRelease}</info>" : '<comment>not deployed</comment>'];

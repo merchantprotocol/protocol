@@ -39,8 +39,10 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
-use Symfony\Component\Console\Command\LockableTrait;
 use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Lock\Store\SemaphoreStore;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
@@ -48,19 +50,23 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Helpers\Secrets;
+use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\StageRunner;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStart extends Command {
 
-    use LockableTrait;
+    private ?\Symfony\Component\Lock\LockInterface $lock = null;
+    private const LOCK_TTL = 120; // 2 minutes — auto-expires stale locks
 
     protected static $defaultName = 'docker:start|start';
     protected static $defaultDescription = 'Starts a node so that the repo and docker image stay up to date and are running';
@@ -80,6 +86,7 @@ Class ProtocolStart extends Command {
             ->addArgument('environment', InputArgument::OPTIONAL, 'What is the current environment?', false)
             ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Force start, ignoring any existing lock')
             // ...
         ;
     }
@@ -110,10 +117,18 @@ Class ProtocolStart extends Command {
 
         $helper = $this->getHelper('question');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-            return Command::SUCCESS;
+        // command should only have one running instance (lock auto-expires after 2 min)
+        $store = SemaphoreStore::isSupported() ? new SemaphoreStore() : new FlockStore();
+        $this->lock = (new LockFactory($store))->createLock($this->getName(), self::LOCK_TTL);
+        if (!$this->lock->acquire()) {
+            if ($input->getOption('force')) {
+                $this->lock->acquire(true); // blocking acquire
+                $output->writeln('<comment>Forcing lock override...</comment>');
+            } else {
+                $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                $output->writeln('<comment>Lock auto-expires after ' . self::LOCK_TTL . ' seconds.</comment>');
+                return Command::SUCCESS;
+            }
         }
 
         // get the correct environment
@@ -135,14 +150,16 @@ Class ProtocolStart extends Command {
             : Json::read('deployment.strategy', 'branch', $repo_dir);
 
         // Prepare sub-command inputs
-        $arrInput = new ArrayInput(['--dir' => $repo_dir]);
-        $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment]);
-        $nullOutput = new NullOutput();
+        $force = $input->getOption('force');
+        $arrInput = new ArrayInput(['--dir' => $repo_dir] + ($force ? ['--force' => true] : []));
+        $arrInput1 = new ArrayInput(['--dir' => $repo_dir, 'environment' => $environment] + ($force ? ['--force' => true] : []));
+        $verbose = $output->isVerbose();
+        $subOutput = $verbose ? $output : new NullOutput();
         $app = $this->getApplication();
 
         $output->writeln('');
 
-        $runner = new StageRunner($output);
+        $runner = new StageRunner($output, $verbose);
 
         // ── Stage 1: Scanning codebase ──────────────────────────
         $runner->run('Scanning codebase', function() use ($repo_dir, $environment, $strategy) {
@@ -158,45 +175,92 @@ Class ProtocolStart extends Command {
         });
 
         // ── Stage 2: Infrastructure provisioning ────────────────
-        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $nullOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
+        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $subOutput, $repo_dir, $environment, $strategy, $isDev, $nodeConfig, $nodeData) {
+
+            // Refresh GitHub App credentials and fix remote URLs if needed
+            if (GitHubApp::isConfigured()) {
+                $creds = GitHubApp::loadCredentials();
+                $appOwner = $creds['owner'] ?? null;
+                if ($appOwner) {
+                    $runner->log("Refreshing GitHub App credentials for {$appOwner}");
+                    $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                    if (!$refreshed) {
+                        throw new \RuntimeException("GitHub App credential refresh failed for {$appOwner} — cannot authenticate git operations");
+                    }
+                    $runner->log("Credentials refreshed successfully");
+                }
+
+                // Update git remote URL in cloned repos to use HTTPS
+                $currentRemote = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " remote get-url origin 2>/dev/null") ?: '');
+                $resolvedRemote = GitHubApp::resolveUrl($currentRemote);
+                if ($currentRemote && $resolvedRemote !== $currentRemote) {
+                    $runner->log("Updating remote URL: {$currentRemote} → {$resolvedRemote}");
+                    Shell::run("git -C " . escapeshellarg($repo_dir) . " remote set-url origin " . escapeshellarg($resolvedRemote) . " 2>/dev/null");
+                }
+            }
 
             $configRemote = Json::read('configuration.remote', false, $repo_dir);
+            // On slave nodes, fall back to node config for the config repo remote
+            if (!$configRemote && $nodeConfig) {
+                $configRemote = $nodeData['configuration']['remote'] ?? false;
+            }
             $configRepo = Config::repo($repo_dir);
             $hasConfigRepo = $configRemote || is_dir($configRepo);
-            $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no'));
+
+            // Also fix config repo remote URL if it was cloned with SSH
+            if (GitHubApp::isConfigured() && is_dir($configRepo)) {
+                $configCurrentRemote = trim(Shell::run("git -C " . escapeshellarg($configRepo) . " remote get-url origin 2>/dev/null") ?: '');
+                $configResolvedRemote = GitHubApp::resolveUrl($configCurrentRemote);
+                if ($configCurrentRemote && $configResolvedRemote !== $configCurrentRemote) {
+                    $runner->log("Updating config repo remote: {$configCurrentRemote} → {$configResolvedRemote}");
+                    Shell::run("git -C " . escapeshellarg($configRepo) . " remote set-url origin " . escapeshellarg($configResolvedRemote) . " 2>/dev/null");
+                }
+            }
+
+            $runner->log("strategy={$strategy} hasConfigRepo=" . ($hasConfigRepo ? 'yes' : 'no') . " isDev=" . ($isDev ? 'yes' : 'no') . " configRemote=" . ($configRemote ?: 'none'));
 
             if ($strategy === 'release') {
                 // Release-based deployment mode
                 if ($hasConfigRepo) {
                     if ($configRemote) {
                         $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                        $app->find('config:slave')->run($arrInput, $subOutput);
                     }
                     $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $nullOutput);
+                    $app->find('config:link')->run($arrInput, $subOutput);
                 }
 
                 // Start the release watcher daemon
                 $runner->log("Running deploy:slave");
-                $app->find('deploy:slave')->run($arrInput, $nullOutput);
+                $app->find('deploy:slave')->run($arrInput, $subOutput);
 
             } else {
                 // Legacy branch-based deployment mode
                 if (!$isDev) {
+                    // Log diagnostic info for debugging auth issues
+                    $runner->log("HOME=" . (getenv('HOME') ?: 'NOT SET'));
+                    $credFile = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : '') . 'git-credentials';
+                    $runner->log("git-credentials exists=" . (is_file($credFile) ? 'yes' : 'no'));
+                    $credHelper = trim(Shell::run("git config --global credential.helper 2>/dev/null") ?: '');
+                    $runner->log("credential.helper={$credHelper}");
+                    $remoteUrl = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " remote get-url origin 2>/dev/null") ?: '');
+                    $runner->log("remote.origin.url={$remoteUrl}");
+
                     $runner->log("Running git:pull");
-                    $app->find('git:pull')->run($arrInput, $nullOutput);
+                    $app->find('git:pull')->run($arrInput, $subOutput);
+                    $runner->log("git:pull completed");
                     $runner->log("Running git:slave");
-                    $app->find('git:slave')->run($arrInput, $nullOutput);
+                    $app->find('git:slave')->run($arrInput, $subOutput);
                 }
 
                 if ($hasConfigRepo) {
                     if (!$isDev && $configRemote) {
                         $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $nullOutput);
+                        $app->find('config:slave')->run($arrInput, $subOutput);
                     }
 
                     $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $nullOutput);
+                    $app->find('config:link')->run($arrInput, $subOutput);
                 }
             }
 
@@ -243,10 +307,18 @@ Class ProtocolStart extends Command {
                 }
             }
 
-            // Rebuild containers
+            // Rebuild containers (inject secrets if encrypted or AWS mode)
             $dockerCommand = Docker::getDockerCommand();
-            $runner->log("{$dockerCommand} up --build -d");
-            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
+            $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
+            $envFlag = $tmpEnv ? ' --env-file ' . escapeshellarg($tmpEnv) : '';
+
+            $runner->log("{$dockerCommand}{$envFlag} up --build -d");
+            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand}{$envFlag} up --build -d 2>&1");
+
+            if ($tmpEnv) {
+                unlink($tmpEnv);
+                $runner->log("Secrets temp file cleaned up");
+            }
 
             // Run composer install inside container if needed
             if (file_exists(rtrim($repo_dir, '/') . '/composer.json')) {
@@ -292,11 +364,9 @@ Class ProtocolStart extends Command {
             }
 
             // Check watcher is running
-            if ($strategy === 'release') {
-                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
-                if ($pid && !Shell::isRunning($pid)) {
-                    throw new \RuntimeException('Release watcher is not running');
-                }
+            $watcherPid = DeploymentState::watcherPid($repo_dir);
+            if ($watcherPid && !Shell::isRunning($watcherPid)) {
+                throw new \RuntimeException('Deployment watcher is not running');
             }
         }, 'PASS');
 
@@ -312,14 +382,14 @@ Class ProtocolStart extends Command {
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
-        $version = JsonLock::read('release.current', null, $repo_dir)
+        $curDeploy = DeploymentState::current($repo_dir);
+        $version = ($curDeploy['version'] ?? null)
             ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
         $secretsStatus = Secrets::hasKey() ? 'decrypted' : 'no key found';
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
 
-        $watcherType = $strategy === 'release' ? 'release' : 'git';
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
-        $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
+        $watcherType = DeploymentState::strategy($repo_dir);
+        $watcherPid = DeploymentState::watcherPid($repo_dir);
         $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
 
         $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);

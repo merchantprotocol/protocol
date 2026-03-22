@@ -12,11 +12,32 @@ class Secrets
     const TAG_LENGTH = 16;
 
     /**
+     * Determine whether secrets should be stored globally (production)
+     * or per-project (all other environments).
+     */
+    public static function isGlobal(): bool
+    {
+        return !IncidentDetector::isDev();
+    }
+
+    /**
+     * Path to the project-local .protocol directory.
+     */
+    public static function projectDataDir(): string
+    {
+        return WORKING_DIR . '.protocol' . DIRECTORY_SEPARATOR;
+    }
+
+    /**
      * Path to the encryption key file.
+     * Production stores globally in NODE_DATA_DIR, all other envs store per-project.
      */
     public static function keyPath(): string
     {
-        return NODE_DATA_DIR . 'key';
+        if (self::isGlobal()) {
+            return NODE_DATA_DIR . 'key';
+        }
+        return self::projectDataDir() . 'key';
     }
 
     /**
@@ -37,17 +58,24 @@ class Secrets
 
     /**
      * Store the encryption key to disk.
+     * Location is determined by the current environment (config:env).
      */
     public static function storeKey(string $hexKey): bool
     {
-        $dir = dirname(self::keyPath());
+        $path = self::keyPath();
+        $dir = dirname($path);
         if (!is_dir($dir)) {
             mkdir($dir, 0700, true);
         }
-        $written = file_put_contents(self::keyPath(), $hexKey);
+        $written = file_put_contents($path, $hexKey);
         if ($written !== false) {
-            chmod(self::keyPath(), 0600);
+            chmod($path, 0600);
         }
+
+        if (!self::isGlobal()) {
+            self::ensureGitignore();
+        }
+
         return $written !== false;
     }
 
@@ -166,5 +194,28 @@ class Secrets
 
         chmod($tmpFile, 0600);
         return $tmpFile;
+    }
+
+    /**
+     * Ensure .protocol/ is listed in the project's .gitignore.
+     */
+    public static function ensureGitignore(): void
+    {
+        $gitignorePath = WORKING_DIR . '.gitignore';
+        $entry = '.protocol/';
+
+        if (is_file($gitignorePath)) {
+            $contents = file_get_contents($gitignorePath);
+            // Check if already present (exact line match)
+            $lines = array_map('trim', explode("\n", $contents));
+            if (in_array($entry, $lines)) {
+                return;
+            }
+            // Append with a newline if file doesn't end with one
+            $append = (substr($contents, -1) === "\n" ? '' : "\n") . $entry . "\n";
+            file_put_contents($gitignorePath, $contents . $append);
+        } else {
+            file_put_contents($gitignorePath, $entry . "\n");
+        }
     }
 }

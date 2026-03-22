@@ -11,9 +11,16 @@ class AuditLog
      */
     public static function logPath(): string
     {
-        $dir = NODE_DATA_DIR;
+        $dir = '/var/log/protocol/';
         if (!is_dir($dir)) {
-            mkdir($dir, 0700, true);
+            @mkdir($dir, 0700, true);
+        }
+        if (!is_writable($dir)) {
+            // Fallback for local dev
+            $dir = NODE_DATA_DIR;
+            if (!is_dir($dir)) {
+                mkdir($dir, 0700, true);
+            }
         }
         return $dir . 'deployments.log';
     }
@@ -32,7 +39,13 @@ class AuditLog
         $entry .= "\n";
 
         $path = self::logPath();
+        $isNew = !is_file($path);
         file_put_contents($path, $entry, FILE_APPEND | LOCK_EX);
+
+        // Restrict permissions on new log files (SOC 2 CC7)
+        if ($isNew) {
+            chmod($path, 0600);
+        }
 
         // Auto-rotate if log exceeds 5 MB
         self::rotate();

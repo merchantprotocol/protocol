@@ -45,6 +45,7 @@ use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class Deploy extends Command {
 
@@ -82,10 +83,9 @@ Class Deploy extends Command {
 
         $version = $input->getArgument('version');
 
-        // Validate gh CLI is available
-        $ghPath = trim(\Gitcd\Helpers\Shell::run('which gh 2>/dev/null') ?: '');
-        if (!$ghPath) {
-            $output->writeln('<error>GitHub CLI (gh) is required for deploy:push. Install: https://cli.github.com/</error>');
+        // Validate GitHub App is configured for API access
+        if (!\Gitcd\Helpers\GitHubApp::isConfigured()) {
+            $output->writeln('<error>GitHub App must be configured for deploy:push. Run: protocol github:app:setup</error>');
             return Command::FAILURE;
         }
 
@@ -108,7 +108,8 @@ Class Deploy extends Command {
         }
 
         $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $cur = DeploymentState::current($repo_dir);
+        $currentRelease = $cur['version'] ?? null;
 
         $output->writeln("<info>Deploying {$version} to all nodes</info>");
         $output->writeln(" - Setting {$pointerName} = {$version}");

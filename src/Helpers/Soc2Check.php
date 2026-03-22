@@ -32,12 +32,14 @@ class Soc2Check extends BaseAuditChecker
         $mode = Json::read('deployment.secrets', 'file', $this->repoDir);
         $hasKey = Secrets::hasKey();
 
-        if ($mode === 'encrypted' && $hasKey) {
-            $this->addResult('Encrypted secrets', 'pass', 'Secrets encrypted with AES-256-GCM, key present');
+        if ($mode === 'aws') {
+            $this->addResult('Secrets management', 'pass', 'Secrets managed via AWS Secrets Manager');
+        } elseif ($mode === 'encrypted' && $hasKey) {
+            $this->addResult('Secrets management', 'pass', 'Secrets encrypted with AES-256-GCM, key present');
         } elseif ($mode === 'encrypted' && !$hasKey) {
-            $this->addResult('Encrypted secrets', 'fail', 'Encryption configured but key is missing on this node');
+            $this->addResult('Secrets management', 'fail', 'Encryption configured but key is missing on this node');
         } else {
-            $this->addResult('Encrypted secrets', 'fail', 'Secrets mode is "' . $mode . '" — should be "encrypted" for production');
+            $this->addResult('Secrets management', 'fail', 'Secrets mode is "' . $mode . '" — should be "encrypted" or "aws" for production');
         }
     }
 
@@ -92,8 +94,8 @@ class Soc2Check extends BaseAuditChecker
 
         // Check that protocol.json remote matches actual remote
         $configuredRemote = Json::read('git.remote', null, $this->repoDir);
-        if ($configuredRemote && $configuredRemote !== $remote) {
-            $this->addResult('Git integrity', 'warn', 'Git remote does not match protocol.json (expected: ' . $configuredRemote . ')');
+        if ($configuredRemote && !self::remotesMatch($configuredRemote, $remote)) {
+            $this->addResult('Git integrity', 'warn', 'Git remote does not match protocol.json (expected: ' . $configuredRemote . ', actual: ' . $remote . ')');
             return;
         }
 
@@ -172,6 +174,27 @@ class Soc2Check extends BaseAuditChecker
         } else {
             $this->addResult('Key rotation', 'warn', "Encryption key is {$ageDays} days old — rotate quarterly (every {$maxAgeDays} days). See: protocol docs/key-rotation.md");
         }
+    }
+
+    /**
+     * Compare two git remote URLs, treating SSH and HTTPS variants as equivalent.
+     * e.g. git@github.com:org/repo.git == https://github.com/org/repo.git
+     */
+    private static function remotesMatch(string $a, string $b): bool
+    {
+        return self::normalizeRemote($a) === self::normalizeRemote($b);
+    }
+
+    private static function normalizeRemote(string $url): string
+    {
+        // git@github.com:org/repo.git → github.com/org/repo
+        $url = preg_replace('#^git@([^:]+):#', 'https://$1/', $url);
+        // Strip protocol
+        $url = preg_replace('#^https?://#', '', $url);
+        // Strip trailing .git
+        $url = preg_replace('#\.git$#', '', $url);
+        // Strip trailing slash
+        return rtrim($url, '/');
     }
 
 }
