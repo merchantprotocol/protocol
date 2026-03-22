@@ -83,18 +83,25 @@ Class DockerExec extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        $cmd = $input->getArgument('cmd') ?: "/bin/bash";
+        $cmd = $input->getArgument('cmd') ?: "/bin/sh";
         $name = Json::read('docker.container_name', false, $repo_dir);
         if (!$name) {
-            $names = Docker::getContainerNamesFromDockerComposeFile();
-            if (count($names)==1) {
-                $name = array_pop($names);
+            $names = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+            if (count($names) === 0) {
+                $output->writeln('<error>No containers found in docker-compose.yml</error>');
+                return Command::FAILURE;
+            }
+            if (count($names) === 1) {
+                $name = $names[0];
                 Json::write('docker.container_name', $name, $repo_dir);
                 Json::save($repo_dir);
+            } else {
+                $io = new SymfonyStyle($input, $output);
+                $name = $io->choice('Select a container', $names, $names[0]);
             }
         }
 
-        $command = "docker exec -it $name $cmd";
+        $command = "docker exec -it " . escapeshellarg($name) . " " . $cmd;
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

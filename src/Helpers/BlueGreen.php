@@ -23,6 +23,7 @@ use Gitcd\Helpers\BlueGreen\ReleaseBuilder;
 use Gitcd\Helpers\BlueGreen\HealthChecker;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 class BlueGreen
 {
@@ -96,7 +97,15 @@ class BlueGreen
      */
     public static function getReleasesDir(string $repo_dir): string
     {
-        $custom = Json::read('bluegreen.releases_dir', null, $repo_dir);
+        // Node config is the source of truth for deployment paths
+        $nodeData = self::getNodeData($repo_dir);
+        $custom = $nodeData['bluegreen']['releases_dir'] ?? null;
+
+        // Fall back to protocol.json for non-slave usage
+        if (!$custom) {
+            $custom = Json::read('bluegreen.releases_dir', null, $repo_dir);
+        }
+
         if ($custom) {
             if (str_starts_with($custom, '/')) {
                 return rtrim($custom, '/') . '/';
@@ -106,6 +115,21 @@ class BlueGreen
 
         $baseName = basename(rtrim($repo_dir, '/'));
         return dirname(rtrim($repo_dir, '/')) . '/' . $baseName . '-releases/';
+    }
+
+    /**
+     * Look up node config data for a given repo directory.
+     */
+    private static function getNodeData(string $repo_dir): array
+    {
+        $projectName = NodeConfig::findByRepoDir($repo_dir);
+        if (!$projectName) {
+            $match = NodeConfig::findByActiveDir($repo_dir);
+            if ($match) {
+                $projectName = $match[0];
+            }
+        }
+        return $projectName ? NodeConfig::load($projectName) : [];
     }
 
     /**

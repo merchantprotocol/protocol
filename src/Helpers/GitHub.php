@@ -1,6 +1,9 @@
 <?php
 /**
- * GitHub API helper using the `gh` CLI.
+ * GitHub API helper.
+ *
+ * Uses the GitHub REST API via GitHubApp installation tokens when available,
+ * falling back to the `gh` CLI for local development.
  */
 namespace Gitcd\Helpers;
 
@@ -22,6 +25,82 @@ class GitHub
     }
 
     /**
+     * Make an authenticated GitHub API request using the GitHubApp token.
+     *
+     * @param string $method  HTTP method (GET, POST, PATCH, PUT, DELETE)
+     * @param string $endpoint API path (e.g. /repos/owner/repo/actions/variables/NAME)
+     * @param array|null $body Request body (will be JSON-encoded for non-GET)
+     * @return array|null Decoded JSON response, or null on failure
+     */
+    private static function apiRequest(string $method, string $endpoint, ?array $body = null): ?array
+    {
+        $token = GitHubApp::getAccessToken();
+
+        if ($token) {
+            // Use App token via curl
+            $url = "https://api.github.com" . $endpoint;
+
+            $cmd = "curl -s -X " . escapeshellarg($method)
+                . " -H " . escapeshellarg("Authorization: token {$token}")
+                . " -H 'Accept: application/vnd.github+json'"
+                . " -H 'X-GitHub-Api-Version: 2022-11-28'";
+
+            if ($body !== null && $method !== 'GET') {
+                $cmd .= " -H 'Content-Type: application/json'"
+                    . " -d " . escapeshellarg(json_encode($body));
+            }
+
+            $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
+        } else {
+            // Fall back to gh CLI
+            $cmd = "gh api -X " . escapeshellarg($method)
+                . " -H 'Accept: application/vnd.github+json'";
+
+            if ($body !== null && $method !== 'GET') {
+                foreach ($body as $key => $val) {
+                    if (is_bool($val)) {
+                        $cmd .= " -F " . escapeshellarg("{$key}=" . ($val ? 'true' : 'false'));
+                    } else {
+                        $cmd .= " -f " . escapeshellarg("{$key}={$val}");
+                    }
+                }
+            }
+
+            $cmd .= " " . escapeshellarg($endpoint) . " 2>/dev/null";
+        }
+
+        $result = Shell::run($cmd);
+        if (!$result) return null;
+
+        $data = json_decode($result, true);
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Make an authenticated API request and return the raw string response.
+     */
+    private static function apiRequestRaw(string $method, string $endpoint): ?string
+    {
+        $token = GitHubApp::getAccessToken();
+
+        if ($token) {
+            $url = "https://api.github.com" . $endpoint;
+            $cmd = "curl -s -X " . escapeshellarg($method)
+                . " -H " . escapeshellarg("Authorization: token {$token}")
+                . " -H 'Accept: application/vnd.github+json'"
+                . " -H 'X-GitHub-Api-Version: 2022-11-28'"
+                . " " . escapeshellarg($url) . " 2>/dev/null";
+        } else {
+            $cmd = "gh api -X " . escapeshellarg($method)
+                . " -H 'Accept: application/vnd.github+json'"
+                . " " . escapeshellarg($endpoint) . " 2>/dev/null";
+        }
+
+        $result = Shell::run($cmd);
+        return $result ?: null;
+    }
+
+    /**
      * Get a GitHub Actions variable value.
      */
     public static function getVariable(string $name, ?string $repo_dir = null): ?string
@@ -29,10 +108,8 @@ class GitHub
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return null;
 
-        $result = Shell::run(
-            "gh variable get " . escapeshellarg($name) . " --repo " . escapeshellarg($slug) . " 2>/dev/null"
-        );
-        return $result ? trim($result) : null;
+        $data = self::apiRequest('GET', "/repos/{$slug}/actions/variables/" . urlencode($name));
+        return $data['value'] ?? null;
     }
 
     /**
@@ -43,35 +120,74 @@ class GitHub
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return false;
 
-        $result = Shell::run(
-            "gh variable set " . escapeshellarg($name) . " --body " . escapeshellarg($value) . " --repo " . escapeshellarg($slug) . " 2>&1",
-            $error
-        );
-        return !$error;
+        // Try to update first (PATCH), create if not found (POST)
+        $data = self::apiRequest('PATCH', "/repos/{$slug}/actions/variables/" . urlencode($name), [
+            'value' => $value,
+        ]);
+
+        // If variable doesn't exist, PATCH returns 404 — create it
+        if ($data && isset($data['message']) && str_contains($data['message'], 'Not Found')) {
+            $data = self::apiRequest('POST', "/repos/{$slug}/actions/variables", [
+                'name' => $name,
+                'value' => $value,
+            ]);
+        }
+
+        // PATCH returns 204 (empty body → null), which is success
+        // POST returns 201 with the created variable
+        return $data === null || !isset($data['message']);
     }
 
     /**
      * Set a GitHub Actions secret (write-only).
+     *
+     * Requires libsodium for public-key encryption.
      */
     public static function setSecret(string $name, string $value, ?string $repo_dir = null): bool
     {
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return false;
 
-        $result = Shell::run(
-            "echo " . escapeshellarg($value) . " | gh secret set " . escapeshellarg($name) . " --repo " . escapeshellarg($slug) . " 2>&1",
-            $error
-        );
-        return !$error;
+        // Get the repo's public key for encrypting secrets
+        $keyData = self::apiRequest('GET', "/repos/{$slug}/actions/secrets/public-key");
+        if (!$keyData || !isset($keyData['key']) || !isset($keyData['key_id'])) {
+            return false;
+        }
+
+        // Encrypt using libsodium (sealed box)
+        if (!function_exists('sodium_crypto_box_seal')) {
+            return false;
+        }
+
+        $publicKey = base64_decode($keyData['key']);
+        $encrypted = sodium_crypto_box_seal($value, $publicKey);
+        $encryptedBase64 = base64_encode($encrypted);
+
+        $data = self::apiRequest('PUT', "/repos/{$slug}/actions/secrets/" . urlencode($name), [
+            'encrypted_value' => $encryptedBase64,
+            'key_id' => $keyData['key_id'],
+        ]);
+
+        // PUT returns 201 (created) or 204 (updated) — both have null/empty body
+        return $data === null || !isset($data['message']);
     }
 
     /**
-     * Check if gh CLI is available and authenticated.
+     * Check if GitHub API is accessible via the App token.
      */
     public static function isAvailable(): bool
     {
-        $result = Shell::run("gh auth status 2>&1", $error);
-        return !$error;
+        $token = GitHubApp::getAccessToken();
+        return $token !== null;
+    }
+
+    /**
+     * Check if gh CLI is installed and authenticated.
+     */
+    public static function isGhCliAvailable(): bool
+    {
+        $result = Shell::run("gh auth status 2>&1");
+        return $result !== null && str_contains($result, 'Logged in');
     }
 
     /**
@@ -82,13 +198,24 @@ class GitHub
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return [];
 
-        $json = Shell::run(
-            "gh release list --repo " . escapeshellarg($slug) . " --limit {$limit} --json tagName,name,publishedAt,isDraft,isPrerelease 2>/dev/null"
-        );
-        if (!$json) return [];
+        $raw = self::apiRequestRaw('GET', "/repos/{$slug}/releases?per_page={$limit}");
+        if (!$raw) return [];
 
-        $releases = json_decode($json, true);
-        return is_array($releases) ? $releases : [];
+        $releases = json_decode($raw, true);
+        if (!is_array($releases)) return [];
+
+        // Normalize to match the format the codebase expects
+        $result = [];
+        foreach ($releases as $r) {
+            $result[] = [
+                'tagName' => $r['tag_name'] ?? '',
+                'name' => $r['name'] ?? '',
+                'publishedAt' => $r['published_at'] ?? '',
+                'isDraft' => $r['draft'] ?? false,
+                'isPrerelease' => $r['prerelease'] ?? false,
+            ];
+        }
+        return $result;
     }
 
     /**
@@ -99,18 +226,15 @@ class GitHub
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return false;
 
-        $cmd = "gh release create " . escapeshellarg($tag);
-        $cmd .= " --repo " . escapeshellarg($slug);
-        if ($title) {
-            $cmd .= " --title " . escapeshellarg($title);
-        }
-        if ($draft) {
-            $cmd .= " --draft";
-        }
-        $cmd .= " --generate-notes 2>&1";
+        $body = [
+            'tag_name' => $tag,
+            'name' => $title ?: $tag,
+            'draft' => $draft,
+            'generate_release_notes' => true,
+        ];
 
-        Shell::run($cmd, $error);
-        return !$error;
+        $data = self::apiRequest('POST', "/repos/{$slug}/releases", $body);
+        return $data !== null && isset($data['id']);
     }
 
     /**
@@ -121,13 +245,8 @@ class GitHub
         $slug = self::getRepoSlug($repo_dir);
         if (!$slug) return null;
 
-        $json = Shell::run(
-            "gh release view --repo " . escapeshellarg($slug) . " --json tagName 2>/dev/null"
-        );
-        if (!$json) return null;
-
-        $data = json_decode($json, true);
-        return $data['tagName'] ?? null;
+        $data = self::apiRequest('GET', "/repos/{$slug}/releases/latest");
+        return $data['tag_name'] ?? null;
     }
 
     /**
@@ -168,44 +287,37 @@ class GitHub
             }
         }
 
-        // Get PRs merged into the default branch between tags
-        $range = $prevTag ? escapeshellarg($prevTag) . ".." . escapeshellarg($tag) : escapeshellarg($tag);
-        $commitJson = Shell::run(
-            "git -C " . escapeshellarg($dir) . " log {$range} --merges --format=%H 2>/dev/null"
-        );
+        // Query merged PRs via the API
+        $raw = self::apiRequestRaw('GET', "/repos/{$slug}/pulls?state=closed&sort=updated&direction=desc&per_page=50");
+        if (!$raw) return [];
 
-        // Use gh to find PRs associated with the release
-        $json = Shell::run(
-            "gh pr list --repo " . escapeshellarg($slug)
-            . " --state merged --limit 50"
-            . " --json number,title,author,mergedBy,mergedAt,reviews,url"
-            . " --jq " . escapeshellarg('[.[] | select(.mergedAt != null)]')
-            . " 2>/dev/null"
-        );
-
-        if (!$json) return [];
-
-        $prs = json_decode($json, true);
+        $prs = json_decode($raw, true);
         if (!is_array($prs)) return [];
 
         $result = [];
         foreach ($prs as $pr) {
+            // Only include actually merged PRs
+            if (empty($pr['merged_at'])) continue;
+
+            // Get reviews for approver info
             $approvers = [];
-            if (!empty($pr['reviews'])) {
-                foreach ($pr['reviews'] as $review) {
+            $reviews = self::apiRequest('GET', "/repos/{$slug}/pulls/{$pr['number']}/reviews");
+            if (is_array($reviews)) {
+                foreach ($reviews as $review) {
                     if (($review['state'] ?? '') === 'APPROVED') {
-                        $approvers[] = $review['author']['login'] ?? 'unknown';
+                        $approvers[] = $review['user']['login'] ?? 'unknown';
                     }
                 }
             }
+
             $result[] = [
                 'number' => (string) ($pr['number'] ?? ''),
                 'title' => $pr['title'] ?? '',
-                'author' => $pr['author']['login'] ?? '',
+                'author' => $pr['user']['login'] ?? '',
                 'approvers' => implode(',', array_unique($approvers)),
-                'merged_by' => $pr['mergedBy']['login'] ?? '',
-                'merged_at' => $pr['mergedAt'] ?? '',
-                'url' => $pr['url'] ?? '',
+                'merged_by' => $pr['merged_by']['login'] ?? '',
+                'merged_at' => $pr['merged_at'] ?? '',
+                'url' => $pr['html_url'] ?? '',
             ];
         }
 

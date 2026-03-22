@@ -82,13 +82,6 @@ Class Deploy extends Command {
 
         $version = $input->getArgument('version');
 
-        // Validate gh CLI is available
-        $ghPath = trim(\Gitcd\Helpers\Shell::run('which gh 2>/dev/null') ?: '');
-        if (!$ghPath) {
-            $output->writeln('<error>GitHub CLI (gh) is required for deploy:push. Install: https://cli.github.com/</error>');
-            return Command::FAILURE;
-        }
-
         // Verify tag exists
         if (!GitHub::tagExists($version, $repo_dir)) {
             // Check GitHub releases as fallback

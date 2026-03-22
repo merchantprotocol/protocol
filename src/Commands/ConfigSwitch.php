@@ -106,32 +106,76 @@ Class ConfigSwitch extends Command {
             }
         }
 
-        $newName = $input->getArgument('environment', false);
-        if (!$newName) {
-            // get the correct environment
-            Git::fetch( $configrepo );
-            $branches = Git::branches( $configrepo );
-            $branchStr = implode(', ',$branches);
-            $currentBranch = Git::branch( $configrepo );
+        // Always fetch to ensure we have remote branches
+        Git::fetch( $configrepo );
 
+        $currentBranch = Git::branch( $configrepo );
+        $branches = Git::branches( $configrepo );
+
+        $newName = $input->getArgument('environment');
+        if (!$newName) {
+            $branchStr = implode(', ', $branches);
             $output->writeln("<info>You have the following environments: $branchStr</info>");
             $question = new Question("You are on env ($currentBranch), switch to what environment?: ");
             $newName = $helper->ask($input, $output, $question);
-
-            if (!in_array($newName, $branches)) {
-                $output->writeln("<info>That's not a valid branch, quitting...</info>");
-                return Command::SUCCESS;
-            }
         }
 
+        if (!$newName) {
+            $output->writeln("<error>No environment specified.</error>");
+            return Command::FAILURE;
+        }
+
+        // Check if branch exists locally or as a remote
+        $escapedRepo = escapeshellarg($configrepo);
+        $localExists = trim(Shell::run("git -C {$escapedRepo} branch --list " . escapeshellarg($newName) . " 2>/dev/null") ?: '');
+        $remoteExists = trim(Shell::run("git -C {$escapedRepo} branch -r --list " . escapeshellarg("*/{$newName}") . " 2>/dev/null") ?: '');
+
+        if (!$localExists && !$remoteExists) {
+            $question = new ConfirmationQuestion(
+                "Environment \"{$newName}\" does not exist. Create it? [Y/n] ",
+                true
+            );
+            if (!$helper->ask($input, $output, $question)) {
+                $output->writeln('Available: ' . implode(', ', $branches));
+                return Command::FAILURE;
+            }
+
+            // Create the new branch from current, then let the rest of the flow handle it
+            $command = $this->getApplication()->find('config:new');
+            $returnCode = $command->run(new ArrayInput([
+                'environment' => $newName,
+                '--dir' => $repo_dir,
+            ]), $output);
+            return $returnCode;
+        }
+
+        if ($newName === $currentBranch) {
+            $output->writeln("<info>Already on {$newName}.</info>");
+            return Command::SUCCESS;
+        }
+
+        // Unlink current config
         $command = $this->getApplication()->find('config:unlink');
-        $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
+        $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
 
-        Git::switchBranch( $newName, $configrepo );
-        $output->writeln("<info>Switched! Your new environment is $newName.</info>");
+        // Switch branch — use checkout which auto-tracks remote branches
+        $result = Shell::run("git -C {$escapedRepo} checkout " . escapeshellarg($newName) . " 2>&1", $returnVar);
 
+        // Verify the switch actually happened
+        $actualBranch = trim(Shell::run("git -C {$escapedRepo} rev-parse --abbrev-ref HEAD 2>/dev/null") ?: '');
+
+        if ($returnVar !== 0 || $actualBranch !== $newName) {
+            $output->writeln("<error>Failed to switch to {$newName}:</error>");
+            $output->writeln("<fg=gray>{$result}</>");
+            return Command::FAILURE;
+        }
+
+        $output->writeln("<info>Config repo switched to: {$newName}</info>");
+
+        // Re-link (decrypts .env.enc if encryption key is present)
         $command = $this->getApplication()->find('config:link');
-        $returnCode = $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
+        $command->run((new ArrayInput(['--dir' => $repo_dir])), $output);
+
         return Command::SUCCESS;
     }
 

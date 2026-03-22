@@ -83,13 +83,14 @@ class CloudflareHelper
 
     // ─── Cloudflare API ─────────────────────────────────────────
 
+    const WRANGLER_CLIENT_ID = '54d11594-84e4-41aa-b438-e81b8fa78ee7';
+    const CF_OAUTH_TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
+
     /**
-     * Get the OAuth token from wrangler's config file.
+     * Find the wrangler config file path.
      */
-    public static function getOAuthToken(): ?string
+    public static function getWranglerConfigPath(): ?string
     {
-        // macOS: ~/Library/Preferences/.wrangler/config/default.toml
-        // Linux: ~/.config/.wrangler/config/default.toml
         $paths = [
             $_SERVER['HOME'] . '/Library/Preferences/.wrangler/config/default.toml',
             $_SERVER['HOME'] . '/.config/.wrangler/config/default.toml',
@@ -98,14 +99,141 @@ class CloudflareHelper
 
         foreach ($paths as $path) {
             if (file_exists($path)) {
-                $contents = file_get_contents($path);
-                if (preg_match('/oauth_token\s*=\s*"([^"]+)"/', $contents, $m)) {
-                    return $m[1];
-                }
+                return $path;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Get the OAuth token from wrangler's config file.
+     */
+    public static function getOAuthToken(): ?string
+    {
+        $path = self::getWranglerConfigPath();
+        if ($path) {
+            $contents = file_get_contents($path);
+            if (preg_match('/oauth_token\s*=\s*"([^"]+)"/', $contents, $m)) {
+                return $m[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the refresh token from wrangler's config file.
+     */
+    public static function getRefreshToken(): ?string
+    {
+        $path = self::getWranglerConfigPath();
+        if ($path) {
+            $contents = file_get_contents($path);
+            if (preg_match('/refresh_token\s*=\s*"([^"]+)"/', $contents, $m)) {
+                return $m[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Refresh the OAuth token using the refresh token and update the wrangler config.
+     *
+     * @return string|null The new OAuth token, or null on failure
+     */
+    public static function refreshOAuthToken(): ?string
+    {
+        $refreshToken = self::getRefreshToken();
+        if (!$refreshToken) {
+            self::log('refreshOAuthToken — no refresh token found in wrangler config');
+            return null;
+        }
+
+        self::log('refreshOAuthToken — attempting token refresh');
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => self::CF_OAUTH_TOKEN_URL,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query([
+                'grant_type'    => 'refresh_token',
+                'refresh_token' => $refreshToken,
+                'client_id'     => self::WRANGLER_CLIENT_ID,
+            ]),
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/x-www-form-urlencoded',
+            ],
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 15,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrno = curl_errno($ch);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlErrno !== 0) {
+            self::log("refreshOAuthToken — curl error #{$curlErrno}: {$curlError}");
+            return null;
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300 || !$response) {
+            $snippet = $response ? substr($response, 0, 200) : '(empty)';
+            self::log("refreshOAuthToken — HTTP {$httpCode}: {$snippet}");
+            return null;
+        }
+
+        $data = json_decode($response, true);
+        $newToken = $data['access_token'] ?? null;
+        $newRefresh = $data['refresh_token'] ?? null;
+        $expiresIn = $data['expires_in'] ?? null;
+
+        if (!$newToken) {
+            self::log('refreshOAuthToken — response missing access_token');
+            return null;
+        }
+
+        // Update the wrangler config file with new tokens
+        $configPath = self::getWranglerConfigPath();
+        if ($configPath) {
+            $contents = file_get_contents($configPath);
+
+            // Replace oauth_token
+            $contents = preg_replace(
+                '/oauth_token\s*=\s*"[^"]+"/',
+                'oauth_token = "' . $newToken . '"',
+                $contents
+            );
+
+            // Replace refresh_token if we got a new one
+            if ($newRefresh) {
+                $contents = preg_replace(
+                    '/refresh_token\s*=\s*"[^"]+"/',
+                    'refresh_token = "' . $newRefresh . '"',
+                    $contents
+                );
+            }
+
+            // Update expiration_time if we can calculate it
+            if ($expiresIn) {
+                $expiry = gmdate('Y-m-d\TH:i:s.v\Z', time() + (int) $expiresIn);
+                $contents = preg_replace(
+                    '/expiration_time\s*=\s*"[^"]+"/',
+                    'expiration_time = "' . $expiry . '"',
+                    $contents
+                );
+            }
+
+            file_put_contents($configPath, $contents, LOCK_EX);
+            self::log("refreshOAuthToken — updated wrangler config at {$configPath}");
+        }
+
+        self::log('refreshOAuthToken — token refreshed successfully');
+        return $newToken;
     }
 
     /**
@@ -138,8 +266,41 @@ class CloudflareHelper
                 // Network error — safe to fall back to wrangler
                 self::log("getAccountId — API curl error #{$curlErrno}: {$curlError}");
             } elseif ($httpCode === 401 || $httpCode === 403) {
-                // Auth error — wrangler will hang for the same reason, don't fall back
-                self::log("getAccountId — API returned HTTP {$httpCode}, OAuth token is expired or invalid. Run: npx wrangler login");
+                // Auth error — try refreshing the token automatically
+                self::log("getAccountId — API returned HTTP {$httpCode}, attempting token refresh");
+                $newToken = self::refreshOAuthToken();
+                if ($newToken) {
+                    // Retry with the refreshed token
+                    self::log('getAccountId — retrying with refreshed token');
+                    $ch = curl_init();
+                    curl_setopt_array($ch, [
+                        CURLOPT_URL => self::CF_API_BASE . '/accounts?per_page=1',
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_HTTPHEADER => [
+                            'Authorization: Bearer ' . $newToken,
+                            'Content-Type: application/json',
+                        ],
+                        CURLOPT_CONNECTTIMEOUT => 10,
+                        CURLOPT_TIMEOUT => 15,
+                    ]);
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+
+                    if ($httpCode >= 200 && $httpCode < 300 && $response) {
+                        $data = json_decode($response, true);
+                        $accounts = $data['result'] ?? [];
+                        if (!empty($accounts)) {
+                            $id = $accounts[0]['id'] ?? null;
+                            if ($id) {
+                                self::log("getAccountId — found account {$id} via API (after refresh)");
+                                return $id;
+                            }
+                        }
+                    }
+                    self::log("getAccountId — retry after refresh failed (HTTP {$httpCode})");
+                }
+                self::log('getAccountId — token refresh failed, OAuth token is expired or invalid. Run: npx wrangler login');
                 return null;
             } elseif ($httpCode >= 200 && $httpCode < 300 && $response) {
                 $data = json_decode($response, true);

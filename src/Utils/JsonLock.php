@@ -72,13 +72,25 @@ Class JsonLock extends Json
 		// if the lock file does not exist
 		if (!is_file($file)) {
 			// we need to find the json file to populate our initial data
-			if (is_file($repo_dir.'protocol.json')) {
+			if ($repo_dir && is_file($repo_dir.'protocol.json')) {
 				$file = $repo_dir.'protocol.json';
+			} else {
+				// Neither lock nor json exists — start with empty data
+				$this->data = [];
+				return;
 			}
 		}
 		$raw = file_get_contents($file);
+		if ($raw === false) {
+			throw new \RuntimeException("Failed to read lock file: {$file}");
+		}
 
 		$this->data = json_decode($raw, true);
+		if ($this->data === null && json_last_error() !== JSON_ERROR_NONE) {
+			throw new \RuntimeException(
+				"Corrupt lock file: {$file} — " . json_last_error_msg()
+			);
+		}
 	}
 
 	/**
