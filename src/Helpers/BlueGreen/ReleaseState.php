@@ -110,10 +110,20 @@ class ReleaseState
 
     /**
      * Get the currently active version (serving production traffic).
+     *
+     * Checks bluegreen.active_version first (written by new strategy code),
+     * then falls back to release.current (written by legacy/older watcher code).
+     * This ensures backward compatibility when upgrading from older protocol versions.
      */
     public static function getActiveVersion(string $repo_dir): ?string
     {
-        return JsonLock::read('bluegreen.active_version', null, $repo_dir);
+        $version = JsonLock::read('bluegreen.active_version', null, $repo_dir);
+        if ($version) {
+            return $version;
+        }
+
+        // Fallback: release.current was written by the old watcher code
+        return JsonLock::read('release.current', null, $repo_dir);
     }
 
     /**
