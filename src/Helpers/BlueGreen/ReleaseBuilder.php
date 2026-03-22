@@ -155,15 +155,12 @@ class ReleaseBuilder
             return true;
         }
 
+        // Strip ALL existing port mappings and replace with only the
+        // two shadow-configurable ports (HTTP → 80, HTTPS → 443).
+        // This prevents collisions with the production container's ports.
         $content = preg_replace(
-            '/"80:80"/',
-            '"${PROTOCOL_PORT_HTTP:-80}:80"',
-            $content
-        );
-
-        $content = preg_replace(
-            '/"443:443"/',
-            '"${PROTOCOL_PORT_HTTPS:-443}:443"',
+            '/^(\s+)ports:\s*\n(\s+-\s*".+"\s*\n)+/m',
+            "$1ports:\n$1    - \"\${PROTOCOL_PORT_HTTP:-80}:80\"\n$1    - \"\${PROTOCOL_PORT_HTTPS:-443}:443\"\n",
             $content
         );
 
