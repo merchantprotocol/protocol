@@ -29,8 +29,8 @@ class BlueGreen
 {
     const PRODUCTION_HTTP = 80;
     const PRODUCTION_HTTPS = 443;
-    const SHADOW_HTTP = 8080;
-    const SHADOW_HTTPS = 8443;
+    const SHADOW_HTTP = 18080;
+    const SHADOW_HTTPS = 18443;
 
     // ─── State management (delegated to ReleaseState) ─────────────────
 
