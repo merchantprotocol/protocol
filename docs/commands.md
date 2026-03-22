@@ -26,15 +26,17 @@ Start everything. This is the one command that makes it all work.
 protocol start
 ```
 
-Runs through six stages — scanning your codebase, provisioning infrastructure, building containers, running a security audit, checking SOC 2 readiness, and verifying health. Each stage shows its progress and collapses to OK, PASS, or FAIL:
+Runs through eight stages — scanning your codebase, provisioning infrastructure, building containers, running post-start hooks, running a security audit, checking SOC 2 readiness, verifying health, and checking disk space. Each stage shows its progress and collapses to OK, PASS, or FAIL:
 
 ```
 [protocol] Scanning codebase.............. OK
 [protocol] Infrastructure provisioning.... OK
-[protocol] Container build & push......... OK
+[protocol] Container build & start........ OK
+[protocol] Post-start hooks............... OK
 [protocol] Running security audit......... PASS
 [protocol] SOC 2 readiness check.......... PASS
 [protocol] Health checks.................. PASS
+[protocol] Disk space check............... OK
 
 ✓ Deployment complete. All systems operational.
   Environment  production
@@ -492,6 +494,80 @@ Run `composer install` inside the Docker container.
 ```bash
 protocol composer:install
 ```
+
+---
+
+## Lifecycle Hooks
+
+Run commands automatically after `protocol start` finishes bringing up containers. Useful for dependency installs, cache warming, queue restarts, or any post-deploy task.
+
+Hooks are stored in `protocol.json` under `lifecycle.post_start` and run in order during Stage 4 of `protocol start`. For release/bluegreen deployments, hooks execute inside the active release directory.
+
+### `protocol lifecycle list`
+
+Show all configured post-start hooks.
+
+```bash
+protocol lifecycle list
+```
+
+```
+  Post-start hooks:
+
+  [0] exec:app composer install --no-interaction --no-dev --optimize-autoloader
+  [1] exec:worker php artisan queue:restart
+```
+
+### `protocol lifecycle add`
+
+Append a hook to the list.
+
+```bash
+protocol lifecycle add "exec:app composer install --no-interaction"
+```
+
+Two formats:
+
+| Format | Runs where | Example |
+|--------|-----------|---------|
+| `exec:<service> <command>` | Inside the named docker compose service | `exec:app composer install` |
+| `<command>` | On the host | `echo "deploy complete"` |
+
+The `<service>` name matches the service key in your `docker-compose.yml` (e.g., `app`, `worker`, `redis`).
+
+### `protocol lifecycle remove`
+
+Remove a hook by its index (shown in `list` output).
+
+```bash
+protocol lifecycle remove 0
+```
+
+### `protocol lifecycle clear`
+
+Remove all hooks.
+
+```bash
+protocol lifecycle clear
+```
+
+### Configuration
+
+Hooks are stored in `protocol.json`:
+
+```json
+{
+    "lifecycle": {
+        "post_start": [
+            "exec:app composer install --no-interaction --no-dev --optimize-autoloader",
+            "exec:worker php artisan queue:restart",
+            "echo deployment complete"
+        ]
+    }
+}
+```
+
+You can edit this file directly or use the `protocol lifecycle` commands above.
 
 ---
 
