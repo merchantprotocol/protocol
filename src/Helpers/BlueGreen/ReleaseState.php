@@ -12,16 +12,39 @@ namespace Gitcd\Helpers\BlueGreen;
 
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 use Gitcd\Helpers\BlueGreen;
 
 class ReleaseState
 {
     /**
-     * Check if shadow deployment is enabled in protocol.json.
+     * Check if shadow deployment is enabled.
+     * Node config is the source of truth (deployment is a node-level concern).
+     * Falls back to protocol.json only for non-slave/local dev usage.
      */
     public static function isEnabled(string $repo_dir): bool
     {
+        $nodeData = self::getNodeData($repo_dir);
+        if (!empty($nodeData)) {
+            return (bool) ($nodeData['bluegreen']['enabled'] ?? false);
+        }
+
         return (bool) Json::read('bluegreen.enabled', false, $repo_dir);
+    }
+
+    /**
+     * Look up node config data for a given repo directory.
+     */
+    private static function getNodeData(string $repo_dir): array
+    {
+        $projectName = NodeConfig::findByRepoDir($repo_dir);
+        if (!$projectName) {
+            $match = NodeConfig::findByActiveDir($repo_dir);
+            if ($match) {
+                $projectName = $match[0];
+            }
+        }
+        return $projectName ? NodeConfig::load($projectName) : [];
     }
 
     /**
