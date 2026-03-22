@@ -238,6 +238,14 @@ while (true) {
                 }
             }
 
+            // Always stop containers in THIS release dir before building.
+            // On retry after a failed build, containers from the previous attempt
+            // may still be running (occupying ports, holding the container name).
+            // Without this, "up --build" fails because it can't bind to ports
+            // that the stale container already holds.
+            wlog("Stopping any existing containers in {$releaseDir} before build...");
+            BlueGreen::stopContainers($releaseDir);
+
             // Build and start containers on production ports
             wlog("Building containers on production ports (80/443)...");
             if (!BlueGreen::buildContainers($releaseDir)) {
@@ -305,6 +313,11 @@ while (true) {
                 sleep($interval);
                 continue;
             }
+
+            // Stop any existing containers in this release dir before building.
+            // On retry after a failed build, stale containers may hold the ports.
+            wlog("Stopping any existing containers in {$releaseDir} before build...");
+            BlueGreen::stopContainers($releaseDir);
 
             // Find available shadow ports (bluegreen builds on shadow, not production)
             [$shadowHttp, $shadowHttps] = BlueGreen::findAvailableShadowPorts();
