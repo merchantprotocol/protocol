@@ -45,6 +45,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Crontab;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 Class CronRemove extends Command {
 
@@ -87,7 +88,17 @@ Class CronRemove extends Command {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
-        Git::checkInitializedRepo( $output, $repo_dir );
+
+        // Detect slave node mode so cron:remove works from anywhere
+        $resolved = NodeConfig::resolveSlaveNode(null, $repo_dir ?: null);
+        if ($resolved) {
+            [, , $activeDir] = $resolved;
+            $repo_dir = $activeDir;
+        }
+
+        if (!$resolved) {
+            Git::checkInitializedRepo($output, $repo_dir);
+        }
 
         // command should only have one running instance
         if (!$this->lock()) {
