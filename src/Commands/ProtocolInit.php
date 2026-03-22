@@ -544,7 +544,9 @@ Class ProtocolInit extends Command {
         $nodeData['name'] = $projectName;
         $nodeData['node_type'] = 'slave';
         $nodeData['environment'] = $environment;
-        $nodeData['repo_dir'] = $repo_dir;
+        // repo_dir should point to the releases directory base, not the cwd
+        // The branch checkout lives inside releases_dir (e.g., releases_dir/main/)
+        $nodeData['repo_dir'] = $releasesDir;
         $nodeData['git'] = $nodeData['git'] ?? [];
         $nodeData['git']['remote'] = $gitRemote;
         $nodeData['deployment'] = $nodeData['deployment'] ?? [];
