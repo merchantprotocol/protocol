@@ -96,7 +96,8 @@ Class DeployReleaseSlave extends Command {
         }
 
         // Start as daemon
-        $logFile = $repo_dir . 'release-watcher.log';
+        $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
+        $logFile = $logDir . 'release-watcher.log';
         $cmd = "nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"

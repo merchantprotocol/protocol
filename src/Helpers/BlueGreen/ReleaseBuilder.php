@@ -15,15 +15,32 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\NodeConfig;
 
 class ReleaseBuilder
 {
     /**
      * Get the git remote URL for cloning releases.
-     * Uses bluegreen.git_remote from protocol.json, falls back to the repo's own remote.
+     * Node config is the source of truth, falls back to protocol.json, then git remote.
      */
     public static function getGitRemote(string $repo_dir): ?string
     {
+        // Check node config first
+        $projectName = NodeConfig::findByRepoDir($repo_dir);
+        if (!$projectName) {
+            $match = NodeConfig::findByActiveDir($repo_dir);
+            if ($match) {
+                $projectName = $match[0];
+            }
+        }
+        if ($projectName) {
+            $nodeData = NodeConfig::load($projectName);
+            $remote = $nodeData['bluegreen']['git_remote'] ?? null;
+            if ($remote) {
+                return $remote;
+            }
+        }
+
         $configured = Json::read('bluegreen.git_remote', null, $repo_dir);
         if ($configured) {
             return $configured;
