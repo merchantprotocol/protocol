@@ -305,7 +305,36 @@ Class ProtocolStart extends Command {
 
                         $containerName = BlueGreen::getContainerName($releaseDir);
                         $runner->log("Starting containers: release={$activeVersion} container={$containerName} dir={$releaseDir}");
-                        $started = BlueGreen::startContainers($releaseDir);
+
+                        // Inject secrets (encrypted or AWS) into containers,
+                        // same as the branch strategy path below.
+                        $tmpEnv = SecretsProvider::resolveToTempFile($releaseDir);
+                        if ($tmpEnv) {
+                            $secretsFile = rtrim($releaseDir, '/') . '/.env.protocol-secrets';
+                            copy($tmpEnv, $secretsFile);
+                            chmod($secretsFile, 0600);
+                            unlink($tmpEnv);
+
+                            $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
+                            $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+                            $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
+                            $dockerCommand = Docker::getDockerCommand();
+
+                            $runner->log("{$dockerCommand} up -d (with secrets + bluegreen env)");
+                            Shell::run("cd " . escapeshellarg(rtrim($releaseDir, '/'))
+                                . " && {$dockerCommand}"
+                                . " --env-file " . escapeshellarg($envFile)
+                                . " -f " . escapeshellarg($composePath)
+                                . " -f " . escapeshellarg($overrideFile)
+                                . " up -d 2>&1", $returnVar);
+                            $started = $returnVar === 0;
+
+                            unlink($secretsFile);
+                            unlink($overrideFile);
+                            $runner->log("Secrets temp files cleaned up");
+                        } else {
+                            $started = BlueGreen::startContainers($releaseDir);
+                        }
                         $runner->log("startContainers result=" . ($started ? 'ok' : 'failed'));
 
                         // Verify the container is actually running
