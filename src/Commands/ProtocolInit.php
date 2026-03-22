@@ -582,7 +582,7 @@ Class ProtocolInit extends Command {
 
         $alreadyDeployed = false;
         if ($currentRelease) {
-            $releaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+            $releaseDir = rtrim($releasesDir, '/') . '/' . $currentRelease . '/';
             if (is_dir($releaseDir)) {
                 $alreadyDeployed = true;
                 $output->writeln("    <fg=white;options=bold>Current deployment:</>");
@@ -733,9 +733,17 @@ Class ProtocolInit extends Command {
             $output->writeln('');
             $output->writeln("    <fg=gray>›</> Cloning release <fg=white>{$selectedTag}</>...");
 
-            $cloneSuccess = ReleaseBuilder::initReleaseDir($repo_dir, $selectedTag, $gitCloneUrl);
+            $releaseDir = rtrim($releasesDir, '/') . '/' . $selectedTag . '/';
+            $cloneUrl = GitHubApp::resolveUrl($gitCloneUrl);
+            if (!is_dir($releasesDir)) {
+                mkdir($releasesDir, 0755, true);
+            }
+            $cloneResult = Shell::run(
+                "GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg(rtrim($releaseDir, '/')) . " 2>&1",
+                $cloneReturnVar
+            );
+            $cloneSuccess = $cloneReturnVar === 0 && is_dir($releaseDir);
             if ($cloneSuccess) {
-                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $selectedTag);
                 ReleaseBuilder::checkoutVersion($releaseDir, $selectedTag);
 
                 $output->writeln("    <fg=green>✓</> Release <fg=white>{$selectedTag}</> cloned to <fg=white>{$releaseDir}</>");
@@ -745,8 +753,10 @@ Class ProtocolInit extends Command {
                 Json::write('deployment.strategy', 'release', $repo_dir);
                 Json::save($repo_dir);
 
-                // Clear awaiting_release flag in node config
+                // Update node config with deployment state
                 $nodeData['deployment']['strategy'] = 'release';
+                $nodeData['release'] = $nodeData['release'] ?? [];
+                $nodeData['release']['current'] = $selectedTag;
                 unset($nodeData['deployment']['awaiting_release']);
                 unset($nodeData['deployment']['branch']);
                 NodeConfig::save($projectName, $nodeData);
@@ -772,7 +782,7 @@ Class ProtocolInit extends Command {
         if ($currentStrategy === 'branch' && $currentBranch) {
             $activeCloneDir = rtrim($releasesDir, '/') . '/' . $currentBranch;
         } elseif ($currentRelease) {
-            $activeCloneDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
+            $activeCloneDir = rtrim($releasesDir, '/') . '/' . $currentRelease;
         }
 
         if ($activeCloneDir && !is_dir($activeCloneDir)) {
@@ -780,12 +790,13 @@ Class ProtocolInit extends Command {
                 mkdir($releasesDir, 0755, true);
             }
 
+            $cloneUrl = GitHubApp::resolveUrl($gitCloneUrl);
             $output->writeln("    <fg=gray>›</> Cloning primary repository...");
             if ($currentStrategy === 'branch' && $currentBranch) {
-                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($gitCloneUrl) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
+                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg($activeCloneDir) . " --branch " . escapeshellarg($currentBranch) . " 2>&1");
             } else {
-                ReleaseBuilder::initReleaseDir($repo_dir, $currentRelease, $gitCloneUrl);
-                ReleaseBuilder::checkoutVersion($activeCloneDir, $currentRelease);
+                Shell::run("GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg($activeCloneDir) . " 2>&1");
+                ReleaseBuilder::checkoutVersion($activeCloneDir . '/', $currentRelease);
             }
             if (is_dir($activeCloneDir)) {
                 $output->writeln("    <fg=green>✓</> Primary repo cloned to <fg=white>{$activeCloneDir}</>");
@@ -831,21 +842,34 @@ Class ProtocolInit extends Command {
 
         $this->clearAndBanner($output);
 
-        $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
-        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Configured!</>                              <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>   <fg=gray>Starting services...</>                                  <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
-        $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
-        $output->writeln('');
+        // Check if we have anything deployed to start services for
+        $hasDeployment = ($activeCloneDir && is_dir($activeCloneDir));
 
-        // Run protocol start — this will also run protocol status at the end
-        $app = $this->getApplication();
-        $startArgs = new \Symfony\Component\Console\Input\ArrayInput([
-            'environment' => $environment,
-            'project' => $projectName,
-        ]);
-        $app->find('start')->run($startArgs, $output);
+        if ($hasDeployment) {
+            $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
+            $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Configured!</>                              <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=gray>Starting services...</>                                  <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
+            $output->writeln('');
+
+            // Run protocol start — this will also run protocol status at the end
+            $app = $this->getApplication();
+            $startArgs = new \Symfony\Component\Console\Input\ArrayInput([
+                'environment' => $environment,
+                'project' => $projectName,
+            ]);
+            $app->find('start')->run($startArgs, $output);
+        } else {
+            $output->writeln('<fg=cyan>  ┌─────────────────────────────────────────────────────────┐</>');
+            $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=green;options=bold>✓  Slave Node Configured!</>                              <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=yellow>No release deployed yet.</>                              <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>   <fg=gray>Deploy with: protocol shadow:build <version></>       <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  │</>                                                         <fg=cyan>│</>');
+            $output->writeln('<fg=cyan>  └─────────────────────────────────────────────────────────┘</>');
+        }
 
         return Command::SUCCESS;
     }

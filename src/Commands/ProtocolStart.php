@@ -39,8 +39,10 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
-use Symfony\Component\Console\Command\LockableTrait;
 use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Lock\Store\SemaphoreStore;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Dir;
@@ -56,13 +58,15 @@ use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStart extends Command {
 
-    use LockableTrait;
+    private ?\Symfony\Component\Lock\LockInterface $lock = null;
+    private const LOCK_TTL = 120; // 2 minutes — auto-expires stale locks
 
     protected static $defaultName = 'docker:start|start';
     protected static $defaultDescription = 'Starts a node so that the repo and docker image stay up to date and are running';
@@ -113,14 +117,16 @@ Class ProtocolStart extends Command {
 
         $helper = $this->getHelper('question');
 
-        // command should only have one running instance
-        if (!$this->lock()) {
+        // command should only have one running instance (lock auto-expires after 2 min)
+        $store = SemaphoreStore::isSupported() ? new SemaphoreStore() : new FlockStore();
+        $this->lock = (new LockFactory($store))->createLock($this->getName(), self::LOCK_TTL);
+        if (!$this->lock->acquire()) {
             if ($input->getOption('force')) {
-                $this->release();
-                $this->lock();
+                $this->lock->acquire(true); // blocking acquire
                 $output->writeln('<comment>Forcing lock override...</comment>');
             } else {
                 $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                $output->writeln('<comment>Lock auto-expires after ' . self::LOCK_TTL . ' seconds.</comment>');
                 return Command::SUCCESS;
             }
         }
@@ -291,8 +297,9 @@ Class ProtocolStart extends Command {
             $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
             if ($usesBuild) {
-                $runner->log("docker compose build");
-                Shell::run("docker compose -f " . escapeshellarg($composePath) . " build 2>&1");
+                $dockerCmd = Docker::getDockerCommand();
+                $runner->log("{$dockerCmd} build");
+                Shell::run("{$dockerCmd} -f " . escapeshellarg($composePath) . " build 2>&1");
             } else {
                 $image = Json::read('docker.image', false, $repo_dir);
                 if ($image) {
@@ -304,14 +311,30 @@ Class ProtocolStart extends Command {
             // Rebuild containers (inject secrets if encrypted or AWS mode)
             $dockerCommand = Docker::getDockerCommand();
             $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
-            $envFlag = $tmpEnv ? ' --env-file ' . escapeshellarg($tmpEnv) : '';
-
-            $runner->log("{$dockerCommand}{$envFlag} up --build -d");
-            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand}{$envFlag} up --build -d 2>&1");
 
             if ($tmpEnv) {
+                // Write secrets into the project dir so compose can reference it
+                $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
+                copy($tmpEnv, $secretsFile);
+                chmod($secretsFile, 0600);
                 unlink($tmpEnv);
-                $runner->log("Secrets temp file cleaned up");
+
+                // Generate a compose override that injects env_file into every service
+                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+
+                $runner->log("{$dockerCommand} up --build -d (with secrets injected into containers)");
+                Shell::run("cd " . escapeshellarg($repo_dir)
+                    . " && {$dockerCommand} -f " . escapeshellarg($composePath)
+                    . " -f " . escapeshellarg($overrideFile)
+                    . " up --build -d 2>&1");
+
+                // Clean up secrets files immediately
+                unlink($secretsFile);
+                unlink($overrideFile);
+                $runner->log("Secrets temp files cleaned up");
+            } else {
+                $runner->log("{$dockerCommand} up --build -d");
+                Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
             }
 
             // Run composer install inside container if needed
@@ -358,11 +381,9 @@ Class ProtocolStart extends Command {
             }
 
             // Check watcher is running
-            if ($strategy === 'release') {
-                $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
-                if ($pid && !Shell::isRunning($pid)) {
-                    throw new \RuntimeException('Release watcher is not running');
-                }
+            $watcherPid = DeploymentState::watcherPid($repo_dir);
+            if ($watcherPid && !Shell::isRunning($watcherPid)) {
+                throw new \RuntimeException('Deployment watcher is not running');
             }
         }, 'PASS');
 
@@ -378,14 +399,14 @@ Class ProtocolStart extends Command {
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
-        $version = JsonLock::read('release.current', null, $repo_dir)
+        $curDeploy = DeploymentState::current($repo_dir);
+        $version = ($curDeploy['version'] ?? null)
             ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
         $secretsStatus = Secrets::hasKey() ? 'decrypted' : 'no key found';
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
 
-        $watcherType = $strategy === 'release' ? 'release' : 'git';
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
-        $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
+        $watcherType = DeploymentState::strategy($repo_dir);
+        $watcherPid = DeploymentState::watcherPid($repo_dir);
         $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
 
         $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);

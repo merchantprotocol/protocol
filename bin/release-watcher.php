@@ -13,6 +13,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\SecretsProvider;
@@ -60,12 +61,20 @@ while (true) {
     $pollCount++;
 
     try {
+        // Clear singleton caches so we re-read files from disk each cycle
+        JsonLock::clearInstances();
+        Json::clearInstances();
+
+
         // Refresh credentials before each poll (tokens expire after 1 hour)
         if (GitHubApp::isConfigured()) {
             $creds = GitHubApp::loadCredentials();
             $appOwner = $creds['owner'] ?? null;
             if ($appOwner) {
-                GitHubApp::refreshGitCredentials($appOwner);
+                $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                if (!$refreshed) {
+                    wlog("WARNING: Failed to refresh GitHub App credentials");
+                }
             }
         }
 
@@ -98,10 +107,18 @@ while (true) {
         // ── New release detected ─────────────────────────────
         wlog("New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")");
 
-        // Fetch latest tags
-        $remote = Git::remoteName($repo_dir) ?: 'origin';
-        wlog("Fetching tags from {$remote}...");
-        Shell::run("GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch {$remote} --tags 2>/dev/null");
+        // Fetch latest tags — use resolved HTTPS URL so the GitHub App
+        // credential helper works (the remote may point to an SSH URL).
+        $gitRemote = BlueGreen::getGitRemote($repo_dir) ?: Git::RemoteUrl($repo_dir);
+        $fetchUrl = GitHubApp::resolveUrl($gitRemote);
+        wlog("Fetching tags from {$fetchUrl}...");
+        $fetchResult = Shell::run(
+            "GIT_TERMINAL_PROMPT=0 timeout 30 git -C " . escapeshellarg($repo_dir) . " fetch " . escapeshellarg($fetchUrl) . " --tags 2>&1",
+            $fetchReturn
+        );
+        if ($fetchReturn !== 0) {
+            wlog("WARNING: Tag fetch failed (exit {$fetchReturn}): " . trim($fetchResult));
+        }
 
         // Verify tag exists
         if (!GitHub::tagExists($activeRelease, $repo_dir)) {
@@ -183,8 +200,15 @@ while (true) {
                         AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
                         AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
                         wlog("Auto-promoted {$activeRelease} to production");
+
+                        // Only update release.current on successful promotion
+                        JsonLock::write('release.previous', $currentRelease, $repo_dir);
+                        JsonLock::write('release.current', $activeRelease, $repo_dir);
+                        JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+                        JsonLock::save($repo_dir);
+                        wlog("Release state updated: current={$activeRelease}");
                     } else {
-                        wlog("ERROR: Auto-promote failed for {$activeRelease}");
+                        wlog("ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle");
                     }
                 } else {
                     wlog("Shadow ready. Run 'protocol shadow:start' to promote.");
@@ -192,15 +216,9 @@ while (true) {
             } else {
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
-                wlog("ERROR: Health check FAILED for {$activeRelease}");
+                wlog("ERROR: Health check FAILED for {$activeRelease} — will retry next cycle");
             }
 
-            // Update release tracking
-            JsonLock::write('release.previous', $currentRelease, $repo_dir);
-            JsonLock::write('release.current', $activeRelease, $repo_dir);
-            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-            JsonLock::save($repo_dir);
-            wlog("Release state updated: current={$activeRelease}");
 
         } else {
             // ── Standard in-place deployment ─────────────────
@@ -219,13 +237,27 @@ while (true) {
             // Handle secrets (encrypted or AWS Secrets Manager)
             $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
 
+            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+            $dockerCommand = Docker::getDockerCommand();
+
             if ($tmpEnv) {
                 wlog("Rebuilding Docker containers with secrets...");
-                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
+                $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
+                copy($tmpEnv, $secretsFile);
+                chmod($secretsFile, 0600);
                 unlink($tmpEnv);
+
+                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+
+                Shell::run("{$dockerCommand} -f " . escapeshellarg($composePath)
+                    . " -f " . escapeshellarg($overrideFile)
+                    . " up -d --build 2>&1");
+
+                unlink($secretsFile);
+                unlink($overrideFile);
             } else {
                 wlog("Rebuilding Docker containers...");
-                Shell::run("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " up -d --build 2>&1");
+                Shell::run("{$dockerCommand} -f " . escapeshellarg($composePath) . " up -d --build 2>&1");
             }
 
             // Audit log

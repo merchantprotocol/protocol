@@ -10,6 +10,7 @@ use Symfony\Component\Console\Question\ChoiceQuestion;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
 
@@ -95,9 +96,8 @@ class DeployStrategy extends Command
             return Command::SUCCESS;
         }
 
-        // Update protocol.json
-        Json::write('deployment.strategy', $newStrategy, $repo_dir);
-        Json::save($repo_dir);
+        // Update unified state + protocol.json
+        DeploymentState::setStrategy($repo_dir, $newStrategy);
 
         // Update node config if it exists
         if ($projectName) {

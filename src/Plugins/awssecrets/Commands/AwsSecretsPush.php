@@ -108,13 +108,6 @@ class AwsSecretsPush extends Command
             return Command::FAILURE;
         }
 
-        // Save config repo first so any local .env edits are committed
-        $output->writeln('  Saving config repo...');
-        $configSaveCmd = $this->getApplication()->find('config:save');
-        $configSaveInput = new ArrayInput(['--dir' => $repoDir]);
-        $configSaveCmd->run($configSaveInput, $output);
-        $output->writeln('');
-
         // Read .env from that branch (without switching branches)
         $envContents = $this->readEnvFromBranch($configRepo, $environment, $output);
         if ($envContents === null) {

@@ -40,6 +40,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class DeployReleaseSlave extends Command {
 
@@ -76,7 +77,7 @@ Class DeployReleaseSlave extends Command {
         $interval = (int) $input->getOption('interval');
 
         // Check if already running
-        $pid = JsonLock::read('release.slave.pid', null, $repo_dir);
+        $pid = DeploymentState::watcherPid($repo_dir);
         if ($pid && Shell::isRunning($pid)) {
             $output->writeln("<comment>Release watcher is already running (PID: {$pid})</comment>");
             return Command::SUCCESS;
@@ -107,6 +108,7 @@ Class DeployReleaseSlave extends Command {
         if ($newPid && is_numeric($newPid)) {
             JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
             JsonLock::save($repo_dir);
+            DeploymentState::setWatcherPid($repo_dir, (int) $newPid);
             $output->writeln("<info>Release watcher started (PID: {$newPid})</info>");
             $output->writeln("Log: {$logFile}");
         } else {

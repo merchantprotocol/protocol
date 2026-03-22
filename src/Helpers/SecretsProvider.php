@@ -33,6 +33,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
+use Symfony\Component\Yaml\Yaml;
 
 class SecretsProvider
 {
@@ -94,6 +95,39 @@ class SecretsProvider
         }
 
         return null;
+    }
+
+    /**
+     * Generate a docker-compose override file that adds env_file to every service.
+     *
+     * The compose-level --env-file flag only interpolates ${VAR} in the compose file.
+     * To actually inject env vars INTO containers, we need the service-level env_file
+     * directive. This generates a temporary override compose file that adds it.
+     *
+     * @param string $composePath Path to the original docker-compose.yml
+     * @param string $envFilePath Path to the .env secrets file
+     * @return string Path to the generated override file (caller must unlink)
+     */
+    public static function generateComposeOverride(string $composePath, string $envFilePath): string
+    {
+        // Parse the original compose file to get service names
+        $parsed = Yaml::parseFile($composePath);
+        $services = $parsed['services'] ?? [];
+        $envFileName = basename($envFilePath);
+
+        // Build override YAML
+        $override = "services:\n";
+        foreach (array_keys($services) as $serviceName) {
+            $override .= "  {$serviceName}:\n";
+            $override .= "    env_file:\n";
+            $override .= "      - {$envFileName}\n";
+        }
+
+        $overridePath = dirname($composePath) . '/.docker-compose.secrets-override.yml';
+        file_put_contents($overridePath, $override);
+        chmod($overridePath, 0600);
+
+        return $overridePath;
     }
 
     /**

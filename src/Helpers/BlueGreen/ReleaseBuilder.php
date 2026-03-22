@@ -12,6 +12,7 @@ namespace Gitcd\Helpers\BlueGreen;
 
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Utils\Json;
@@ -83,14 +84,26 @@ class ReleaseBuilder
      */
     public static function checkoutVersion(string $releaseDir, string $version): bool
     {
-        $remote = Git::remoteName($releaseDir) ?: 'origin';
+        $dir = escapeshellarg(rtrim($releaseDir, '/'));
 
-        Shell::run("git -C " . escapeshellarg(rtrim($releaseDir, '/')) . " fetch {$remote} --tags 2>/dev/null");
+        // Fetch tags using resolved HTTPS URL so credential helper works
+        $remoteUrl = trim(Shell::run("git -C {$dir} remote get-url origin 2>/dev/null"));
+        $fetchUrl = $remoteUrl ? GitHubApp::resolveUrl($remoteUrl) : 'origin';
+        Shell::run(
+            "GIT_TERMINAL_PROMPT=0 git -C {$dir} fetch " . escapeshellarg($fetchUrl) . " --tags 2>&1",
+            $fetchReturn
+        );
+        if ($fetchReturn !== 0) {
+            error_log("checkoutVersion: tag fetch failed (exit {$fetchReturn}) for {$releaseDir}");
+        }
 
         $result = Shell::run(
-            "git -C " . escapeshellarg(rtrim($releaseDir, '/')) . " checkout " . escapeshellarg($version) . " 2>&1",
+            "git -C {$dir} checkout " . escapeshellarg($version) . " 2>&1",
             $returnVar
         );
+        if ($returnVar !== 0) {
+            error_log("checkoutVersion: checkout failed (exit {$returnVar}): " . trim($result));
+        }
 
         return $returnVar === 0;
     }

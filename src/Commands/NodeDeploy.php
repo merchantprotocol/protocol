@@ -42,12 +42,14 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class NodeDeploy extends Command {
 
@@ -101,19 +103,17 @@ Class NodeDeploy extends Command {
             return Command::FAILURE;
         }
 
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $current = DeploymentState::current($repo_dir);
+        $currentRelease = $current['version'] ?? null;
         $output->writeln("<info>Deploying {$version} on this node</info>");
 
         // Checkout the tag (detached HEAD)
         Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($version) . " 2>&1");
         $output->writeln(" - Checked out {$version}");
 
-        // Update lock file
-        JsonLock::write('release.previous', $currentRelease, $repo_dir);
-        JsonLock::write('release.current', $version, $repo_dir);
-        JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-        JsonLock::save($repo_dir);
-        $output->writeln(' - Updated protocol.lock');
+        // Update deployment state
+        DeploymentState::setCurrent($repo_dir, $version, $repo_dir);
+        $output->writeln(' - Updated deployment state');
 
         // Handle secrets (encrypted or AWS Secrets Manager)
         $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
@@ -121,11 +121,22 @@ Class NodeDeploy extends Command {
         if ($tmpEnv) {
             $output->writeln(' - Secrets resolved to temp file');
 
-            // Rebuild docker with env file
-            Shell::passthru("docker compose -f " . escapeshellarg($repo_dir . 'docker-compose.yml') . " --env-file " . escapeshellarg($tmpEnv) . " up -d --build 2>&1");
-
-            // Delete temp file immediately
+            // Write secrets into the project dir and generate compose override
+            $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
+            $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
+            copy($tmpEnv, $secretsFile);
+            chmod($secretsFile, 0600);
             unlink($tmpEnv);
+
+            $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+            $dockerCommand = Docker::getDockerCommand();
+
+            Shell::passthru("{$dockerCommand} -f " . escapeshellarg($composePath)
+                . " -f " . escapeshellarg($overrideFile)
+                . " up -d --build 2>&1");
+
+            unlink($secretsFile);
+            unlink($overrideFile);
             $output->writeln(' - Docker containers rebuilt (secrets injected and cleaned)');
         } else {
             // Rebuild docker normally (file mode or no secrets)

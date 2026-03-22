@@ -149,7 +149,7 @@ Class Git
     public static function remoteName( $repo_dir = false )
     {
         $flag = self::repoFlag($repo_dir);
-        $remotes = Shell::run("git $flag remote");
+        $remotes = Shell::run("git $flag remote 2>/dev/null");
         $remotearray = explode(PHP_EOL, $remotes);
         return array_shift($remotearray);
     }
@@ -164,7 +164,7 @@ Class Git
     {
         $remote = self::remoteName( $repo_dir );
         $flag = self::repoFlag($repo_dir);
-        return Shell::run("git $flag config --get remote." . escapeshellarg($remote) . ".url");
+        return Shell::run("git $flag config --get remote." . escapeshellarg($remote) . ".url 2>/dev/null");
     }
 
     /**
@@ -308,9 +308,9 @@ Class Git
             }
             $cd = "cd " . escapeshellarg($repo_dir) . " &&";
         }
-        $command = "$cd git log";
+        $command = "$cd git log 2>/dev/null";
         $response = Shell::run($command);
-        if (strpos($response, 'not a git repository') !== false) {
+        if (!$response || strpos($response, 'not a git repository') !== false) {
             return false;
         }
         return true;

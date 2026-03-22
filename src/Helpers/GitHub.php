@@ -2,8 +2,8 @@
 /**
  * GitHub API helper.
  *
- * Uses the GitHub REST API via GitHubApp installation tokens when available,
- * falling back to the `gh` CLI for local development.
+ * Uses the GitHub REST API via GitHubApp installation tokens.
+ * No dependency on the `gh` CLI.
  */
 namespace Gitcd\Helpers;
 
@@ -35,39 +35,24 @@ class GitHub
     private static function apiRequest(string $method, string $endpoint, ?array $body = null): ?array
     {
         $token = GitHubApp::getAccessToken();
-
-        if ($token) {
-            // Use App token via curl
-            $url = "https://api.github.com" . $endpoint;
-
-            $cmd = "curl -s -X " . escapeshellarg($method)
-                . " -H " . escapeshellarg("Authorization: token {$token}")
-                . " -H 'Accept: application/vnd.github+json'"
-                . " -H 'X-GitHub-Api-Version: 2022-11-28'";
-
-            if ($body !== null && $method !== 'GET') {
-                $cmd .= " -H 'Content-Type: application/json'"
-                    . " -d " . escapeshellarg(json_encode($body));
-            }
-
-            $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
-        } else {
-            // Fall back to gh CLI
-            $cmd = "gh api -X " . escapeshellarg($method)
-                . " -H 'Accept: application/vnd.github+json'";
-
-            if ($body !== null && $method !== 'GET') {
-                foreach ($body as $key => $val) {
-                    if (is_bool($val)) {
-                        $cmd .= " -F " . escapeshellarg("{$key}=" . ($val ? 'true' : 'false'));
-                    } else {
-                        $cmd .= " -f " . escapeshellarg("{$key}={$val}");
-                    }
-                }
-            }
-
-            $cmd .= " " . escapeshellarg($endpoint) . " 2>/dev/null";
+        if (!$token) {
+            return null;
         }
+
+        $url = "https://api.github.com" . $endpoint;
+
+        $cmd = "curl -s -X " . escapeshellarg($method)
+            . " -H " . escapeshellarg("Authorization: token {$token}")
+            . " -H 'Accept: application/vnd.github+json'"
+            . " -H 'X-GitHub-Api-Version: 2022-11-28'";
+
+        if ($body !== null && $method !== 'GET') {
+            $cmd .= " -H 'Content-Type: application/json'"
+                . " -d " . escapeshellarg(json_encode($body));
+        }
+
+        $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
+
 
         $result = Shell::run($cmd);
         if (!$result) return null;
@@ -82,19 +67,18 @@ class GitHub
     private static function apiRequestRaw(string $method, string $endpoint): ?string
     {
         $token = GitHubApp::getAccessToken();
-
-        if ($token) {
-            $url = "https://api.github.com" . $endpoint;
-            $cmd = "curl -s -X " . escapeshellarg($method)
-                . " -H " . escapeshellarg("Authorization: token {$token}")
-                . " -H 'Accept: application/vnd.github+json'"
-                . " -H 'X-GitHub-Api-Version: 2022-11-28'"
-                . " " . escapeshellarg($url) . " 2>/dev/null";
-        } else {
-            $cmd = "gh api -X " . escapeshellarg($method)
-                . " -H 'Accept: application/vnd.github+json'"
-                . " " . escapeshellarg($endpoint) . " 2>/dev/null";
+        if (!$token) {
+            return null;
         }
+
+        $url = "https://api.github.com" . $endpoint;
+
+        $cmd = "curl -s -X " . escapeshellarg($method)
+            . " -H " . escapeshellarg("Authorization: token {$token}")
+            . " -H 'Accept: application/vnd.github+json'"
+            . " -H 'X-GitHub-Api-Version: 2022-11-28'"
+            . " " . escapeshellarg($url) . " 2>/dev/null";
+
 
         $result = Shell::run($cmd);
         return $result ?: null;
@@ -179,15 +163,6 @@ class GitHub
     {
         $token = GitHubApp::getAccessToken();
         return $token !== null;
-    }
-
-    /**
-     * Check if gh CLI is installed and authenticated.
-     */
-    public static function isGhCliAvailable(): bool
-    {
-        $result = Shell::run("gh auth status 2>&1");
-        return $result !== null && str_contains($result, 'Logged in');
     }
 
     /**

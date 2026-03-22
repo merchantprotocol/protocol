@@ -39,6 +39,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class GitSlave extends BaseSlaveCommand {
 
@@ -66,12 +67,14 @@ Class GitSlave extends BaseSlaveCommand {
         $output->writeln('<comment>Continuously monitoring git repo for remote changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
-        $running = Shell::isLockedPIDStillRunning();
-        if ($running) {
-            $output->writeln("Slave mode is already running");
-            exit(0);
+        $existingPid = JsonLock::read('slave.pid', null, $repo_dir);
+        if ($existingPid && Shell::isRunning($existingPid)) {
+            $output->writeln("Slave mode is already running (PID: {$existingPid})");
+            return Command::SUCCESS;
         }
-        JsonLock::delete( $repo_dir );
+        // Clear only the stale PID, not the entire lock file
+        JsonLock::write('slave.pid', null, $repo_dir);
+        JsonLock::save($repo_dir);
         $remoteName = Git::remoteName( $repo_dir );
         $remoteurl = Git::RemoteUrl( $repo_dir );
 
@@ -94,7 +97,7 @@ Class GitSlave extends BaseSlaveCommand {
         // execute command
         $command = SCRIPT_DIR."git-repo-watcher -d '$repo_dir' -o $remoteName -b $branch -h ".SCRIPT_DIR."git-repo-watcher-hooks -i $increment";
 
-        return $this->runSlaveCommand(
+        $result = $this->runSlaveCommand(
             $command,
             $daemon,
             $increment,
@@ -109,6 +112,14 @@ Class GitSlave extends BaseSlaveCommand {
             $repo_dir,
             $output
         );
+
+        // Also write unified watcher PID
+        $pid = JsonLock::read('slave.pid', null, $repo_dir);
+        if ($pid) {
+            DeploymentState::setWatcherPid($repo_dir, (int)$pid);
+        }
+
+        return $result;
     }
 
 }

@@ -45,6 +45,7 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
 
@@ -214,15 +215,13 @@ Class GitPull extends Command {
                     $logMsg("Release detected: {$activeRelease} — switching to release strategy");
                     $output->writeln("<info>Release detected: {$activeRelease} — switching from branch to release strategy</info>");
 
-                    // Update node config — keep deployment.branch so stop
-                    // can still find containers started under branch strategy
+                    // Update unified deployment state
+                    DeploymentState::setStrategy($repo_dir, 'release');
+
+                    // Update node config — keep deployment.branch for stop
                     $nodeData['deployment']['strategy'] = 'release';
                     unset($nodeData['deployment']['awaiting_release']);
                     NodeConfig::save($projectName, $nodeData);
-
-                    // Update protocol.json in repo
-                    Json::write('deployment.strategy', 'release', $repo_dir);
-                    Json::save($repo_dir);
 
                     AuditLog::logConfig($repo_dir, 'strategy_switch', "branch -> release (detected {$activeRelease})");
 
