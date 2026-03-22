@@ -421,9 +421,17 @@ else
         step_ok "Docker $(docker --version 2>/dev/null | head -n1)"
       else
         start_spinner "Installing Docker..."
-        run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
-          && step_ok "Docker installed" \
-          || step_fail "Failed to install Docker"
+        if command_exists amazon-linux-extras; then
+          # Amazon Linux 2
+          run_silent "docker" bash -c "sudo amazon-linux-extras enable docker && sudo yum install -y docker" \
+            && step_ok "Docker installed" \
+            || step_fail "Failed to install Docker"
+        else
+          # Amazon Linux 2023
+          run_silent "docker" sudo dnf install -y docker \
+            && step_ok "Docker installed" \
+            || step_fail "Failed to install Docker"
+        fi
       fi
 
       start_spinner "Enabling Docker service..."
