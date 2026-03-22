@@ -460,15 +460,9 @@ else
       elif command_exists docker-compose; then
         step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
       else
-        start_spinner "Installing Docker Compose plugin..."
-        # Try the dnf/yum plugin package first (preferred), fall back to standalone binary
+        start_spinner "Installing Docker Compose..."
+        # AL2023 repos don't include docker-compose-plugin — install standalone binary
         run_silent "docker-compose" bash -c "
-          if command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y docker-compose-plugin 2>/dev/null && exit 0
-          elif command -v yum >/dev/null 2>&1; then
-            sudo yum install -y docker-compose-plugin 2>/dev/null && exit 0
-          fi
-          # Standalone binary fallback
           curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /tmp/docker-compose \
             && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose \
             && sudo chmod +x /usr/local/bin/docker-compose
