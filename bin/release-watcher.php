@@ -31,6 +31,11 @@ $interval = (int) ($options['interval'] ?? 60);
 
 $repo_dir = realpath($repo_dir) . DIRECTORY_SEPARATOR;
 
+// Anchor working directory to repo_dir so that shell commands don't break
+// when a release directory is removed underneath us. This MUST happen before
+// any shell commands or file operations. Re-applied at the top of each cycle.
+chdir($repo_dir);
+
 /**
  * Log a message with timestamp.
  */
@@ -61,6 +66,11 @@ while (true) {
     $pollCount++;
 
     try {
+        // Re-anchor working directory every cycle. A previous cycle may have
+        // deleted the release dir we were sitting in, causing every subsequent
+        // shell command to fail with "getcwd: cannot access parent directories".
+        chdir($repo_dir);
+
         // Clear singleton caches so we re-read files from disk each cycle
         JsonLock::clearInstances();
         Json::clearInstances();
