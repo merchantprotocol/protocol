@@ -66,12 +66,14 @@ Class GitSlave extends BaseSlaveCommand {
         $output->writeln('<comment>Continuously monitoring git repo for remote changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
-        $running = Shell::isLockedPIDStillRunning();
-        if ($running) {
-            $output->writeln("Slave mode is already running");
-            exit(0);
+        $existingPid = JsonLock::read('slave.pid', null, $repo_dir);
+        if ($existingPid && Shell::isRunning($existingPid)) {
+            $output->writeln("Slave mode is already running (PID: {$existingPid})");
+            return Command::SUCCESS;
         }
-        JsonLock::delete( $repo_dir );
+        // Clear only the stale PID, not the entire lock file
+        JsonLock::write('slave.pid', null, $repo_dir);
+        JsonLock::save($repo_dir);
         $remoteName = Git::remoteName( $repo_dir );
         $remoteurl = Git::RemoteUrl( $repo_dir );
 

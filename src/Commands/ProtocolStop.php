@@ -196,7 +196,7 @@ Class ProtocolStop extends Command {
 
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'still installed' : 'removed';
 
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
+        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'slave.pid';
         $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
         $watcherStatus = (!$watcherPid || !Shell::isRunning($watcherPid)) ? 'stopped' : 'still running';
 

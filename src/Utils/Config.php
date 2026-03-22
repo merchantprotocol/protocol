@@ -239,5 +239,14 @@ Class Config
 		//return an instance of this instantiation
 		return self::$instances[$file];
 	}
+
+	/**
+	 * Clear cached singleton instances.
+	 * Required for long-running processes (daemons) to re-read files from disk.
+	 */
+	public static function clearInstances(): void
+	{
+		static::$instances = [];
+	}
 	
 }

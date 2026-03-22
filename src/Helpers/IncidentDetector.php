@@ -64,7 +64,7 @@ class IncidentDetector
             // Check for release watcher not running when it should be
             if ($repoDir) {
                 $strategy = Json::read('deployment.strategy', 'branch', $repoDir);
-                $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
+                $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'slave.pid';
                 $watcherPid = JsonLock::read($watcherPidKey, null, $repoDir);
                 if ($watcherPid && !Shell::isRunning($watcherPid)) {
                     $issues[] = ['level' => 'P3', 'message' => ucfirst($strategy) . ' watcher (PID ' . $watcherPid . ') is not running'];

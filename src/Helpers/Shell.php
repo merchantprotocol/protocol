@@ -34,6 +34,7 @@ namespace Gitcd\Helpers;
 
 use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
+use Gitcd\Utils\JsonLock;
 
 Class Shell
 {
@@ -188,7 +189,7 @@ Class Shell
     public static function run( $command, &$return_var = null )
     {
         $response = null;
-        exec("$command 2>&1", $response, $return_var);
+        exec($command, $response, $return_var);
 
         if (is_array($response)) {
             $response = implode(PHP_EOL, $response);
@@ -233,7 +234,7 @@ Class Shell
      */
     public static function isLockedPIDStillRunning()
     {
-        $pid = Json::read('slave.pid');
+        $pid = JsonLock::read('slave.pid');
         return self::isRunning( $pid );
     }
 

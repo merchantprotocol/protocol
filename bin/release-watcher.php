@@ -36,20 +36,39 @@ $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', 
 
 while (true) {
     try {
+        // Clear singleton caches so we re-read files from disk each cycle
+        JsonLock::clearInstances();
+        Json::clearInstances();
+
+        // Refresh credentials before each poll (tokens expire after 1 hour)
+        if (GitHubApp::isConfigured()) {
+            $creds = GitHubApp::loadCredentials();
+            $appOwner = $creds['owner'] ?? null;
+            if ($appOwner) {
+                $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                if (!$refreshed) {
+                    echo "[" . date('Y-m-d H:i:s') . "] WARNING: Failed to refresh GitHub App credentials\n";
+                }
+            }
+        }
+
         $activeRelease = GitHub::getVariable($pointerName, $repo_dir);
         $currentRelease = JsonLock::read('release.current', null, $repo_dir);
 
+        if (!$activeRelease) {
+            echo "[" . date('Y-m-d H:i:s') . "] WARNING: Could not read {$pointerName} — API error or variable not set\n";
+            sleep($interval);
+            continue;
+        }
+
+        if ($activeRelease === $currentRelease) {
+            // Already deployed — no action needed
+            sleep($interval);
+            continue;
+        }
+
         if ($activeRelease && $activeRelease !== $currentRelease) {
             echo "[" . date('Y-m-d H:i:s') . "] New release detected: {$activeRelease} (was: " . ($currentRelease ?: 'none') . ")\n";
-
-            // Refresh GitHub App credentials if configured (tokens expire after 1 hour)
-            if (GitHubApp::isConfigured()) {
-                $creds = GitHubApp::loadCredentials();
-                $appOwner = $creds['owner'] ?? null;
-                if ($appOwner) {
-                    GitHubApp::refreshGitCredentials($appOwner);
-                }
-            }
 
             // Fetch latest tags
             $remote = Git::remoteName($repo_dir) ?: 'origin';
@@ -118,23 +137,27 @@ while (true) {
                             AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
                             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
                             echo "[" . date('Y-m-d H:i:s') . "] Auto-promoted {$activeRelease} to production\n";
+
+                            // Only update release tracking on successful promotion
+                            JsonLock::write('release.previous', $currentRelease, $repo_dir);
+                            JsonLock::write('release.current', $activeRelease, $repo_dir);
+                            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
+                            JsonLock::save($repo_dir);
                         } else {
-                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Auto-promote failed\n";
+                            echo "[" . date('Y-m-d H:i:s') . "] ERROR: Auto-promote failed for {$activeRelease} — will retry next cycle\n";
                         }
                     } else {
                         echo "[" . date('Y-m-d H:i:s') . "] Shadow ready. Run 'protocol shadow:start' to promote.\n";
+                        // Track that the shadow is built (but not promoted yet)
+                        JsonLock::write('release.shadow', $activeRelease, $repo_dir);
+                        JsonLock::save($repo_dir);
                     }
                 } else {
                     BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::SHADOW_HTTP, 'failed');
                     AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
-                    echo "[" . date('Y-m-d H:i:s') . "] Health check FAILED for {$activeRelease}\n";
+                    echo "[" . date('Y-m-d H:i:s') . "] Health check FAILED for {$activeRelease} — will retry next cycle\n";
+                    // Do NOT update release.current — failed releases must be retried
                 }
-
-                // Update release tracking
-                JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                JsonLock::write('release.current', $activeRelease, $repo_dir);
-                JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                JsonLock::save($repo_dir);
 
             } else {
                 // ── Standard in-place deployment ─────────────────

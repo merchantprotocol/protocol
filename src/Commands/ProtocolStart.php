@@ -318,7 +318,7 @@ Class ProtocolStart extends Command {
         $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
 
         $watcherType = $strategy === 'release' ? 'release' : 'git';
-        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'git.slave.pid';
+        $watcherPidKey = $strategy === 'release' ? 'release.slave.pid' : 'slave.pid';
         $watcherPid = JsonLock::read($watcherPidKey, null, $repo_dir);
         $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
 
