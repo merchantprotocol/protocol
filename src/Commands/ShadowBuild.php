@@ -153,8 +153,9 @@ Class ShadowBuild extends Command {
         });
 
         // ── Stage 5: Write shadow env ────────────────────────────
-        $runner->run('Configuring shadow ports', function() use ($releaseDir, $version) {
-            BlueGreen::writeReleaseEnv($releaseDir, BlueGreen::SHADOW_HTTP, BlueGreen::SHADOW_HTTPS, $version);
+        [$shadowHttp, $shadowHttps] = BlueGreen::findAvailableShadowPorts();
+        $runner->run('Configuring shadow ports', function() use ($releaseDir, $version, $shadowHttp, $shadowHttps) {
+            BlueGreen::writeReleaseEnv($releaseDir, $shadowHttp, $shadowHttps, $version);
         });
 
         // ── Stage 6: Build containers (slow) ─────────────────────
@@ -166,17 +167,17 @@ Class ShadowBuild extends Command {
 
         // ── Stage 7: Health checks ───────────────────────────────
         if (!$skipHealth) {
-            $runner->run('Running health checks', function() use ($repo_dir, $version) {
+            $runner->run('Running health checks', function() use ($repo_dir, $version, $shadowHttp) {
                 $healthChecks = Json::read('bluegreen.health_checks', [], $repo_dir);
-                if (!BlueGreen::runHealthChecks($repo_dir, BlueGreen::SHADOW_HTTP, $healthChecks, $version)) {
-                    throw new \RuntimeException('Health checks failed on shadow port ' . BlueGreen::SHADOW_HTTP);
+                if (!BlueGreen::runHealthChecks($repo_dir, $shadowHttp, $healthChecks, $version)) {
+                    throw new \RuntimeException('Health checks failed on shadow port ' . $shadowHttp);
                 }
             }, 'PASS');
         }
 
         // ── Stage 8: Update state ────────────────────────────────
-        $runner->run('Updating deployment state', function() use ($repo_dir, $version) {
-            BlueGreen::setReleaseState($repo_dir, $version, BlueGreen::SHADOW_HTTP, 'ready');
+        $runner->run('Updating deployment state', function() use ($repo_dir, $version, $shadowHttp) {
+            BlueGreen::setReleaseState($repo_dir, $version, $shadowHttp, 'ready');
             BlueGreen::setShadowVersion($repo_dir, $version);
             AuditLog::logShadow($repo_dir, 'build', $version, $version);
         });
@@ -185,7 +186,7 @@ Class ShadowBuild extends Command {
         $runner->writeSummary();
 
         $output->writeln('');
-        $output->writeln("  <info>Shadow build complete.</info> {$version} running on port " . BlueGreen::SHADOW_HTTP);
+        $output->writeln("  <info>Shadow build complete.</info> {$version} running on port {$shadowHttp}");
         $output->writeln("  Releases dir: <comment>{$releasesBase}</comment>");
         $output->writeln('  Promote to production: <comment>protocol shadow:start</comment>');
 
