@@ -42,6 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\Docker;
 use Gitcd\Utils\Json;
 
 Class DockerPull extends Command {
@@ -98,7 +99,8 @@ Class DockerPull extends Command {
 
         if ($usesBuild) {
             $output->writeln('<comment>Building Docker image from source</comment>');
-            Shell::passthru("docker compose -f " . escapeshellarg($composePath) . " build");
+            $dockerCommand = Docker::getDockerCommand();
+            Shell::passthru("{$dockerCommand} -f " . escapeshellarg($composePath) . " build");
         } else {
             $image = $input->getArgument('image') ?: Json::read('docker.image', false, $repo_dir);
             if ($image) {

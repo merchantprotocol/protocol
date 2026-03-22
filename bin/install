@@ -471,12 +471,29 @@ else
           step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
         else
           start_spinner "Installing Docker Compose standalone..."
+          # AL2023 repos don't include docker-compose-plugin — install standalone binary
           run_silent "docker-compose" bash -c "
             curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /tmp/docker-compose \
               && sudo mv /tmp/docker-compose /usr/local/bin/docker-compose \
               && sudo chmod +x /usr/local/bin/docker-compose
           " && step_ok "Docker Compose installed" \
             || step_fail "Failed to install Docker Compose"
+        fi
+      fi
+
+      # Crontab (cronie) — needed for reboot recovery
+      if command_exists crontab; then
+        step_ok "Crontab available"
+      else
+        start_spinner "Installing cronie..."
+        if command_exists dnf; then
+          run_silent "cronie" bash -c "sudo dnf install -y cronie && sudo systemctl enable crond && sudo systemctl start crond" \
+            && step_ok "Cronie installed" \
+            || step_fail "Failed to install cronie"
+        else
+          run_silent "cronie" bash -c "sudo yum install -y cronie && sudo systemctl enable crond && sudo systemctl start crond" \
+            && step_ok "Cronie installed" \
+            || step_fail "Failed to install cronie"
         fi
       fi
 
@@ -575,6 +592,33 @@ else
           sudo systemctl start containerd.service
         "
         step_ok "Docker service running"
+
+        # Docker Compose — check both plugin (v2) and standalone
+        if command_exists docker && docker compose version >/dev/null 2>&1; then
+          step_ok "Docker Compose $(docker compose version 2>/dev/null | head -n1)"
+        elif command_exists docker-compose; then
+          step_ok "Docker Compose $(docker-compose --version 2>/dev/null | head -n1)"
+        else
+          start_spinner "Installing Docker Compose..."
+          run_silent "docker-compose" bash -c "
+            # Try plugin package first (preferred)
+            sudo apt-get install -y docker-compose-plugin 2>/dev/null && exit 0
+            # Standalone binary fallback
+            sudo curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m) -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+          " && step_ok "Docker Compose installed" \
+            || step_fail "Failed to install Docker Compose"
+      fi
+
+      # Crontab (cron) — needed for reboot recovery
+      if command_exists crontab; then
+        step_ok "Crontab available"
+      else
+        start_spinner "Installing cron..."
+        run_silent "cron" bash -c "sudo apt-get install -y cron && sudo systemctl enable cron && sudo systemctl start cron" \
+          && step_ok "Cron installed" \
+          || step_fail "Failed to install cron"
       fi
 
       section "Dependencies"

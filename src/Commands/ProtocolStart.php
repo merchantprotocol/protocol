@@ -297,8 +297,9 @@ Class ProtocolStart extends Command {
             $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
 
             if ($usesBuild) {
-                $runner->log("docker compose build");
-                Shell::run("docker compose -f " . escapeshellarg($composePath) . " build 2>&1");
+                $dockerCmd = Docker::getDockerCommand();
+                $runner->log("{$dockerCmd} build");
+                Shell::run("{$dockerCmd} -f " . escapeshellarg($composePath) . " build 2>&1");
             } else {
                 $image = Json::read('docker.image', false, $repo_dir);
                 if ($image) {
@@ -310,14 +311,30 @@ Class ProtocolStart extends Command {
             // Rebuild containers (inject secrets if encrypted or AWS mode)
             $dockerCommand = Docker::getDockerCommand();
             $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
-            $envFlag = $tmpEnv ? ' --env-file ' . escapeshellarg($tmpEnv) : '';
-
-            $runner->log("{$dockerCommand}{$envFlag} up --build -d");
-            Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand}{$envFlag} up --build -d 2>&1");
 
             if ($tmpEnv) {
+                // Write secrets into the project dir so compose can reference it
+                $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
+                copy($tmpEnv, $secretsFile);
+                chmod($secretsFile, 0600);
                 unlink($tmpEnv);
-                $runner->log("Secrets temp file cleaned up");
+
+                // Generate a compose override that injects env_file into every service
+                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+
+                $runner->log("{$dockerCommand} up --build -d (with secrets injected into containers)");
+                Shell::run("cd " . escapeshellarg($repo_dir)
+                    . " && {$dockerCommand} -f " . escapeshellarg($composePath)
+                    . " -f " . escapeshellarg($overrideFile)
+                    . " up --build -d 2>&1");
+
+                // Clean up secrets files immediately
+                unlink($secretsFile);
+                unlink($overrideFile);
+                $runner->log("Secrets temp files cleaned up");
+            } else {
+                $runner->log("{$dockerCommand} up --build -d");
+                Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
             }
 
             // Run composer install inside container if needed
