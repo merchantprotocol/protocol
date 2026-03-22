@@ -879,12 +879,17 @@ Class ProtocolInit extends Command {
      */
     protected function testRepoAccess(string $gitRemote): bool
     {
-        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1");
-        // ls-remote returns refs on success, error messages on failure
+        $returnVar = 0;
+        $result = Shell::run("GIT_TERMINAL_PROMPT=0 git ls-remote " . escapeshellarg($gitRemote) . " HEAD 2>&1", $returnVar);
+        // ls-remote exits 0 on success (even for empty repos with no refs).
+        // On failure it exits non-zero and/or prints error messages.
+        if ($returnVar !== 0) {
+            return false;
+        }
         if (str_contains($result, 'fatal:') || str_contains($result, 'ERROR') || str_contains($result, 'Permission denied')) {
             return false;
         }
-        return !empty(trim($result));
+        return true;
     }
 
     /**
