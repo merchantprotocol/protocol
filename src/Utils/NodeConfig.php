@@ -261,7 +261,7 @@ class NodeConfig
     {
         $strategy = $data['deployment']['strategy'] ?? 'none';
         $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
-        $currentRelease = $data['release']['current'] ?? null;
+        $currentRelease = $data['release']['active'] ?? $data['release']['current'] ?? null;
         $currentBranch = $data['deployment']['branch'] ?? $data['git']['branch'] ?? null;
         $projectName = $data['name'] ?? 'unknown';
 
