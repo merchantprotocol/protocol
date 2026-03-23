@@ -3,23 +3,41 @@
  * Centralized logging for Protocol CLI.
  *
  * All log output goes to a single file: /var/log/protocol/protocol.log
- * Every entry is tagged with a component label for easy filtering:
- *   [HH:MM:SS] [shell] git pull origin main
- *   [HH:MM:SS] [shell]   → exit=0 (0.3s)
- *   [HH:MM:SS] [docker] pulling image ghcr.io/...
- *   [HH:MM:SS] [config] cloning config repo
+ * Every entry is tagged with a component label and log level:
+ *   [HH:MM:SS] [INFO] [deploy] new release detected: v2.1.0
+ *   [HH:MM:SS] [ERROR] [deploy] clone failed for v2.1.0
+ *   [HH:MM:SS] [INFO] [deploy] strategy=release active=v2.1.0 current=v2.0.9
  *
- * Usage:
- *   Log::write('shell', 'running command: git pull');
- *   Log::write('docker', 'container started');
- *   Log::cmd('git pull origin main', $output, $exitCode, $duration);
+ * Log levels (controlled by PROTOCOL_LOG_LEVEL env var, default: info):
+ *   Log::debug('tag', 'message');   // suppressed by default
+ *   Log::info('tag', 'message');    // default threshold
+ *   Log::warn('tag', 'message');    // always shown
+ *   Log::error('tag', 'message');   // always shown
+ *
+ * Structured variable logging:
+ *   Log::context('deploy', ['strategy' => 'release', 'version' => 'v2.1.0']);
+ *   // Output: [HH:MM:SS] [INFO] [deploy] strategy=release version=v2.1.0
  */
 namespace Gitcd\Helpers;
 
 class Log
 {
+    const DEBUG = 0;
+    const INFO  = 1;
+    const WARN  = 2;
+    const ERROR = 3;
+
     private static ?string $logFile = null;
     private static bool $initialized = false;
+    private static ?int $level = null;
+    private static ?string $operationId = null;
+
+    private static array $levelNames = [
+        self::DEBUG => 'DEBUG',
+        self::INFO  => 'INFO',
+        self::WARN  => 'WARN',
+        self::ERROR => 'ERROR',
+    ];
 
     /**
      * Override the log file path. Use this to redirect all logging
@@ -44,6 +62,56 @@ class Log
     }
 
     /**
+     * Get the configured log level threshold.
+     * Set via PROTOCOL_LOG_LEVEL env var (debug, info, warn, error).
+     */
+    public static function getLevel(): int
+    {
+        if (self::$level !== null) {
+            return self::$level;
+        }
+
+        $env = strtolower(getenv('PROTOCOL_LOG_LEVEL') ?: 'info');
+        $map = [
+            'debug' => self::DEBUG,
+            'info'  => self::INFO,
+            'warn'  => self::WARN,
+            'error' => self::ERROR,
+        ];
+
+        self::$level = $map[$env] ?? self::INFO;
+        return self::$level;
+    }
+
+    /**
+     * Override the log level programmatically.
+     */
+    public static function setLevel(int $level): void
+    {
+        self::$level = $level;
+    }
+
+    /**
+     * Generate or retrieve the current operation ID.
+     * Used to correlate log lines across a single command invocation.
+     */
+    public static function getOperationId(): string
+    {
+        if (self::$operationId === null) {
+            self::$operationId = substr(bin2hex(random_bytes(2)), 0, 4);
+        }
+        return self::$operationId;
+    }
+
+    /**
+     * Set a specific operation ID (useful when resuming or correlating).
+     */
+    public static function setOperationId(string $id): void
+    {
+        self::$operationId = $id;
+    }
+
+    /**
      * Initialize the log file path, creating directories as needed.
      */
     private static function initLogFile(): string
@@ -51,10 +119,10 @@ class Log
         $logDir = '/var/log/protocol/';
 
         if (!is_dir($logDir)) {
-            @Shell::run("sudo mkdir -p /var/log/protocol 2>/dev/null");
+            @exec("sudo mkdir -p /var/log/protocol 2>/dev/null");
         }
         if (is_dir($logDir) && !is_writable($logDir)) {
-            @Shell::run("sudo chmod 1777 /var/log/protocol 2>/dev/null");
+            @exec("sudo chmod 1777 /var/log/protocol 2>/dev/null");
         }
 
         // Fallback if /var/log/protocol still isn't available
@@ -76,97 +144,95 @@ class Log
     }
 
     /**
-     * Write a tagged log line.
-     *
-     * @param string $tag   Component tag (e.g. 'shell', 'docker', 'config', 'git', 'deploy')
-     * @param string $message  Log message
+     * Write a tagged, leveled log line.
      */
-    public static function write(string $tag, string $message): void
+    public static function write(string $tag, string $message, int $level = self::INFO): void
     {
+        if ($level < self::getLevel()) {
+            return;
+        }
+
         $logFile = self::getLogFile();
         $timestamp = date('H:i:s');
+        $levelName = self::$levelNames[$level] ?? 'INFO';
+        $opId = self::getOperationId();
 
         // Write session header on first call
         if (!self::$initialized) {
             self::$initialized = true;
             @file_put_contents(
                 $logFile,
-                "\n[{$timestamp}] [protocol] === Session started at " . date('Y-m-d H:i:s') . " (PID " . getmypid() . ") ===\n",
+                "\n[{$timestamp}] [INFO] [protocol] op={$opId} === Session started at " . date('Y-m-d H:i:s') . " (PID " . getmypid() . ") ===\n",
                 FILE_APPEND | LOCK_EX
             );
         }
 
         @file_put_contents(
             $logFile,
-            "[{$timestamp}] [{$tag}] {$message}\n",
+            "[{$timestamp}] [{$levelName}] [{$tag}] op={$opId} {$message}\n",
             FILE_APPEND | LOCK_EX
         );
     }
 
     /**
-     * Log a shell command execution with its output and result.
-     *
-     * @param string      $command   The command that was run
-     * @param string|null $output    Command stdout/stderr
-     * @param int         $exitCode  Process exit code
-     * @param float|null  $duration  Execution time in seconds
+     * Log at DEBUG level. Suppressed unless PROTOCOL_LOG_LEVEL=debug.
      */
-    public static function cmd(string $command, ?string $output, int $exitCode, ?float $duration = null): void
+    public static function debug(string $tag, string $message): void
     {
-        $safeCmd = self::sanitize($command);
-        $isSensitive = self::isSensitiveCommand($command);
-
-        $durationStr = $duration !== null ? ' (' . round($duration, 2) . 's)' : '';
-
-        self::write('shell', $safeCmd);
-
-        // Never log output of sensitive commands (API calls with tokens, secrets)
-        if (!$isSensitive && $output !== null && trim($output) !== '') {
-            $lines = explode("\n", trim($output));
-            $total = count($lines);
-            $lines = array_slice($lines, 0, 50);
-            foreach ($lines as $line) {
-                self::write('shell', "  | " . self::sanitize($line));
-            }
-            if ($total > 50) {
-                self::write('shell', "  | ... ({$total} total lines, truncated)");
-            }
-        } elseif ($isSensitive && $output !== null && trim($output) !== '') {
-            self::write('shell', "  | [output redacted — sensitive command]");
-        }
-
-        $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
-        self::write('shell', "  → {$status}{$durationStr}");
+        self::write($tag, $message, self::DEBUG);
     }
 
     /**
-     * Check if a command is sensitive (output should not be logged).
+     * Log at INFO level. Default threshold.
      */
-    private static function isSensitiveCommand(string $command): bool
+    public static function info(string $tag, string $message): void
     {
-        $patterns = [
-            'Authorization:',
-            'Bearer ',
-            'x-access-token',
-            'api.github.com',
-            'gh api',
-            'credential',
-            'secret',
-            'token',
-        ];
-        $lower = strtolower($command);
-        foreach ($patterns as $pattern) {
-            if (stripos($lower, strtolower($pattern)) !== false) {
-                return true;
+        self::write($tag, $message, self::INFO);
+    }
+
+    /**
+     * Log at WARN level.
+     */
+    public static function warn(string $tag, string $message): void
+    {
+        self::write($tag, $message, self::WARN);
+    }
+
+    /**
+     * Log at ERROR level.
+     */
+    public static function error(string $tag, string $message): void
+    {
+        self::write($tag, $message, self::ERROR);
+    }
+
+    /**
+     * Log structured key-value context at a decision point.
+     *
+     * Usage:
+     *   Log::context('deploy', ['strategy' => 'release', 'version' => 'v2.1.0']);
+     *   // Output: [HH:MM:SS] [INFO] [deploy] op=a3f2 strategy=release version=v2.1.0
+     */
+    public static function context(string $tag, array $data, int $level = self::INFO): void
+    {
+        $parts = [];
+        foreach ($data as $key => $value) {
+            if ($value === null) {
+                $value = 'null';
+            } elseif (is_bool($value)) {
+                $value = $value ? 'true' : 'false';
+            } elseif (is_array($value)) {
+                $value = implode(',', $value);
             }
+            $parts[] = "{$key}={$value}";
         }
-        return false;
+        self::write($tag, implode(' ', $parts), $level);
     }
 
     /**
      * Sanitize a string by masking tokens, keys, and secrets.
      */
-    private static function sanitize(string $text): string
+    public static function sanitize(string $text): string
     {
         // GitHub access tokens: x-access-token:ghs_xxxx@
         $text = preg_replace('/x-access-token:[^@]+@/', 'x-access-token:***@', $text);
@@ -180,13 +246,5 @@ class Log
         $text = preg_replace('/\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/', 'JWT:***', $text);
 
         return $text;
-    }
-
-    /**
-     * Log an error.
-     */
-    public static function error(string $tag, string $message): void
-    {
-        self::write($tag, "ERROR: {$message}");
     }
 }

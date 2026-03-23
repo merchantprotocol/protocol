@@ -101,7 +101,7 @@ Class GitPull extends Command {
         $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
 
         $logMsg = function(string $msg) {
-            Log::write('git:pull', $msg);
+            Log::info('git:pull', $msg);
         };
 
         $logMsg("enter execute() repo_dir={$repo_dir}");

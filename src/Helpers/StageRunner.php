@@ -50,7 +50,7 @@ class StageRunner
     public function log(string $message): void
     {
         $tag = $this->currentStage ? 'stage:' . $this->currentStage : 'stage';
-        Log::write($tag, $message);
+        Log::info($tag, $message);
 
         if ($this->verbose) {
             $timestamp = date('H:i:s');
