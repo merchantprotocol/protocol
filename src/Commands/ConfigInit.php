@@ -121,7 +121,8 @@ Class ConfigInit extends Command {
 
         $configrepo = Config::repo($repo_dir);
         $basedir = dirname($repo_dir) . DIRECTORY_SEPARATOR;
-        $foldername = basename($repo_dir) . '-config';
+        $configLocal = Json::read('configuration.local', false, $repo_dir);
+        $foldername = $configLocal ? basename($configLocal) : basename($repo_dir) . '-config';
         $preExistingRemoteUrl = Json::read('configuration.remote', false, $repo_dir);
         $hasExistingConfig = is_dir($configrepo) && is_dir($configrepo . '.git');
 
