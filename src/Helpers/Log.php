@@ -22,6 +22,15 @@ class Log
     private static bool $initialized = false;
 
     /**
+     * Override the log file path. Use this to redirect all logging
+     * to a different file (e.g. watcher.log for the release watcher daemon).
+     */
+    public static function setFile(string $path): void
+    {
+        self::$logFile = $path;
+    }
+
+    /**
      * Resolve and return the log file path.
      */
     public static function getLogFile(): string
