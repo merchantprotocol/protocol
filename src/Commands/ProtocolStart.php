@@ -228,6 +228,7 @@ Class ProtocolStart extends Command {
         $ctx['portOverrideFile'] = $portOverrideFile;
 
         $this->startContainers($dir, $ctx);
+        $this->cleanupOldReleases($dir, $ctx);
         // Spawn watchers AFTER startContainers sets release.active —
         // otherwise the watcher sees target != active and triggers a
         // duplicate stop+start cycle that kills what we just started.
@@ -747,6 +748,48 @@ Class ProtocolStart extends Command {
                 $runner->log("Health check: watcherPid={$watcherPid}");
                 if ($watcherPid && !Shell::isRunning($watcherPid)) {
                     throw new \RuntimeException('Deployment watcher is not running');
+                }
+            }
+        }, 'PASS');
+    }
+
+    /**
+     * Stop and remove old release containers, keeping only the current
+     * version and the one previous (for rollback).
+     */
+    private function cleanupOldReleases(string $dir, array $ctx): void
+    {
+        if (!in_array($ctx['strategy'], ['release', 'bluegreen'])) {
+            return;
+        }
+
+        $runner = $this->runner;
+        $runner->run('Cleanup old release containers', function() use ($runner, $dir, $ctx) {
+            $releases = BlueGreen::listReleases($dir);
+            if (count($releases) <= 2) {
+                $runner->log("Only " . count($releases) . " release(s) — nothing to clean up");
+                return;
+            }
+
+            // Sort versions ascending so we can keep the last two
+            usort($releases, 'version_compare');
+            $keep = array_slice($releases, -2);
+            $remove = array_diff($releases, $keep);
+
+            $runner->log("Keeping: " . implode(', ', $keep));
+            $runner->log("Removing: " . implode(', ', $remove));
+
+            foreach ($remove as $version) {
+                $releaseDir = BlueGreen::getReleaseDir($dir, $version);
+                $containerName = ContainerName::resolveFromDir($releaseDir);
+                if ($containerName && Docker::isDockerContainerRunning($containerName)) {
+                    $runner->log("Stopping container {$containerName} (release {$version})");
+                    BlueGreen::stopContainers($releaseDir);
+                }
+                // Remove the stopped container entirely so it doesn't show in docker ps -a
+                if ($containerName) {
+                    Shell::run("docker rm -f " . escapeshellarg($containerName) . " 2>/dev/null");
+                    $runner->log("Removed container {$containerName}");
                 }
             }
         }, 'PASS');
