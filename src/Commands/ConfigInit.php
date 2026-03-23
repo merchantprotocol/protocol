@@ -47,6 +47,7 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\FileEncryption;
 use Gitcd\Helpers\GitHub;
+use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Commands\Init\DotMenuTrait;
 
@@ -469,12 +470,25 @@ Class ConfigInit extends Command {
         $output->writeln("    <fg=white>{$remoteUrl}</>");
         $output->writeln('');
 
+        // If GitHub App is configured, refresh credentials and resolve URL
+        $cloneUrl = $remoteUrl;
+        if (GitHubApp::isConfigured()) {
+            $owner = '';
+            if (preg_match('#github\.com[:/]([^/]+)/#', $remoteUrl, $m)) {
+                $owner = $m[1];
+            }
+            if ($owner) {
+                GitHubApp::refreshGitCredentials($owner);
+            }
+            $cloneUrl = GitHubApp::resolveUrl($remoteUrl);
+        }
+
         if (!is_dir($configrepo)) {
             Shell::run("mkdir -p '$configrepo'");
         }
         if (!is_dir($basedir . $foldername . DIRECTORY_SEPARATOR . '.git')) {
             $arrInput = new ArrayInput([
-                'remote' => $remoteUrl,
+                'remote' => $cloneUrl,
                 'repo_dir' => $basedir . $foldername,
                 '--dir' => $repo_dir
             ]);
