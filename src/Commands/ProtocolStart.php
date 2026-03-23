@@ -234,6 +234,7 @@ Class ProtocolStart extends Command {
                 // Start the release watcher daemon
                 $runner->log("Running deploy:slave");
                 $app->find('deploy:slave')->run($arrInput, $subOutput);
+                $runner->log("deploy:slave returned");
 
             } else {
                 // Legacy branch-based deployment mode

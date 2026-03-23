@@ -72,8 +72,28 @@ Class DeployReleaseSlave extends Command {
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $repo_dir = Dir::realpath($input->getOption('dir'));
+        try {
+            return $this->doExecute($input, $output);
+        } catch (\Throwable $e) {
+            Log::error('deploy:slave', "uncaught exception: {$e->getMessage()} at {$e->getFile()}:{$e->getLine()}");
+            $output->writeln('<error>deploy:slave failed: ' . $e->getMessage() . '</error>');
+            return Command::FAILURE;
+        }
+    }
+
+    private function doExecute(InputInterface $input, OutputInterface $output): int
+    {
+        $rawDir = $input->getOption('dir');
+        $repo_dir = Dir::realpath($rawDir);
+
+        Log::context('deploy:slave', [
+            'event'    => 'init',
+            'raw_dir'  => $rawDir ?: '(null)',
+            'repo_dir' => $repo_dir ?: '(null)',
+        ]);
+
         Git::checkInitializedRepo($output, $repo_dir);
+        Log::debug('deploy:slave', "repo check passed");
 
         $interval = (int) $input->getOption('interval');
 
@@ -84,6 +104,8 @@ Class DeployReleaseSlave extends Command {
 
         // Check if already running
         $pid = DeploymentState::watcherPid($repo_dir);
+        Log::debug('deploy:slave', "existing watcher pid=" . ($pid ?: 'none'));
+
         if ($pid && Shell::isRunning($pid)) {
             Log::info('deploy:slave', "watcher already running (PID: {$pid})");
             $output->writeln("<comment>Release watcher is already running (PID: {$pid})</comment>");
@@ -91,6 +113,8 @@ Class DeployReleaseSlave extends Command {
         }
 
         $watcherScript = SCRIPT_DIR . 'release-watcher.php';
+        Log::debug('deploy:slave', "SCRIPT_DIR=" . SCRIPT_DIR . " watcher_script={$watcherScript} exists=" . (is_file($watcherScript) ? 'yes' : 'no'));
+
         if (!is_file($watcherScript)) {
             Log::error('deploy:slave', "watcher script not found at {$watcherScript}");
             $output->writeln('<error>Release watcher script not found at: ' . $watcherScript . '</error>');
@@ -112,6 +136,8 @@ Class DeployReleaseSlave extends Command {
             chdir($repo_dir);
             Log::warn('deploy:slave', "parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}");
             $output->writeln("<comment>Parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}</comment>");
+        } else {
+            Log::debug('deploy:slave', "parent cwd={$parentCwd}");
         }
 
         $logFile = Log::getLogFile();
@@ -121,18 +147,43 @@ Class DeployReleaseSlave extends Command {
             . " --interval={$interval}"
             . " >> " . escapeshellarg($watcherLog) . " 2>&1 & echo $!";
 
+        Log::context('deploy:slave', [
+            'event'          => 'spawning_daemon',
+            'cmd'            => $cmd,
+            'watcher_log'    => $watcherLog,
+            'watcher_script' => $watcherScript,
+            'script_exists'  => is_file($watcherScript) ? 'yes' : 'no',
+            'cwd'            => getcwd() ?: 'FALSE',
+        ]);
+
         $newPid = trim(Shell::run($cmd));
+
+        Log::context('deploy:slave', [
+            'event'      => 'spawn_result',
+            'raw_pid'    => $newPid ?: '(empty)',
+            'is_numeric' => is_numeric($newPid) ? 'yes' : 'no',
+        ]);
 
         if ($newPid && is_numeric($newPid)) {
             JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
             JsonLock::save($repo_dir);
             DeploymentState::setWatcherPid($repo_dir, (int) $newPid);
 
+            // Verify the process is actually alive after a brief moment
+            usleep(500000); // 0.5s
+            $alive = Shell::isRunning((int) $newPid);
+
             Log::context('deploy:slave', [
                 'event'       => 'daemon_started',
                 'pid'         => $newPid,
+                'alive_check' => $alive ? 'yes' : 'NO',
                 'watcher_log' => $watcherLog,
             ]);
+
+            if (!$alive) {
+                Log::warn('deploy:slave', "daemon PID {$newPid} died immediately — check {$watcherLog} for errors");
+                $output->writeln("<comment>Warning: watcher process {$newPid} exited immediately. Check log: {$watcherLog}</comment>");
+            }
 
             $output->writeln("<info>Release watcher started (PID: {$newPid})</info>");
             $output->writeln("Log: {$watcherLog}");
