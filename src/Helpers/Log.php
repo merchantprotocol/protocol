@@ -104,54 +104,26 @@ class Log
      */
     public static function cmd(string $command, ?string $output, int $exitCode, ?float $duration = null): void
     {
+        // Skip diagnostic noise — these run every 10s via IncidentDetector and clutter the log
+        if (self::isDiagnosticCommand($command) && $exitCode === 0) {
+            return;
+        }
+
         $safeCmd = self::sanitize($command);
-        $isSensitive = self::isSensitiveCommand($command);
-
         $durationStr = $duration !== null ? ' (' . round($duration, 2) . 's)' : '';
+        $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
 
-        self::write('shell', $safeCmd);
+        // One line per command: command → result
+        self::write('shell', "{$safeCmd} → {$status}{$durationStr}");
 
-        // Never log output of sensitive commands (API calls with tokens, secrets)
-        if (!$isSensitive && $output !== null && trim($output) !== '') {
+        // Only log output on failure so you can see what went wrong
+        if ($exitCode !== 0 && $output !== null && trim($output) !== '') {
             $lines = explode("\n", trim($output));
-            $total = count($lines);
-            $lines = array_slice($lines, 0, 50);
+            $lines = array_slice($lines, 0, 10);
             foreach ($lines as $line) {
                 self::write('shell', "  | " . self::sanitize($line));
             }
-            if ($total > 50) {
-                self::write('shell', "  | ... ({$total} total lines, truncated)");
-            }
-        } elseif ($isSensitive && $output !== null && trim($output) !== '') {
-            self::write('shell', "  | [output redacted — sensitive command]");
         }
-
-        $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
-        self::write('shell', "  → {$status}{$durationStr}");
-    }
-
-    /**
-     * Check if a command is sensitive (output should not be logged).
-     */
-    private static function isSensitiveCommand(string $command): bool
-    {
-        $patterns = [
-            'Authorization:',
-            'Bearer ',
-            'x-access-token',
-            'api.github.com',
-            'gh api',
-            'credential',
-            'secret',
-            'token',
-        ];
-        $lower = strtolower($command);
-        foreach ($patterns as $pattern) {
-            if (stripos($lower, strtolower($pattern)) !== false) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -171,6 +143,21 @@ class Log
         $text = preg_replace('/\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/', 'JWT:***', $text);
 
         return $text;
+    }
+
+    /**
+     * Check if a command is a diagnostic/system probe that should not be logged.
+     * These run every ~10s via IncidentDetector and create excessive noise.
+     */
+    private static function isDiagnosticCommand(string $command): bool
+    {
+        $prefixes = ['ps ', 'find ', 'who ', 'who|', 'grep '];
+        foreach ($prefixes as $prefix) {
+            if (strncmp($command, $prefix, strlen($prefix)) === 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
