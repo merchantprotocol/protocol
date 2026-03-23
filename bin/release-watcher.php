@@ -20,6 +20,7 @@ use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 // Redirect ALL logging to watcher.log — completely separate from protocol.log
 $watcherLogDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : sys_get_temp_dir() . '/protocol/log/';
@@ -237,6 +238,23 @@ while (true) {
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
             Log::info('watcher', "release {$activeRelease} prepared, running stop+start");
 
+            // Persist active version in node config BEFORE stop+start.
+            // protocol stop kills the watcher, so protocol.lock state written
+            // above may not survive. Node config is the durable source of truth
+            // that protocol start reads via NodeConfig::resolveActiveDir().
+            $projectName = NodeConfig::findByRepoDir($repo_dir);
+            if ($projectName) {
+                $nodeData = NodeConfig::load($projectName);
+                $nodeData['release']['current'] = $activeRelease;
+                if ($currentRelease) {
+                    $nodeData['release']['previous'] = $currentRelease;
+                }
+                NodeConfig::save($projectName, $nodeData);
+                Log::info('watcher', "node config updated: release.current={$activeRelease} (project={$projectName})");
+            } else {
+                Log::warn('watcher', "no node config found for {$repo_dir} — active version only in protocol.lock");
+            }
+
             $stopDir = $repo_dir;
             if ($currentRelease) {
                 $oldReleaseDir = BlueGreen::getReleaseDir($repo_dir, $currentRelease);
@@ -324,6 +342,18 @@ while (true) {
                             'version'  => $activeRelease,
                             'previous' => $currentRelease ?: 'none',
                         ]);
+
+                        // Persist active version in node config before stop+start
+                        $bgProject = NodeConfig::findByRepoDir($repo_dir);
+                        if ($bgProject) {
+                            $bgNodeData = NodeConfig::load($bgProject);
+                            $bgNodeData['release']['current'] = $activeRelease;
+                            if ($currentRelease) {
+                                $bgNodeData['release']['previous'] = $currentRelease;
+                            }
+                            NodeConfig::save($bgProject, $bgNodeData);
+                            Log::info('watcher', "node config updated: release.current={$activeRelease} (project={$bgProject})");
+                        }
 
                         $bgStopDir = $repo_dir;
                         if ($currentRelease) {
