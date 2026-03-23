@@ -139,7 +139,7 @@ Class ProtocolStatus extends Command {
             $strategy = $nodeData['deployment']['strategy'] ?? 'none';
             $projectName = $nodeData['name'] ?? $nodeConfig;
             $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
-            $currentRelease = $nodeData['release']['current'] ?? null;
+            $currentRelease = $nodeData['release']['active'] ?? $nodeData['release']['current'] ?? null;
             $currentBranch = $nodeData['deployment']['branch'] ?? null;
             $awaitingRelease = $nodeData['deployment']['awaiting_release'] ?? false;
             $dockerImage = $nodeData['docker']['image'] ?? null;
@@ -413,6 +413,7 @@ Class ProtocolStatus extends Command {
     {
         $output = $this->output;
         $repo_dir = $ctx['repo_dir'];
+        $strategy = $ctx['strategy'];
         $dockerDir = ($ctx['nodeConfig'] && $ctx['activeDir']) ? $ctx['activeDir'] : $repo_dir;
 
         $containers = ContainerName::resolveAll($repo_dir);
@@ -421,12 +422,14 @@ Class ProtocolStatus extends Command {
         }
 
         $releaseDockerDir = null;
+        $activeContainerName = null;
         if (BlueGreen::isEnabled($repo_dir)) {
             $activeVersion = BlueGreen::getActiveVersion($repo_dir);
             if ($activeVersion) {
                 $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                 if (is_dir($releaseDir)) {
                     $releaseDockerDir = $releaseDir;
+                    $activeContainerName = ContainerName::resolveFromDir($releaseDir);
                 }
             }
         }
@@ -446,7 +449,14 @@ Class ProtocolStatus extends Command {
                 $this->writeService($output, $container, 'running', $stats);
             } else {
                 $this->writeService($output, $container, 'stopped');
-                $this->issues[] = "Container '{$container}' is not running";
+                // Only flag as issue if this is the active container or strategy=none
+                // Old release containers being stopped is expected
+                $isActiveContainer = ($strategy === 'none')
+                    || (!$activeContainerName)
+                    || ($container === $activeContainerName);
+                if ($isActiveContainer) {
+                    $this->issues[] = "Container '{$container}' is not running";
+                }
             }
         }
 
