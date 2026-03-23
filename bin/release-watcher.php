@@ -21,6 +21,13 @@ use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 
+// Redirect ALL logging (including Shell::run) to watcher.log
+$watcherLogDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : sys_get_temp_dir() . '/protocol/log/';
+if (!is_dir($watcherLogDir)) {
+    @mkdir($watcherLogDir, 0755, true);
+}
+Log::setFile($watcherLogDir . 'watcher.log');
+
 // Parse arguments
 $options = getopt('', ['dir:', 'interval:']);
 $rawDir = $options['dir'] ?? null;
