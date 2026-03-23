@@ -66,19 +66,26 @@ Class Config {
      */
     public static function repo( $repo_dir )
     {
+        $foldername = basename(rtrim($repo_dir, '/')). '-config';
+
         // Detect slave context: config repo lives inside the releases directory
         $nodeInfo = \Gitcd\Utils\NodeConfig::findByActiveDir($repo_dir);
         if ($nodeInfo) {
             $nodeData = $nodeInfo[1];
             $releasesDir = rtrim($nodeData['bluegreen']['releases_dir'] ?? '', '/');
-            $projectName = $nodeData['name'] ?? basename(rtrim($nodeData['repo_dir'] ?? $repo_dir, '/'));
             if ($releasesDir) {
-                $path = $releasesDir . '/' . $projectName . '-config/';
+                $configLocal = Json::read('configuration.local', false, $repo_dir);
+                if ($configLocal) {
+                    // configuration.local is relative to the project dir (e.g. "../enterprise-gateway-config")
+                    // In releases context, resolve it relative to the active release dir
+                    $path = $repo_dir . $configLocal . '/';
+                } else {
+                    $projectName = $nodeData['name'] ?? basename(rtrim($nodeData['repo_dir'] ?? $repo_dir, '/'));
+                    $path = $releasesDir . '/' . $projectName . '-config/';
+                }
                 return Dir::realpath($path);
             }
         }
-
-        $foldername = basename(rtrim($repo_dir, '/')). '-config';
 
         $path = Json::read('configuration.local', '..'.DIRECTORY_SEPARATOR.$foldername.DIRECTORY_SEPARATOR, $repo_dir);
         if (strpos($path, '..')!==false) {
