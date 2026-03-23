@@ -142,10 +142,22 @@ Class DeployReleaseSlave extends Command {
 
         $logFile = Log::getLogFile();
         $watcherLog = dirname($logFile) . '/watcher.log';
-        $cmd = "cd " . escapeshellarg(rtrim($repo_dir, '/')) . " && nohup php " . escapeshellarg($watcherScript)
+
+        // Write PID to a temp file instead of capturing via pipe.
+        // PHP's exec() blocks until ALL processes holding the stdout pipe
+        // close it. The nohup'd watcher inherits the pipe FD from the shell,
+        // so exec() hangs forever. By redirecting the group's stdout to
+        // /dev/null we close the pipe immediately, and read the PID from file.
+        $pidFile = sys_get_temp_dir() . '/protocol-watcher-' . substr(md5($repo_dir), 0, 8) . '.pid';
+        @unlink($pidFile); // clean any stale file
+
+        $cmd = "{ cd " . escapeshellarg(rtrim($repo_dir, '/'))
+            . " && nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"
-            . " >> " . escapeshellarg($watcherLog) . " 2>&1 & echo $!";
+            . " >> " . escapeshellarg($watcherLog) . " 2>&1 </dev/null &"
+            . " echo \$! > " . escapeshellarg($pidFile)
+            . "; } >/dev/null 2>&1";
 
         Log::context('deploy:slave', [
             'event'          => 'spawning_daemon',
@@ -154,9 +166,17 @@ Class DeployReleaseSlave extends Command {
             'watcher_script' => $watcherScript,
             'script_exists'  => is_file($watcherScript) ? 'yes' : 'no',
             'cwd'            => getcwd() ?: 'FALSE',
+            'pid_file'       => $pidFile,
         ]);
 
-        $newPid = trim(Shell::run($cmd));
+        Shell::run($cmd);
+
+        // Read PID from temp file
+        $newPid = '';
+        if (is_file($pidFile)) {
+            $newPid = trim(file_get_contents($pidFile));
+            @unlink($pidFile);
+        }
 
         Log::context('deploy:slave', [
             'event'      => 'spawn_result',
