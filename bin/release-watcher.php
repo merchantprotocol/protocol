@@ -57,8 +57,11 @@ function protocolStopStart(string $stopDir, string $startDir): void
     $stopArg = escapeshellarg($stopDir);
     $startArg = escapeshellarg($startDir);
 
-    $cmd = "nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
-        . " >> " . escapeshellarg($logFile) . " 2>&1 &";
+    // Redirect group stdout/stderr to /dev/null so PHP's exec() pipe
+    // doesn't block waiting for the backgrounded process to exit.
+    $cmd = "{ nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
+        . " >> " . escapeshellarg($logFile) . " 2>&1 </dev/null &"
+        . " } >/dev/null 2>&1";
 
     Log::context('watcher', [
         'action'    => 'stop+start',

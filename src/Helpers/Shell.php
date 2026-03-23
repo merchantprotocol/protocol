@@ -230,11 +230,26 @@ Class Shell
 
         $outputfile = Log::getLogFile();
 
-        $command = sprintf("%s >> %s 2>&1 & echo $!", $command, $outputfile);
-        exec($command, $response);
+        // Write PID to a temp file instead of capturing via stdout pipe.
+        // PHP's exec() blocks until ALL holders of the stdout pipe close it.
+        // A backgrounded process inherits the pipe FD, so exec() hangs
+        // until the daemon exits. Redirecting the group's stdout to /dev/null
+        // closes the pipe immediately.
+        $pidFile = sys_get_temp_dir() . '/protocol-bg-' . substr(md5($command), 0, 8) . '.pid';
+        @unlink($pidFile);
 
-        if (is_array($response)) {
-            $response = array_pop($response);
+        $wrapped = sprintf(
+            "{ %s >> %s 2>&1 </dev/null & echo \$! > %s; } >/dev/null 2>&1",
+            $command,
+            escapeshellarg($outputfile),
+            escapeshellarg($pidFile)
+        );
+        exec($wrapped);
+
+        $response = '';
+        if (is_file($pidFile)) {
+            $response = trim(file_get_contents($pidFile));
+            @unlink($pidFile);
         }
 
         return $response;
