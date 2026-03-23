@@ -106,10 +106,11 @@ Class DeployReleaseSlave extends Command {
         }
 
         $logFile = Log::getLogFile();
+        $watcherLog = dirname($logFile) . '/watcher.log';
         $cmd = "cd " . escapeshellarg(rtrim($repo_dir, '/')) . " && nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"
-            . " >> " . escapeshellarg($logFile) . " 2>&1 & echo $!";
+            . " >> " . escapeshellarg($watcherLog) . " 2>&1 & echo $!";
 
         $newPid = trim(Shell::run($cmd));
 
@@ -118,7 +119,7 @@ Class DeployReleaseSlave extends Command {
             JsonLock::save($repo_dir);
             DeploymentState::setWatcherPid($repo_dir, (int) $newPid);
             $output->writeln("<info>Release watcher started (PID: {$newPid})</info>");
-            $output->writeln("Log: {$logFile}");
+            $output->writeln("Log: {$watcherLog}");
         } else {
             $output->writeln('<error>Failed to start release watcher daemon</error>');
             return Command::FAILURE;
