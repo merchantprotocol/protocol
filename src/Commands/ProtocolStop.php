@@ -275,19 +275,30 @@ Class ProtocolStop extends Command {
 
     private function stopContainers(string $dir, array $ctx): void
     {
+        if ($ctx['strategy'] === 'none') {
+            $this->stopSimpleContainers($dir);
+        } else {
+            $this->stopReleaseContainers($dir);
+            $this->stopTrackedReleaseDirs($dir);
+            $this->sweepOrphanReleases($dir);
+        }
+    }
+
+    private function stopSimpleContainers(string $dir): void
+    {
         $runner = $this->runner;
+        $runner->run('Stopping containers', function() use ($runner, $dir) {
+            $dockerCommand = Docker::getDockerCommand();
+            $runner->log("strategy=none, running {$dockerCommand} down in {$dir}");
+            $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
+            $runner->log("output=" . trim($result));
+        });
+    }
 
-        $runner->run('Stopping containers', function() use ($runner, $dir, $ctx) {
-            // Simple case: just docker compose down in the given directory
-            if ($ctx['strategy'] === 'none') {
-                $dockerCommand = Docker::getDockerCommand();
-                $runner->log("strategy=none, running {$dockerCommand} down in {$dir}");
-                $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
-                $runner->log("output=" . trim($result));
-                return;
-            }
-
-            // Release dir: stop via BlueGreen (resolves .env.deployment container name)
+    private function stopReleaseContainers(string $dir): void
+    {
+        $runner = $this->runner;
+        $runner->run('Stopping containers', function() use ($runner, $dir) {
             if (BlueGreen::isReleaseDir($dir, $dir) || is_file(rtrim($dir, '/') . '/.env.deployment')) {
                 $containerName = ContainerName::resolveFromDir($dir);
                 $runner->log("Stopping release dir {$dir} via BlueGreen::stopContainers (container={$containerName})");
@@ -299,30 +310,42 @@ Class ProtocolStop extends Command {
                 $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
                 $runner->log("output=" . trim($result));
             }
+        });
+    }
 
-            // Also stop all known release dirs tracked by DeploymentState
+    private function stopTrackedReleaseDirs(string $dir): void
+    {
+        $runner = $this->runner;
+        $runner->run('Stopping tracked releases', function() use ($runner, $dir) {
             $dirs = DeploymentState::allKnownDirs($dir);
             $runner->log("allKnownDirs returned " . count($dirs) . " dirs");
             foreach ($dirs as $knownDir) {
-                if ($knownDir === $dir) continue; // already stopped above
+                if ($knownDir === $dir) continue;
                 if (BlueGreen::isReleaseDir($knownDir, $dir)) {
                     $containerName = ContainerName::resolveFromDir($knownDir);
                     $runner->log("Stopping release dir {$knownDir} (container={$containerName})");
                     BlueGreen::stopContainers($knownDir);
                 }
             }
+        });
+    }
 
-            // Sweep all release directories on disk for orphans
-            if (BlueGreen::isEnabled($dir)) {
-                $releases = BlueGreen::listReleases($dir);
-                $runner->log("listReleases returned " . count($releases) . " releases");
-                foreach ($releases as $release) {
-                    $releaseDir = BlueGreen::getReleaseDir($dir, $release);
-                    if (is_dir($releaseDir)) {
-                        $containerName = ContainerName::resolveFromDir($releaseDir);
-                        $runner->log("Stopping release {$release} (container={$containerName})");
-                        BlueGreen::stopContainers($releaseDir);
-                    }
+    private function sweepOrphanReleases(string $dir): void
+    {
+        if (!BlueGreen::isEnabled($dir)) {
+            return;
+        }
+
+        $runner = $this->runner;
+        $runner->run('Sweeping orphan releases', function() use ($runner, $dir) {
+            $releases = BlueGreen::listReleases($dir);
+            $runner->log("listReleases returned " . count($releases) . " releases");
+            foreach ($releases as $release) {
+                $releaseDir = BlueGreen::getReleaseDir($dir, $release);
+                if (is_dir($releaseDir)) {
+                    $containerName = ContainerName::resolveFromDir($releaseDir);
+                    $runner->log("Stopping release {$release} (container={$containerName})");
+                    BlueGreen::stopContainers($releaseDir);
                 }
             }
 
