@@ -294,9 +294,20 @@ Class ProtocolStart extends Command {
                     $dirExists = is_dir($releaseDir);
                     $runner->log("releaseDir={$releaseDir} exists={$dirExists}");
                     if ($dirExists) {
-                        // Ensure docker-compose.yml has parameterized container
-                        // name and ports. The watcher patches this on initial clone,
-                        // but git operations may restore the original file.
+                        // IMPORTANT: Patch docker-compose.yml to replace hardcoded
+                        // container_name and port mappings with parameterized versions:
+                        //   container_name: mp-gateway  →  container_name: ${CONTAINER_NAME:-mp-gateway}
+                        //   ports: "8090:80"            →  ports: "${PROTOCOL_PORT_HTTP:-80}:80"
+                        //
+                        // Without this, writeReleaseEnv() sets CONTAINER_NAME=mp-gateway-v1.0.0
+                        // in .env.bluegreen, but docker-compose ignores it because the compose
+                        // file has a hardcoded name. The result is containers named "mp-gateway"
+                        // with no version info, making it impossible to tell which release is
+                        // running or to run multiple releases side-by-side.
+                        //
+                        // The watcher also patches on initial clone, but git operations
+                        // (checkout, reset) can restore the original unpatched file.
+                        // Patching here on every start guarantees correctness.
                         BlueGreen::patchComposeFile($releaseDir);
 
                         // For release strategy, ensure production ports are set
