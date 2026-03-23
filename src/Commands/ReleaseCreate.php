@@ -38,6 +38,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
+use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
@@ -119,10 +120,24 @@ Class ReleaseCreate extends Command {
         $output->writeln('');
 
         // Check clean working tree
-        $status = Shell::run("git -C " . escapeshellarg($repo_dir) . " status --porcelain 2>/dev/null");
-        if (trim($status)) {
-            $output->writeln('<error>Working tree is not clean. Commit or stash your changes first.</error>');
-            return Command::FAILURE;
+        $status = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " status --porcelain 2>/dev/null"));
+        if ($status) {
+            $output->writeln('<fg=yellow>Warning: Working tree is not clean.</>');
+            $output->writeln('');
+            $output->writeln($status);
+            $output->writeln('');
+
+            $helper = $this->getHelper('question');
+            $question = new ConfirmationQuestion('Commit all changes before creating the release? [y/N] ', false);
+            if ($helper->ask($input, $output, $question)) {
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " add -A");
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " commit -m " . escapeshellarg("Pre-release cleanup for {$version}"));
+                $output->writeln(' - Committed all changes');
+                $output->writeln('');
+            } else {
+                $output->writeln('<error>Aborting. Commit or stash your changes first.</error>');
+                return Command::FAILURE;
+            }
         }
 
         // Check tag doesn't exist
