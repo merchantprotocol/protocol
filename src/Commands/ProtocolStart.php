@@ -228,6 +228,10 @@ Class ProtocolStart extends Command {
         $ctx['portOverrideFile'] = $portOverrideFile;
 
         $this->startContainers($dir, $ctx);
+        // Spawn watchers AFTER startContainers sets release.active —
+        // otherwise the watcher sees target != active and triggers a
+        // duplicate stop+start cycle that kills what we just started.
+        $this->provisionSlaveWatchers($dir, $ctx);
         $this->startDevServices($dir, $ctx);
         $this->runPostStartHooks($dir, $ctx);
         $this->runSecurityAudit($dir, $ctx);
@@ -346,7 +350,9 @@ Class ProtocolStart extends Command {
     {
         $this->provisionGitHubCredentials($dir, $ctx);
         $this->provisionConfigRepo($dir, $ctx);
-        $this->provisionSlaveWatchers($dir, $ctx);
+        // NOTE: provisionSlaveWatchers() is called AFTER startContainers() in
+        // startDirect() to avoid a race condition. The watcher must not start
+        // polling until release.active is set by startContainers().
         $this->provisionCrontab($dir, $ctx);
     }
 
