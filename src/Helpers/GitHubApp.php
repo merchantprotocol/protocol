@@ -206,16 +206,7 @@ class GitHubApp
      */
     private static function logError(string $message): void
     {
-        $logFile = '/var/log/protocol/protocol-start.log';
-        if (!is_file($logFile)) {
-            $fallbackDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
-            $logFile = $fallbackDir . 'protocol-start.log';
-        }
-        @file_put_contents(
-            $logFile,
-            "[" . date('H:i:s') . "] [GitHubApp] {$message}\n",
-            FILE_APPEND | LOCK_EX
-        );
+        Log::error('github-app', $message);
     }
 
     /**
