@@ -3,20 +3,20 @@
  * Unified Deployment State Manager.
  *
  * Provides a single interface for tracking deployment state across all
- * strategies (branch, release, blue-green). Every strategy writes the
- * same keys so that start/stop/status commands work without knowing
- * which strategy produced the state.
+ * strategies (branch, release, blue-green).
  *
- * State is stored in protocol.lock under the `deploy` namespace:
+ * State is stored in two locations:
  *
- *   deploy.strategy      - "branch", "release", or "bluegreen"
- *   deploy.current        - { version, dir, deployed_at }
- *   deploy.previous       - { version, dir, deployed_at }
- *   deploy.next           - { version, dir, deployed_at }  (blue-green shadow)
- *   deploy.watcher_pid    - int|null
+ *   NodeConfig (~/.protocol/.node/nodes/<project>.json):
+ *     deployment.strategy   - "none", "branch", "release", or "bluegreen"
+ *     release.target        - version we want deployed
+ *     release.active        - version that is successfully deployed
+ *     release.previous      - rollback target
+ *     release.releases_dir  - path to releases directory
+ *     bluegreen.shadow_version - shadow build (bluegreen only)
  *
- * Backward-compatible: reads old keys (release.current, bluegreen.active_version,
- * deployment.branch, slave.pid, release.slave.pid) as fallbacks.
+ *   Per-release deployment.json (<release_dir>/<version>/.protocol/deployment.json):
+ *     watcher_pid, deployed_at, port_http, port_https, container_name, status
  *
  * MIT License
  * Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
@@ -24,8 +24,8 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\Log;
 
 class DeploymentState
 {
@@ -36,14 +36,15 @@ class DeploymentState
      */
     public static function strategy(string $repoDir): string
     {
-        // New key first
-        $strategy = JsonLock::read('deploy.strategy', null, $repoDir);
-        if ($strategy) {
-            return $strategy;
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            $strategy = NodeConfig::read($project, 'deployment.strategy');
+            if ($strategy) {
+                return $strategy;
+            }
         }
 
-        // Fall back to protocol.json
-        return Json::read('deployment.strategy', 'branch', $repoDir);
+        return Json::read('deployment.strategy', 'none', $repoDir);
     }
 
     /**
@@ -53,48 +54,38 @@ class DeploymentState
      */
     public static function current(string $repoDir): ?array
     {
-        // New unified key
-        $current = JsonLock::read('deploy.current', null, $repoDir);
-        if ($current && is_array($current) && !empty($current['version'])) {
-            return $current;
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return null;
         }
 
-        // ── Backward compatibility ──
+        $nodeData = NodeConfig::load($project);
+        $strategy = $nodeData['deployment']['strategy'] ?? 'none';
+        $active = $nodeData['release']['active'] ?? null;
+        $releasesDir = self::resolveReleasesDir($repoDir, $nodeData);
 
-        // Blue-green: bluegreen.active_version
-        $bgActive = JsonLock::read('bluegreen.active_version', null, $repoDir);
-        if ($bgActive) {
+        if ($active && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($active) . '/';
+            $deployedAt = self::readDeploymentJson($dir, 'deployed_at');
             return [
-                'version' => $bgActive,
-                'dir' => BlueGreen::getReleaseDir($repoDir, $bgActive),
-                'deployed_at' => JsonLock::read('bluegreen.promoted_at', null, $repoDir),
+                'version' => $active,
+                'dir' => $dir,
+                'deployed_at' => $deployedAt,
             ];
         }
 
-        // Release: release.current
-        $relCurrent = JsonLock::read('release.current', null, $repoDir);
-        if ($relCurrent) {
-            return [
-                'version' => $relCurrent,
-                'dir' => $repoDir,
-                'deployed_at' => JsonLock::read('release.deployed_at', null, $repoDir),
-            ];
-        }
-
-        // Branch: deployment.branch from node config or protocol.json
-        $branch = self::resolveBranch($repoDir);
-        if ($branch) {
-            $releasesDir = self::resolveReleasesDir($repoDir);
-            $dir = $releasesDir
-                ? rtrim($releasesDir, '/') . '/' . $branch . '/'
-                : $repoDir;
-            // Only return if the directory actually exists
-            if (is_dir($dir)) {
-                return [
-                    'version' => $branch,
-                    'dir' => $dir,
-                    'deployed_at' => null,
-                ];
+        // Branch strategy: use branch name as version
+        if ($strategy === 'branch') {
+            $branch = $nodeData['deployment']['branch'] ?? null;
+            if ($branch && $releasesDir) {
+                $dir = rtrim($releasesDir, '/') . '/' . $branch . '/';
+                if (is_dir($dir)) {
+                    return [
+                        'version' => $branch,
+                        'dir' => $dir,
+                        'deployed_at' => null,
+                    ];
+                }
             }
         }
 
@@ -108,29 +99,22 @@ class DeploymentState
      */
     public static function previous(string $repoDir): ?array
     {
-        // New unified key
-        $previous = JsonLock::read('deploy.previous', null, $repoDir);
-        if ($previous && is_array($previous) && !empty($previous['version'])) {
-            return $previous;
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return null;
         }
 
-        // Blue-green fallback
-        $bgPrevious = JsonLock::read('bluegreen.previous_version', null, $repoDir);
-        if ($bgPrevious) {
-            return [
-                'version' => $bgPrevious,
-                'dir' => BlueGreen::getReleaseDir($repoDir, $bgPrevious),
-                'deployed_at' => null,
-            ];
-        }
+        $nodeData = NodeConfig::load($project);
+        $previous = $nodeData['release']['previous'] ?? null;
+        $releasesDir = self::resolveReleasesDir($repoDir, $nodeData);
 
-        // Release fallback
-        $relPrevious = JsonLock::read('release.previous', null, $repoDir);
-        if ($relPrevious) {
+        if ($previous && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($previous) . '/';
+            $deployedAt = self::readDeploymentJson($dir, 'deployed_at');
             return [
-                'version' => $relPrevious,
-                'dir' => $repoDir,
-                'deployed_at' => null,
+                'version' => $previous,
+                'dir' => $dir,
+                'deployed_at' => $deployedAt,
             ];
         }
 
@@ -138,24 +122,42 @@ class DeploymentState
     }
 
     /**
-     * Get the next deployment (blue-green shadow build).
+     * Get the next deployment (blue-green shadow build, or pending target).
      *
      * @return array|null  ['version' => string, 'dir' => string, 'deployed_at' => string|null]
      */
     public static function next(string $repoDir): ?array
     {
-        // New unified key
-        $next = JsonLock::read('deploy.next', null, $repoDir);
-        if ($next && is_array($next) && !empty($next['version'])) {
-            return $next;
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return null;
         }
 
-        // Blue-green fallback
-        $bgShadow = JsonLock::read('bluegreen.shadow_version', null, $repoDir);
-        if ($bgShadow) {
+        $nodeData = NodeConfig::load($project);
+        $releasesDir = self::resolveReleasesDir($repoDir, $nodeData);
+        $strategy = $nodeData['deployment']['strategy'] ?? 'none';
+
+        // Bluegreen: shadow version
+        if ($strategy === 'bluegreen') {
+            $shadow = $nodeData['bluegreen']['shadow_version'] ?? null;
+            if ($shadow && $releasesDir) {
+                $dir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($shadow) . '/';
+                return [
+                    'version' => $shadow,
+                    'dir' => $dir,
+                    'deployed_at' => null,
+                ];
+            }
+        }
+
+        // Any strategy: target that hasn't been deployed yet
+        $target = $nodeData['release']['target'] ?? null;
+        $active = $nodeData['release']['active'] ?? null;
+        if ($target && $target !== $active && $releasesDir) {
+            $dir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($target) . '/';
             return [
-                'version' => $bgShadow,
-                'dir' => BlueGreen::getReleaseDir($repoDir, $bgShadow),
+                'version' => $target,
+                'dir' => $dir,
                 'deployed_at' => null,
             ];
         }
@@ -164,28 +166,17 @@ class DeploymentState
     }
 
     /**
-     * Get the watcher process PID.
+     * Get the watcher process PID from the active release's deployment.json.
      */
     public static function watcherPid(string $repoDir): ?int
     {
-        // New key
-        $pid = JsonLock::read('deploy.watcher_pid', null, $repoDir);
-        if ($pid) {
-            return (int) $pid;
+        $current = self::current($repoDir);
+        if (!$current || empty($current['dir'])) {
+            return null;
         }
 
-        // Fallback: release.slave.pid or slave.pid
-        $pid = JsonLock::read('release.slave.pid', null, $repoDir);
-        if ($pid) {
-            return (int) $pid;
-        }
-
-        $pid = JsonLock::read('slave.pid', null, $repoDir);
-        if ($pid) {
-            return (int) $pid;
-        }
-
-        return null;
+        $pid = self::readDeploymentJson($current['dir'], 'watcher_pid');
+        return $pid ? (int) $pid : null;
     }
 
     /**
@@ -197,58 +188,93 @@ class DeploymentState
         return $pid && Shell::isRunning($pid);
     }
 
+    /**
+     * Get the target version (what we want deployed).
+     */
+    public static function target(string $repoDir): ?string
+    {
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return null;
+        }
+        return NodeConfig::read($project, 'release.target');
+    }
+
     // ─── Write ───────────────────────────────────────────────────────
 
     /**
-     * Set the current deployment. Moves existing current to previous.
+     * Set the current deployment. Moves existing active to previous.
      */
     public static function setCurrent(string $repoDir, string $version, string $dir): void
     {
-        // Move current → previous
-        $existing = self::current($repoDir);
-        if ($existing && $existing['version'] !== $version) {
-            JsonLock::write('deploy.previous', $existing, $repoDir);
-
-            // Legacy keys
-            JsonLock::write('release.previous', $existing['version'], $repoDir);
-            JsonLock::write('bluegreen.previous_version', $existing['version'], $repoDir);
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return;
         }
 
-        $entry = [
-            'version' => $version,
-            'dir' => rtrim($dir, '/') . '/',
+        Log::info('deployment', "setCurrent: version={$version} project={$project}");
+
+        NodeConfig::modify($project, function (array $nodeData) use ($version) {
+            // Move active → previous
+            $existingActive = $nodeData['release']['active'] ?? null;
+            if ($existingActive && $existingActive !== $version) {
+                $nodeData['release']['previous'] = $existingActive;
+            }
+
+            $nodeData['release']['active'] = $version;
+
+            // Update versions list
+            $versions = $nodeData['release']['versions'] ?? [];
+            if (!in_array($version, $versions, true)) {
+                $versions[] = $version;
+                $nodeData['release']['versions'] = $versions;
+            }
+
+            return $nodeData;
+        });
+
+        // Write deployed_at + status to per-release deployment.json
+        self::writeDeploymentJson($dir, [
             'deployed_at' => date('Y-m-d\TH:i:sP'),
-        ];
-        JsonLock::write('deploy.current', $entry, $repoDir);
-
-        // Legacy keys (dual-write for one release cycle)
-        JsonLock::write('release.current', $version, $repoDir);
-        JsonLock::write('release.deployed_at', $entry['deployed_at'], $repoDir);
-        JsonLock::write('bluegreen.active_version', $version, $repoDir);
-
-        // Strategy
-        $strategy = Json::read('deployment.strategy', 'branch', $repoDir);
-        JsonLock::write('deploy.strategy', $strategy, $repoDir);
-
-        JsonLock::save($repoDir);
+            'status' => 'active',
+        ]);
     }
 
     /**
-     * Set the next (shadow/staging) deployment.
+     * Set the target version (what we want deployed).
+     * Called immediately when watcher detects a new release.
+     */
+    public static function setTarget(string $repoDir, string $version): void
+    {
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return;
+        }
+
+        Log::info('deployment', "setTarget: version={$version} project={$project}");
+
+        NodeConfig::modify($project, function (array $nodeData) use ($version) {
+            $nodeData['release']['target'] = $version;
+            return $nodeData;
+        });
+    }
+
+    /**
+     * Set the next (shadow/staging) deployment (bluegreen only).
      */
     public static function setNext(string $repoDir, string $version, string $dir): void
     {
-        $entry = [
-            'version' => $version,
-            'dir' => rtrim($dir, '/') . '/',
-            'deployed_at' => null,
-        ];
-        JsonLock::write('deploy.next', $entry, $repoDir);
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return;
+        }
 
-        // Legacy key
-        JsonLock::write('bluegreen.shadow_version', $version, $repoDir);
+        Log::info('deployment', "setNext: shadow_version={$version} project={$project}");
 
-        JsonLock::save($repoDir);
+        NodeConfig::modify($project, function (array $nodeData) use ($version) {
+            $nodeData['bluegreen']['shadow_version'] = $version;
+            return $nodeData;
+        });
     }
 
     /**
@@ -256,9 +282,17 @@ class DeploymentState
      */
     public static function clearNext(string $repoDir): void
     {
-        JsonLock::write('deploy.next', null, $repoDir);
-        JsonLock::write('bluegreen.shadow_version', null, $repoDir);
-        JsonLock::save($repoDir);
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return;
+        }
+
+        Log::debug('deployment', "clearNext: clearing shadow_version project={$project}");
+
+        NodeConfig::modify($project, function (array $nodeData) {
+            $nodeData['bluegreen']['shadow_version'] = null;
+            return $nodeData;
+        });
     }
 
     /**
@@ -271,11 +305,18 @@ class DeploymentState
             return false;
         }
 
+        Log::info('deployment', "promoteNext: promoting {$next['version']}");
+
         self::setCurrent($repoDir, $next['version'], $next['dir']);
         self::clearNext($repoDir);
 
-        JsonLock::write('bluegreen.promoted_at', date('Y-m-d\TH:i:sP'), $repoDir);
-        JsonLock::save($repoDir);
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nodeData) {
+                $nodeData['bluegreen']['promoted_at'] = date('Y-m-d\TH:i:sP');
+                return $nodeData;
+            });
+        }
 
         return true;
     }
@@ -285,51 +326,57 @@ class DeploymentState
      */
     public static function rollback(string $repoDir): bool
     {
-        $previous = self::previous($repoDir);
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return false;
+        }
+
+        $nodeData = NodeConfig::load($project);
+        $active = $nodeData['release']['active'] ?? null;
+        $previous = $nodeData['release']['previous'] ?? null;
+
         if (!$previous) {
             return false;
         }
 
-        $current = self::current($repoDir);
+        Log::info('deployment', "rollback: {$active} → standby, {$previous} → active, project={$project}");
 
-        // Set previous as the new current
-        $entry = [
-            'version' => $previous['version'],
-            'dir' => $previous['dir'],
-            'deployed_at' => date('Y-m-d\TH:i:sP'),
-        ];
-        JsonLock::write('deploy.current', $entry, $repoDir);
-        JsonLock::write('release.current', $previous['version'], $repoDir);
-        JsonLock::write('release.deployed_at', $entry['deployed_at'], $repoDir);
-        JsonLock::write('bluegreen.active_version', $previous['version'], $repoDir);
+        NodeConfig::modify($project, function (array $nd) use ($active, $previous) {
+            $nd['release']['active'] = $previous;
+            $nd['release']['previous'] = $active;
+            return $nd;
+        });
 
-        // Set current as the new previous
-        if ($current) {
-            JsonLock::write('deploy.previous', $current, $repoDir);
-            JsonLock::write('release.previous', $current['version'], $repoDir);
-            JsonLock::write('bluegreen.previous_version', $current['version'], $repoDir);
+        // Update deployment.json statuses
+        $releasesDir = self::resolveReleasesDir($repoDir, $nodeData);
+        if ($releasesDir) {
+            if ($previous) {
+                $prevDir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($previous) . '/';
+                self::writeDeploymentJson($prevDir, [
+                    'deployed_at' => date('Y-m-d\TH:i:sP'),
+                    'status' => 'active',
+                ]);
+            }
+            if ($active) {
+                $activeDir = rtrim($releasesDir, '/') . '/' . BlueGreen::sanitizeVersion($active) . '/';
+                self::writeDeploymentJson($activeDir, ['status' => 'standby']);
+            }
         }
 
-        JsonLock::save($repoDir);
         return true;
     }
 
     /**
-     * Set the watcher PID.
+     * Set the watcher PID in the active release's deployment.json.
      */
     public static function setWatcherPid(string $repoDir, ?int $pid): void
     {
-        JsonLock::write('deploy.watcher_pid', $pid, $repoDir);
+        Log::debug('deployment', "setWatcherPid: pid=" . ($pid ?? 'null'));
 
-        // Legacy dual-write
-        $strategy = self::strategy($repoDir);
-        if ($strategy === 'branch') {
-            JsonLock::write('slave.pid', $pid, $repoDir);
-        } else {
-            JsonLock::write('release.slave.pid', $pid, $repoDir);
+        $current = self::current($repoDir);
+        if ($current && !empty($current['dir'])) {
+            self::writeDeploymentJson($current['dir'], ['watcher_pid' => $pid]);
         }
-
-        JsonLock::save($repoDir);
     }
 
     /**
@@ -337,10 +384,18 @@ class DeploymentState
      */
     public static function setStrategy(string $repoDir, string $strategy): void
     {
-        JsonLock::write('deploy.strategy', $strategy, $repoDir);
+        Log::info('deployment', "setStrategy: strategy={$strategy}");
+
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nodeData) use ($strategy) {
+                $nodeData['deployment']['strategy'] = $strategy;
+                return $nodeData;
+            });
+        }
+
         Json::write('deployment.strategy', $strategy, $repoDir);
         Json::save($repoDir);
-        JsonLock::save($repoDir);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -351,6 +406,16 @@ class DeploymentState
      */
     public static function allKnownDirs(string $repoDir): array
     {
+        // No deployment strategy — repo dir is the only dir
+        $strategy = self::strategy($repoDir);
+        if ($strategy === 'none') {
+            $repoDir = rtrim($repoDir, '/') . '/';
+            if (is_file($repoDir . 'docker-compose.yml')) {
+                return [$repoDir];
+            }
+            return [];
+        }
+
         $dirs = [];
 
         $current = self::current($repoDir);
@@ -369,17 +434,10 @@ class DeploymentState
         }
 
         // Also check node config fallbacks
-        $projectName = NodeConfig::findByRepoDir($repoDir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repoDir);
-            if ($match) {
-                $projectName = $match[0];
-            }
-        }
-
-        if ($projectName) {
-            $nodeData = NodeConfig::load($projectName);
-            $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            $nodeData = NodeConfig::load($project);
+            $releasesDir = self::resolveReleasesDir($repoDir, $nodeData);
 
             $branch = $nodeData['deployment']['branch'] ?? null;
             if ($branch && $releasesDir) {
@@ -393,8 +451,6 @@ class DeploymentState
         }
 
         // Scan ALL release directories for running containers.
-        // This ensures `protocol stop` finds containers regardless of which
-        // strategy created them (release or bluegreen).
         $strategy = self::strategy($repoDir);
         if (in_array($strategy, ['release', 'bluegreen'], true)) {
             if (class_exists(BlueGreen::class)) {
@@ -418,30 +474,18 @@ class DeploymentState
     }
 
     /**
-     * Resolve the current branch from node config or git.
+     * Resolve the project name from a repo directory.
      */
-    private static function resolveBranch(string $repoDir): ?string
+    public static function resolveProjectName(string $repoDir): ?string
     {
-        $projectName = NodeConfig::findByRepoDir($repoDir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repoDir);
-            if ($match) {
-                $projectName = $match[0];
-            }
+        $project = NodeConfig::findByRepoDir($repoDir);
+        if ($project) {
+            return $project;
         }
 
-        if ($projectName) {
-            $nodeData = NodeConfig::load($projectName);
-            $branch = $nodeData['deployment']['branch'] ?? null;
-            if ($branch) {
-                return $branch;
-            }
-        }
-
-        // Fall back to protocol.json
-        $branch = Json::read('deployment.branch', null, $repoDir);
-        if ($branch) {
-            return $branch;
+        $match = NodeConfig::findByActiveDir($repoDir);
+        if ($match) {
+            return $match[0];
         }
 
         return null;
@@ -450,22 +494,18 @@ class DeploymentState
     /**
      * Resolve the releases directory from node config or protocol.json.
      */
-    private static function resolveReleasesDir(string $repoDir): ?string
+    private static function resolveReleasesDir(string $repoDir, array $nodeData = []): ?string
     {
-        $projectName = NodeConfig::findByRepoDir($repoDir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repoDir);
-            if ($match) {
-                $projectName = $match[0];
-            }
+        // Primary: release.releases_dir
+        $dir = $nodeData['release']['releases_dir'] ?? null;
+        if ($dir) {
+            return rtrim($dir, '/') . '/';
         }
 
-        if ($projectName) {
-            $nodeData = NodeConfig::load($projectName);
-            $dir = $nodeData['bluegreen']['releases_dir'] ?? null;
-            if ($dir) {
-                return $dir;
-            }
+        // Migration fallback: bluegreen.releases_dir
+        $dir = $nodeData['bluegreen']['releases_dir'] ?? null;
+        if ($dir) {
+            return rtrim($dir, '/') . '/';
         }
 
         if (class_exists(BlueGreen::class)) {
@@ -473,5 +513,203 @@ class DeploymentState
         }
 
         return null;
+    }
+
+    /**
+     * Read a value from a release's .protocol/deployment.json.
+     */
+    public static function readDeploymentJson(string $releaseDir, ?string $key = null)
+    {
+        $file = rtrim($releaseDir, '/') . '/.protocol/deployment.json';
+        if (!is_file($file)) {
+            return null;
+        }
+
+        $data = json_decode(file_get_contents($file), true);
+        if (!is_array($data)) {
+            return null;
+        }
+
+        if ($key === null) {
+            return $data;
+        }
+
+        return $data[$key] ?? null;
+    }
+
+    /**
+     * Write/merge values into a release's .protocol/deployment.json.
+     * Uses file locking to prevent read-modify-write races.
+     */
+    public static function writeDeploymentJson(string $releaseDir, array $values): void
+    {
+        $protocolDir = rtrim($releaseDir, '/') . '/.protocol';
+        if (!is_dir($protocolDir)) {
+            @mkdir($protocolDir, 0755, true);
+        }
+
+        $file = $protocolDir . '/deployment.json';
+        $lockFile = $file . '.lock';
+
+        $lockHandle = fopen($lockFile, 'c');
+        if (!$lockHandle) {
+            // Fallback to non-atomic write
+            $existing = is_file($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+            $merged = array_merge($existing, $values);
+            file_put_contents($file, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+            return;
+        }
+
+        if (!flock($lockHandle, LOCK_EX)) {
+            fclose($lockHandle);
+            $existing = is_file($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+            $merged = array_merge($existing, $values);
+            file_put_contents($file, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+            return;
+        }
+
+        try {
+            $existing = [];
+            if (is_file($file)) {
+                $existing = json_decode(file_get_contents($file), true) ?: [];
+            }
+
+            $merged = array_merge($existing, $values);
+            file_put_contents(
+                $file,
+                json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+                LOCK_EX
+            );
+        } finally {
+            flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    // ─── Migration ──────────────────────────────────────────────────
+
+    /**
+     * Migrate from protocol.lock to NodeConfig + deployment.json.
+     *
+     * Call this from protocol start or init. It's idempotent — safe to
+     * call repeatedly. Does nothing if no protocol.lock exists or if
+     * NodeConfig already has release.active set.
+     */
+    public static function migrateFromLockFile(string $repoDir): void
+    {
+        $lockFile = rtrim($repoDir, '/') . '/protocol.lock';
+        if (!is_file($lockFile)) {
+            return;
+        }
+
+        $project = self::resolveProjectName($repoDir);
+        if (!$project) {
+            return;
+        }
+
+        $nodeData = NodeConfig::load($project);
+
+        // Skip if already migrated
+        if (!empty($nodeData['release']['active'])) {
+            // Clean up the lock file
+            @unlink($lockFile);
+            return;
+        }
+
+        $lockData = json_decode(file_get_contents($lockFile), true);
+        if (!is_array($lockData)) {
+            @unlink($lockFile);
+            return;
+        }
+
+        Log::info('deployment', "migrateFromLockFile: migrating protocol.lock for project={$project}");
+
+        // Migrate deployment state
+        $current = $lockData['release']['current']
+            ?? $lockData['deploy']['current']['version']
+            ?? $lockData['bluegreen']['active_version']
+            ?? null;
+        $previous = $lockData['release']['previous']
+            ?? $lockData['deploy']['previous']['version']
+            ?? $lockData['bluegreen']['previous_version']
+            ?? null;
+        $strategy = $lockData['deploy']['strategy']
+            ?? $lockData['deployment']['strategy']
+            ?? $nodeData['deployment']['strategy']
+            ?? 'none';
+
+        if ($current) {
+            $nodeData['release']['active'] = $current;
+            $nodeData['release']['target'] = $current;
+        }
+        if ($previous) {
+            $nodeData['release']['previous'] = $previous;
+        }
+        $nodeData['deployment']['strategy'] = $strategy;
+
+        // Migrate releases_dir from bluegreen to release namespace
+        if (empty($nodeData['release']['releases_dir']) && !empty($nodeData['bluegreen']['releases_dir'])) {
+            $nodeData['release']['releases_dir'] = $nodeData['bluegreen']['releases_dir'];
+        }
+        if (empty($nodeData['release']['git_remote']) && !empty($nodeData['bluegreen']['git_remote'])) {
+            $nodeData['release']['git_remote'] = $nodeData['bluegreen']['git_remote'];
+        }
+
+        // Migrate watcher PID
+        $pid = $lockData['deploy']['watcher_pid']
+            ?? $lockData['release']['slave']['pid']
+            ?? $lockData['slave']['pid']
+            ?? null;
+        $nodeData['deploy']['watcher_pid'] = $pid;
+
+        // Migrate configuration state
+        if (isset($lockData['configuration'])) {
+            $nodeData['configuration'] = array_merge(
+                $nodeData['configuration'] ?? [],
+                $lockData['configuration']
+            );
+        }
+
+        NodeConfig::save($project, $nodeData);
+
+        Log::info('deployment', "migrateFromLockFile: migrated active={$current} previous={$previous} strategy={$strategy} project={$project}");
+
+        // Rename .env.bluegreen → .env.deployment in release dirs
+        $releasesDir = $nodeData['release']['releases_dir']
+            ?? $nodeData['bluegreen']['releases_dir']
+            ?? null;
+        if ($releasesDir && is_dir($releasesDir)) {
+            foreach (glob(rtrim($releasesDir, '/') . '/*/') as $dir) {
+                $oldEnv = $dir . '.env.bluegreen';
+                $newEnv = $dir . '.env.deployment';
+                if (is_file($oldEnv) && !is_file($newEnv)) {
+                    rename($oldEnv, $newEnv);
+                }
+
+                // Create deployment.json from .env.deployment if missing
+                $deployJson = $dir . '.protocol/deployment.json';
+                if (!is_file($deployJson) && is_file($newEnv)) {
+                    $envContent = file_get_contents($newEnv);
+                    $envData = [];
+                    foreach (explode("\n", $envContent) as $line) {
+                        if (preg_match('/^([A-Z_]+)=(.+)$/', trim($line), $m)) {
+                            $envData[strtolower($m[1])] = $m[2];
+                        }
+                    }
+                    self::writeDeploymentJson($dir, [
+                        'version' => basename(rtrim($dir, '/')),
+                        'compose_project_name' => $envData['compose_project_name'] ?? null,
+                        'port_http' => (int) ($envData['protocol_port_http'] ?? 80),
+                        'port_https' => (int) ($envData['protocol_port_https'] ?? 443),
+                        'container_name' => $envData['container_name'] ?? null,
+                        'docker_hostname' => $envData['docker_hostname'] ?? null,
+                        'status' => 'migrated',
+                    ]);
+                }
+            }
+        }
+
+        // Remove the lock file
+        @unlink($lockFile);
     }
 }

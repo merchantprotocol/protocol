@@ -147,7 +147,8 @@ View it anytime with `protocol deploy:log`.
 | File | Where | What it does |
 |---|---|---|
 | `protocol.json` | Your project root (in git) | Your project's Protocol settings — Docker image, deploy strategy, config repo URL |
-| `protocol.lock` | Your project root (gitignored) | Runtime state — what version is deployed, which processes are running, which files are symlinked |
+| `~/.protocol/.node/nodes/<project>.json` | Each machine (never in git) | Runtime state — what version is deployed, release tracking, bluegreen settings |
+| `<release_dir>/<version>/.protocol/deployment.json` | Each release directory (gitignored) | Per-release state — port, status, container name, watcher PID |
 | `~/.protocol/.node/key` | Each machine (never in git) | Your encryption key for decrypting secrets |
 | `~/.protocol/.node/deployments.log` | Each machine | Audit trail of every deployment |
 | `~/.protocol/.node/nodes/<project>.json` | Each slave node (never in git) | Per-node deployment settings for slave/blue-green nodes |

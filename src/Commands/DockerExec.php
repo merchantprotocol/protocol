@@ -44,7 +44,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Docker;
-use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
 
@@ -97,23 +97,16 @@ Class DockerExec extends Command {
 
         $cmd = $input->getArgument('cmd') ?: "/bin/sh";
 
-        // For release/bluegreen strategy, use the versioned container name
-        // from .env.bluegreen (e.g. ghostagent-v0.1.0)
-        $name = BlueGreen::getContainerName($repo_dir);
-
+        $name = ContainerName::resolveActive($repo_dir);
         if (!$name) {
-            $name = Json::read('docker.container_name', false, $repo_dir);
-        }
-        if (!$name) {
+            // Fallback: multiple containers in compose, prompt user
             $names = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
             if (count($names) === 0) {
-                $output->writeln('<error>No containers found in docker-compose.yml</error>');
+                $output->writeln('<error>No containers found</error>');
                 return Command::FAILURE;
             }
             if (count($names) === 1) {
                 $name = $names[0];
-                Json::write('docker.container_name', $name, $repo_dir);
-                Json::save($repo_dir);
             } else {
                 $io = new SymfonyStyle($input, $output);
                 $name = $io->choice('Select a container', $names, $names[0]);

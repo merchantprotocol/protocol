@@ -48,7 +48,6 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\SecretsProvider;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class NodeDeploy extends Command {

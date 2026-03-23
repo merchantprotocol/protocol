@@ -39,7 +39,6 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class DeployReleaseSlaveStop extends Command {
@@ -94,8 +93,6 @@ Class DeployReleaseSlaveStop extends Command {
             }
         }
 
-        JsonLock::write('release.slave.pid', null, $repo_dir);
-        JsonLock::save($repo_dir);
         DeploymentState::setWatcherPid($repo_dir, null);
 
         return Command::SUCCESS;

@@ -40,7 +40,7 @@ use Symfony\Component\Console\Helper\Table;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 Class ReleaseList extends Command {
 
@@ -71,7 +71,8 @@ Class ReleaseList extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+        $current = DeploymentState::current($repo_dir);
+        $currentRelease = $current ? $current['version'] : null;
         $activePointer = GitHub::getVariable('PROTOCOL_ACTIVE_RELEASE', $repo_dir);
 
         // Try GitHub releases first, fall back to local tags

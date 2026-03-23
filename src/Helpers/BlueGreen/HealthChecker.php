@@ -12,6 +12,7 @@ namespace Gitcd\Helpers\BlueGreen;
 
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Helpers\Log;
 
 class HealthChecker
@@ -62,7 +63,7 @@ class HealthChecker
                     $command = $check['command'] ?? '';
                     $expectExit = (int) ($check['expect_exit'] ?? 0);
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $version);
-                    $containerName = BlueGreen::getContainerName($releaseDir);
+                    $containerName = ContainerName::resolveFromDir($releaseDir);
 
                     if ($containerName && $command) {
                         // Validate command contains only safe characters

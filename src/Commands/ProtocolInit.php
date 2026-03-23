@@ -359,7 +359,7 @@ Class ProtocolInit extends Command {
         $helper,
         SymfonyStyle $io
     ): int {
-        $currentStrategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $currentStrategy = Json::read('deployment.strategy', 'none', $repo_dir);
         $projectName = Json::read('name', basename($repo_dir), $repo_dir);
 
         $this->clearAndBanner($output);
@@ -520,7 +520,9 @@ Class ProtocolInit extends Command {
         // Step 2: Releases directory
         $this->writeStep($output, 2, $totalSteps, 'Code Location');
 
-        $storedReleasesDir = $existingData['bluegreen']['releases_dir'] ?? null;
+        $storedReleasesDir = $existingData['release']['releases_dir']
+            ?? $existingData['bluegreen']['releases_dir']
+            ?? null;
         $defaultReleasesDir = $storedReleasesDir ?: rtrim($repo_dir, '/') . '/' . $projectName . '-releases';
 
         $output->writeln("    <fg=gray>Each release gets its own directory with a full git clone,</>");
@@ -554,8 +556,12 @@ Class ProtocolInit extends Command {
         $nodeData['deployment']['strategy'] = $nodeData['deployment']['strategy'] ?? 'release';
         $nodeData['deployment']['pointer'] = $nodeData['deployment']['pointer'] ?? 'github_variable';
         $nodeData['deployment']['pointer_name'] = $nodeData['deployment']['pointer_name'] ?? 'PROTOCOL_ACTIVE_RELEASE';
+        $nodeData['release'] = $nodeData['release'] ?? [];
+        $nodeData['release']['releases_dir'] = $releasesDir;
+        $nodeData['release']['git_remote'] = $gitRemote;
         $nodeData['bluegreen'] = $nodeData['bluegreen'] ?? [];
         $nodeData['bluegreen']['enabled'] = true;
+        // Keep bluegreen copies for backward compatibility during transition
         $nodeData['bluegreen']['git_remote'] = $gitRemote;
         $nodeData['bluegreen']['releases_dir'] = $releasesDir;
         $nodeData['bluegreen']['auto_promote'] = true;
@@ -1510,8 +1516,9 @@ Class ProtocolInit extends Command {
     {
         $fixes = [];
 
-        // Ensure .gitignore has protocol.lock
-        Git::addIgnore('protocol.lock', $repo_dir);
+        // Ensure .gitignore has deployment files
+        Git::addIgnore('.protocol/', $repo_dir);
+        Git::addIgnore('.env.deployment', $repo_dir);
 
         // Create missing scaffold directories
         foreach (['nginx.d', 'cron.d', 'supervisor.d'] as $dir) {
@@ -1649,7 +1656,7 @@ Class ProtocolInit extends Command {
 
     protected function writeCompletion(OutputInterface $output, string $repo_dir): void
     {
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $strategy = Json::read('deployment.strategy', 'none', $repo_dir);
 
         // Auto-commit protocol files
         $this->commitProtocolFiles($output, $repo_dir);

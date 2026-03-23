@@ -20,9 +20,10 @@ use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\Webhook;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Helpers\IncidentDetector;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
 
 class IncidentReport extends Command
 {
@@ -309,9 +310,11 @@ MD;
 
     private function gatherDeploymentInfo(string $repoDir): string
     {
-        $version = JsonLock::read('release.current', 'unknown', $repoDir);
-        $previous = JsonLock::read('release.previous', 'unknown', $repoDir);
-        $deployedAt = JsonLock::read('release.deployed_at', 'unknown', $repoDir);
+        $current = DeploymentState::current($repoDir);
+        $version = $current ? $current['version'] : 'unknown';
+        $deployedAt = $current ? ($current['deployed_at'] ?? 'unknown') : 'unknown';
+        $prev = DeploymentState::previous($repoDir);
+        $previous = $prev ? $prev['version'] : 'unknown';
         $strategy = Json::read('deployment.strategy', 'unknown', $repoDir);
 
         return <<<MD
@@ -394,7 +397,7 @@ MD;
                   + count(array_filter($soc2Results, fn($r) => $r['status'] === 'warn'));
 
         // Check container health
-        $containerNames = Docker::getContainerNamesFromDockerComposeFile($repoDir);
+        $containerNames = ContainerName::resolveAll($repoDir);
         $downContainers = 0;
         foreach ($containerNames as $name) {
             if (!Docker::isDockerContainerRunning($name)) {

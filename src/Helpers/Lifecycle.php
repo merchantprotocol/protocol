@@ -12,9 +12,9 @@ class Lifecycle
      *   "exec:<service> <command>" — runs inside the named compose service
      *   "<command>"                — runs on the host
      */
-    public static function runPostStart(string $repoDir, ?callable $logger = null, ?string $envFile = null): void
+    public static function runPostStart(string $repoDir, ?callable $logger = null, ?string $envFile = null, string $hookKey = 'lifecycle.post_start'): void
     {
-        $hooks = Json::read('lifecycle.post_start', [], $repoDir);
+        $hooks = Json::read($hookKey, [], $repoDir);
         if (!is_array($hooks) || empty($hooks)) {
             return;
         }

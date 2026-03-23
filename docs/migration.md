@@ -10,7 +10,7 @@ Protocol v2.0.0 introduces **release-based deployment** as the recommended strat
 | **How nodes update** | Poll branch, `git pull` | Poll GitHub variable, `git checkout tag` |
 | **Rollback** | Revert commit + push | `deploy:rollback` (instant) |
 | **Audit trail** | Git log only | Structured audit log (`~/.protocol/.node/deployments.log`) |
-| **Version tracking** | None | VERSION file, protocol.lock, GitHub Releases |
+| **Version tracking** | None | VERSION file, NodeConfig, GitHub Releases |
 | **Multi-node deploy** | Push to branch | Set one variable, all nodes update |
 
 ## Quick Migration
@@ -184,7 +184,7 @@ protocol deploy:rollback
 protocol node:rollback
 ```
 
-The previous version is tracked in `protocol.lock`, so rollback is always one command away.
+The previous version is tracked in NodeConfig (`release.previous`), so rollback is always one command away.
 
 ## Keeping Branch-Based Mode
 
@@ -232,3 +232,51 @@ gh repo view
 2. Check the active release: `protocol deploy:status`
 3. Check the audit log for errors: `protocol deploy:log`
 4. Restart the watcher: `protocol stop && protocol start`
+
+---
+
+## Migrating from protocol.lock to NodeConfig
+
+Protocol no longer uses `protocol.lock` for runtime state. All state is now stored in two locations:
+
+- **NodeConfig** (`~/.protocol/.node/nodes/<project>.json`) — release tracking, bluegreen settings, and shared configuration
+- **Per-release deployment.json** (`<release_dir>/<version>/.protocol/deployment.json`) — per-release runtime state (port, status, container name, watcher PID)
+
+### Automatic Migration
+
+**No manual action is required.** When you run `protocol start`, Protocol automatically detects any existing `protocol.lock` file and migrates its state to NodeConfig and deployment.json. The migration happens once on first run.
+
+After migration, the `protocol.lock` file is no longer read or written. You can safely delete it.
+
+### What Moved Where
+
+| Old Location (`protocol.lock`) | New Location |
+|---|---|
+| `release.current` | NodeConfig: `release.active` |
+| `release.previous` | NodeConfig: `release.previous` |
+| `release.deployed_at` | Per-release: `.protocol/deployment.json` |
+| `release.slave.pid` | Per-release: `.protocol/deployment.json` (`watcher_pid`) |
+| `bluegreen.active_version` | NodeConfig: `release.active` |
+| `bluegreen.previous_version` | NodeConfig: `release.previous` |
+| `bluegreen.shadow_version` | NodeConfig: `bluegreen.shadow_version` |
+| `bluegreen.promoted_at` | NodeConfig: `bluegreen.promoted_at` |
+| `bluegreen.releases.<version>.port` | Per-release: `.protocol/deployment.json` (`port`) |
+| `bluegreen.releases.<version>.status` | Per-release: `.protocol/deployment.json` (`status`) |
+
+### Other Changes
+
+- **`.env.bluegreen`** has been renamed to **`.env.deployment`**. Protocol handles this rename automatically during migration.
+- **Release directory detection** now uses path comparison against `release.releases_dir` in NodeConfig, rather than checking for the existence of specific files.
+- The `release.*` namespace in NodeConfig holds shared config used by both release and bluegreen strategies: `releases_dir`, `git_remote`, `active`, `previous`, `target`, `versions`.
+- The `bluegreen.*` namespace holds only bluegreen-specific config: `shadow_version`, `auto_promote`, `health_checks`, `promoted_at`.
+
+### New File Locations
+
+```
+~/.protocol/.node/nodes/<project>.json    ← all runtime state (replaces protocol.lock)
+
+<releases_dir>/<version>/.protocol/
+└── deployment.json                       ← per-release state (port, status, container_name)
+
+<releases_dir>/<version>/.env.deployment  ← port config (renamed from .env.bluegreen)
+```

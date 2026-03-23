@@ -47,7 +47,8 @@ use Gitcd\Helpers\Str;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigNew extends Command {
 
@@ -122,7 +123,8 @@ Class ConfigNew extends Command {
         }
         $newName = $slug;
 
-        $activeEnv = JsonLock::read('configuration.active', false, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $activeEnv = $project ? NodeConfig::read($project, 'configuration.active', false) : false;
         if ($activeEnv) {
             $output->writeln("<info>The $activeEnv environment is currently active. We need to disable this env to proceed.</info>");
             $question = new ConfirmationQuestion("Can we unlink the currently active env? [Y/n]");

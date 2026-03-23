@@ -44,7 +44,6 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\AnsiColors as C;
 use Gitcd\Helpers\DashboardFormatter as Fmt;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
 Class TopShadow extends Command {
 

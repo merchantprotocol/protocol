@@ -43,7 +43,6 @@ use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
 Class ShadowStart extends Command {
 

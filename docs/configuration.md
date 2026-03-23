@@ -103,10 +103,10 @@ These settings control zero-downtime shadow deployments. See [Shadow Deployment]
 | Setting | What it means |
 |---|---|
 | `bluegreen.enabled` | Enable shadow deployment mode (`true`/`false`) |
-| `bluegreen.git_remote` | Git remote URL for cloning releases (falls back to `git.remote`) |
-| `bluegreen.releases_dir` | Directory where release clones are stored (default: sibling `<project>-releases/`) |
 | `bluegreen.auto_promote` | Automatically promote the shadow to production after health checks pass |
 | `bluegreen.health_checks` | Array of health check definitions (see below) |
+
+Note: `releases_dir` and `git_remote` are stored in NodeConfig under the `release.*` namespace, not in `protocol.json`. See [NodeConfig (Runtime State)](#nodeconfig-runtime-state) above.
 
 Health check format:
 
@@ -169,7 +169,7 @@ When you run `protocol config:env production`, Protocol knows to check out the `
 | Server configuration | Config repo (plaintext) | nginx.conf, php.ini, cron schedules |
 | Docker configuration | App repo | docker-compose.yml, Dockerfile |
 | Project metadata | App repo | protocol.json |
-| Runtime state | App directory (gitignored) | protocol.lock |
+| Runtime state | NodeConfig + per-release `.protocol/deployment.json` | Active version, ports, container names |
 
 ### Setting It Up
 
@@ -212,30 +212,49 @@ This way, the relative symlinks resolve correctly inside the container.
 
 ---
 
-## protocol.lock
+## NodeConfig (Runtime State)
 
-This is Protocol's scratchpad. It tracks what's happening right now — which version is deployed, what processes are running, which files are symlinked.
+Runtime state is stored in NodeConfig (`~/.protocol/.node/nodes/<project>.json`) rather than in the project directory. This ensures state persists across blue-green directory swaps and isn't accidentally committed to git.
+
+NodeConfig uses two namespaces for release and bluegreen state:
+
+**`release.*`** — Shared release tracking (used by both release and bluegreen strategies):
+
+| Key | Type | Description |
+|---|---|---|
+| `release.releases_dir` | string | Absolute path to the releases directory |
+| `release.git_remote` | string | Git URL to clone releases from |
+| `release.active` | string | Currently serving version |
+| `release.previous` | string | Previous version (rollback target) |
+| `release.target` | string | Version being built or promoted |
+| `release.versions` | array | All known version tags |
+
+**`bluegreen.*`** — Bluegreen-specific settings:
+
+| Key | Type | Description |
+|---|---|---|
+| `bluegreen.shadow_version` | string | Version currently building in the shadow |
+| `bluegreen.auto_promote` | boolean | Auto-promote after successful build |
+| `bluegreen.health_checks` | array | Health check definitions |
+| `bluegreen.promoted_at` | string | Timestamp of last promotion |
+
+You never edit NodeConfig directly. Protocol manages it. The `release.previous` version is how `protocol deploy:rollback` knows where to go back to.
+
+### Per-Release State (deployment.json)
+
+Each release directory stores its own runtime state in `<release_dir>/<version>/.protocol/deployment.json`:
 
 ```json
 {
-    "release": {
-        "current": "v1.2.0",
-        "previous": "v1.1.0",
-        "deployed_at": "2024-01-15T10:30:01Z"
-    },
-    "release.slave": {
-        "pid": 12345
-    },
-    "configuration": {
-        "active": "production",
-        "symlinks": ["/opt/myapp/nginx.conf"]
-    }
+    "port": 80,
+    "status": "serving",
+    "container_name": "myapp-v1_2_0",
+    "deployed_at": "2024-01-15T10:30:01Z",
+    "watcher_pid": 12345
 }
 ```
 
-You never edit this file. Protocol manages it. It's gitignored because it's different on every machine.
-
-The `previous` version is how `protocol deploy:rollback` knows where to go back to.
+This file is auto-generated during `shadow:build` and updated during promotions and rollbacks.
 
 ---
 
@@ -287,15 +306,19 @@ When a server is set up as a slave/deployment node via `protocol init`, its conf
         "pointer": "github_variable",
         "pointer_name": "PROTOCOL_ACTIVE_RELEASE"
     },
-    "bluegreen": {
-        "enabled": true,
-        "git_remote": "git@github.com:org/myapp.git",
-        "releases_dir": "/opt/myapp-releases",
-        "auto_promote": true,
-        "health_checks": [
-            {"type": "http", "path": "/health", "expect_status": 200}
-        ]
-    }
+    "release.releases_dir": "/opt/myapp-releases",
+    "release.git_remote": "git@github.com:org/myapp.git",
+    "release.active": "v1.2.0",
+    "release.previous": "v1.1.0",
+    "release.target": null,
+    "release.versions": ["v1.1.0", "v1.2.0"],
+    "bluegreen.enabled": true,
+    "bluegreen.shadow_version": null,
+    "bluegreen.auto_promote": true,
+    "bluegreen.health_checks": [
+        {"type": "http", "path": "/health", "expect_status": 200}
+    ],
+    "bluegreen.promoted_at": "2026-03-10T21:00:00+00:00"
 }
 ```
 

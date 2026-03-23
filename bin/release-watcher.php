@@ -6,6 +6,15 @@
  * Polls the GitHub repository variable for release changes and automatically
  * deploys when a new release is detected.
  *
+ * State is stored in:
+ *   NodeConfig (~/.protocol/.node/nodes/<project>.json):
+ *     release.target  — version we want deployed (set immediately on detection)
+ *     release.active  — version that is successfully deployed
+ *     release.previous — rollback target
+ *
+ *   Per-release (.protocol/deployment.json):
+ *     watcher_pid, deployed_at, port_http, status, container_name
+ *
  * Usage: php release-watcher.php --dir=/path/to/repo [--interval=60]
  */
 
@@ -17,9 +26,9 @@ use Gitcd\Helpers\Log;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 // Redirect ALL logging to watcher.log — completely separate from protocol.log
@@ -96,7 +105,16 @@ Log::context('watcher', [
 
 $pointerName = Json::read('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
 $strategy = BlueGreen::getStrategy($repo_dir);
-$currentRelease = JsonLock::read('release.current', null, $repo_dir);
+$projectName = DeploymentState::resolveProjectName($repo_dir);
+$currentRelease = $projectName ? NodeConfig::read($projectName, 'release.active') : null;
+
+// Check for failed deploy on startup (target != active means previous attempt failed)
+if ($projectName) {
+    $target = NodeConfig::read($projectName, 'release.target');
+    if ($target && $target !== $currentRelease) {
+        Log::info('watcher', "detected incomplete deploy: target={$target}, active={$currentRelease} — will retry");
+    }
+}
 
 Log::context('watcher', [
     'pointer'  => $pointerName,
@@ -119,7 +137,6 @@ while (true) {
         chdir($repo_dir);
 
         // Clear singleton caches so we re-read files from disk each cycle
-        JsonLock::clearInstances();
         Json::clearInstances();
 
         // Refresh credentials before each poll (tokens expire after 1 hour)
@@ -135,7 +152,10 @@ while (true) {
         }
 
         $activeRelease = GitHub::getVariable($pointerName, $repo_dir);
-        $currentRelease = JsonLock::read('release.current', null, $repo_dir);
+
+        // Re-read current from NodeConfig each cycle
+        $projectName = DeploymentState::resolveProjectName($repo_dir);
+        $currentRelease = $projectName ? NodeConfig::read($projectName, 'release.active') : null;
 
         // Log poll state every 10th cycle
         if ($pollCount % 10 === 1) {
@@ -169,6 +189,10 @@ while (true) {
             'active'   => $activeRelease,
             'previous' => $currentRelease ?: 'none',
         ]);
+
+        // Immediately write target to NodeConfig
+        Log::info('watcher', "Setting release.target={$activeRelease}");
+        DeploymentState::setTarget($repo_dir, $activeRelease);
 
         // Fetch latest tags
         $gitRemote = BlueGreen::getGitRemote($repo_dir) ?: Git::RemoteUrl($repo_dir);
@@ -228,32 +252,16 @@ while (true) {
                 $activeRelease
             );
 
-            BlueGreen::setActiveVersion($repo_dir, $activeRelease);
+            Log::info('watcher', "Setting {$activeRelease} status=pending");
             BlueGreen::setReleaseState($repo_dir, $activeRelease, BlueGreen::PRODUCTION_HTTP, 'pending');
-            JsonLock::write('release.previous', $currentRelease, $repo_dir);
-            JsonLock::write('release.current', $activeRelease, $repo_dir);
-            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-            JsonLock::save($repo_dir);
 
-            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'release-watcher');
+            // NOTE: We do NOT set release.active here. The watcher already set
+            // release.target above. ProtocolStart will set release.active after
+            // containers start successfully. This way, if start fails,
+            // target != active and the next watcher startup will retry.
+
+            AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'initiated', 'release-watcher');
             Log::info('watcher', "release {$activeRelease} prepared, running stop+start");
-
-            // Persist active version in node config BEFORE stop+start.
-            // protocol stop kills the watcher, so protocol.lock state written
-            // above may not survive. Node config is the durable source of truth
-            // that protocol start reads via NodeConfig::resolveActiveDir().
-            $projectName = NodeConfig::findByRepoDir($repo_dir);
-            if ($projectName) {
-                $nodeData = NodeConfig::load($projectName);
-                $nodeData['release']['current'] = $activeRelease;
-                if ($currentRelease) {
-                    $nodeData['release']['previous'] = $currentRelease;
-                }
-                NodeConfig::save($projectName, $nodeData);
-                Log::info('watcher', "node config updated: release.current={$activeRelease} (project={$projectName})");
-            } else {
-                Log::warn('watcher', "no node config found for {$repo_dir} — active version only in protocol.lock");
-            }
 
             $stopDir = $repo_dir;
             if ($currentRelease) {
@@ -308,6 +316,7 @@ while (true) {
             $buildOutput = null;
             if (!BlueGreen::buildContainers($releaseDir, $buildOutput)) {
                 Log::error('watcher', "docker build failed for {$activeRelease}: " . trim($buildOutput ?? '(no output)'));
+                Log::error('watcher', "Marking {$activeRelease} as failed (build)");
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 sleep($interval);
@@ -320,6 +329,7 @@ while (true) {
             $healthy = BlueGreen::runHealthChecks($repo_dir, $shadowHttp, $healthChecks, $activeRelease);
 
             if ($healthy) {
+                Log::info('watcher', "Shadow {$activeRelease} healthy, marking ready");
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'ready');
                 BlueGreen::setShadowVersion($repo_dir, $activeRelease);
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease);
@@ -332,28 +342,14 @@ while (true) {
                         AuditLog::logShadow($repo_dir, 'promote', $activeRelease, $activeRelease);
                         AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'shadow-auto-promote');
 
-                        JsonLock::write('release.previous', $currentRelease, $repo_dir);
-                        JsonLock::write('release.current', $activeRelease, $repo_dir);
-                        JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-                        JsonLock::save($repo_dir);
-
                         Log::context('watcher', [
                             'event'    => 'auto_promoted',
                             'version'  => $activeRelease,
                             'previous' => $currentRelease ?: 'none',
                         ]);
 
-                        // Persist active version in node config before stop+start
-                        $bgProject = NodeConfig::findByRepoDir($repo_dir);
-                        if ($bgProject) {
-                            $bgNodeData = NodeConfig::load($bgProject);
-                            $bgNodeData['release']['current'] = $activeRelease;
-                            if ($currentRelease) {
-                                $bgNodeData['release']['previous'] = $currentRelease;
-                            }
-                            NodeConfig::save($bgProject, $bgNodeData);
-                            Log::info('watcher', "node config updated: release.current={$activeRelease} (project={$bgProject})");
-                        }
+                        // NOTE: We do NOT set release.active here. ProtocolStart will
+                        // set it after containers are confirmed running (same as release strategy).
 
                         $bgStopDir = $repo_dir;
                         if ($currentRelease) {
@@ -370,6 +366,7 @@ while (true) {
                     Log::info('watcher', "shadow ready, run 'protocol shadow:start' to promote");
                 }
             } else {
+                Log::error('watcher', "Marking {$activeRelease} as failed (health check)");
                 BlueGreen::setReleaseState($repo_dir, $activeRelease, $shadowHttp, 'failed');
                 AuditLog::logShadow($repo_dir, 'build', $activeRelease, $activeRelease, 'failure');
                 Log::error('watcher', "health check failed for {$activeRelease}, will retry next cycle");
@@ -386,10 +383,17 @@ while (true) {
             Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout " . escapeshellarg($activeRelease) . " 2>&1");
             Log::info('watcher', "checked out {$activeRelease}");
 
-            JsonLock::write('release.previous', $currentRelease, $repo_dir);
-            JsonLock::write('release.current', $activeRelease, $repo_dir);
-            JsonLock::write('release.deployed_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-            JsonLock::save($repo_dir);
+            // Update NodeConfig
+            if ($projectName) {
+                Log::info('watcher', "Branch deploy: setting release.active={$activeRelease}");
+                NodeConfig::modify($projectName, function (array $nd) use ($activeRelease, $currentRelease) {
+                    $nd['release']['active'] = $activeRelease;
+                    if ($currentRelease) {
+                        $nd['release']['previous'] = $currentRelease;
+                    }
+                    return $nd;
+                });
+            }
 
             AuditLog::logDeploy($repo_dir, $currentRelease ?: 'none', $activeRelease, 'success', 'watcher');
             Log::info('watcher', "tag {$activeRelease} checked out, running stop+start");

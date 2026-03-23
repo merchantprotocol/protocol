@@ -70,12 +70,27 @@ class IncidentSnapshot extends Command
             copy("{$nodeDir}deployments.log", "{$snapshotDir}/deployments.log");
         }
 
-        // Copy protocol.json and protocol.lock from repo
+        // Copy protocol.json from repo
         if (is_file("{$repo_dir}/protocol.json")) {
             copy("{$repo_dir}/protocol.json", "{$snapshotDir}/protocol.json");
         }
-        if (is_file("{$repo_dir}/protocol.lock")) {
-            copy("{$repo_dir}/protocol.lock", "{$snapshotDir}/protocol.lock");
+
+        // Copy node config for this project
+        $project = \Gitcd\Helpers\DeploymentState::resolveProjectName($repo_dir);
+        if ($project) {
+            $nodePath = \Gitcd\Utils\NodeConfig::configPath($project);
+            if (is_file($nodePath)) {
+                copy($nodePath, "{$snapshotDir}/node-config.json");
+            }
+        }
+
+        // Copy active release's deployment.json
+        $current = \Gitcd\Helpers\DeploymentState::current($repo_dir);
+        if ($current && !empty($current['dir'])) {
+            $deployJson = rtrim($current['dir'], '/') . '/.protocol/deployment.json';
+            if (is_file($deployJson)) {
+                copy($deployJson, "{$snapshotDir}/deployment.json");
+            }
         }
 
         // ── Running processes ────────────────────────────────────

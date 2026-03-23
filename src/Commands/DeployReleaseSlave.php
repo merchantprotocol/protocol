@@ -40,7 +40,6 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Log;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class DeployReleaseSlave extends Command {
@@ -171,8 +170,6 @@ Class DeployReleaseSlave extends Command {
         ]);
 
         if ($newPid && is_numeric($newPid)) {
-            JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
-            JsonLock::save($repo_dir);
             DeploymentState::setWatcherPid($repo_dir, (int) $newPid);
 
             // Verify the process is actually alive after a brief moment

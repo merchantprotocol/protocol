@@ -4,9 +4,8 @@ tmp/pid/*
 !tmp/pid/.gitkeep
 config/config.php
 protocol.json
-protocol.lock
 .idea
-protocol.lock
+.protocol/
 vendor/
 .phpunit.cache/
 .env

@@ -46,10 +46,10 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Helpers\DeploymentState;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStatus extends Command {
@@ -111,7 +111,7 @@ Class ProtocolStatus extends Command {
 
         // Read config: slave nodes use NodeConfig, others use protocol.json
         if ($nodeConfig) {
-            $strategy = $nodeData['deployment']['strategy'] ?? 'branch';
+            $strategy = $nodeData['deployment']['strategy'] ?? 'none';
             $projectName = $nodeData['name'] ?? $nodeConfig;
             $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
             $currentRelease = $nodeData['release']['current'] ?? null;
@@ -121,7 +121,7 @@ Class ProtocolStatus extends Command {
             $secretsMode = $nodeData['deployment']['secrets'] ?? 'file';
             $gitRemote = $nodeData['git']['remote'] ?? null;
         } else {
-            $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+            $strategy = Json::read('deployment.strategy', 'none', $repo_dir);
             $projectName = Json::read('name', basename($repo_dir), $repo_dir);
             $releasesDir = null;
             $currentRelease = null;
@@ -164,12 +164,12 @@ Class ProtocolStatus extends Command {
 
         // Release info
         if ($strategy === 'release' || $strategy === 'bluegreen') {
-            // Node config's release.current may be stale — the watcher writes
-            // to protocol.lock, so always check there too.
+            // Fallback: check ReleaseState if DeploymentState didn't find it.
             if (!$currentRelease) {
                 $currentRelease = BlueGreen::getActiveVersion($repo_dir);
             }
-            $deployedAt = JsonLock::read('release.deployed_at', null, $repo_dir);
+            $currentState = DeploymentState::current($repo_dir);
+            $deployedAt = $currentState ? ($currentState['deployed_at'] ?? null) : null;
             $releaseDisplay = $currentRelease ?: '<fg=yellow>none</>';
 
             if ($currentRelease && $deployedAt) {
@@ -239,7 +239,7 @@ Class ProtocolStatus extends Command {
         if (!$lockDir || !is_dir($lockDir)) {
             $this->writeService($output, 'watchers', 'stopped', 'no active deployment directory');
         } elseif ($strategy === 'release') {
-            $pid = JsonLock::read('release.slave.pid', null, $lockDir);
+            $pid = DeploymentState::watcherPid($lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'deploy:slave', 'watching', "pid {$pid}");
@@ -254,7 +254,7 @@ Class ProtocolStatus extends Command {
                 }
             }
         } else {
-            $pid = JsonLock::read('slave.pid', null, $lockDir);
+            $pid = DeploymentState::watcherPid($lockDir);
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'git:slave', 'watching', "pid {$pid}");
@@ -266,7 +266,8 @@ Class ProtocolStatus extends Command {
 
         // Config watcher
         if ($configrepo && Git::isInitializedRepo($configrepo)) {
-            $pid = JsonLock::read('configuration.slave.pid', null, $lockDir);
+            $configProject = DeploymentState::resolveProjectName($lockDir);
+            $pid = $configProject ? NodeConfig::read($configProject, 'configuration.slave_pid') : null;
             $running = $pid && Shell::isRunning($pid);
             if ($running) {
                 $this->writeService($output, 'config:slave', 'watching', "pid {$pid}");
@@ -309,30 +310,27 @@ Class ProtocolStatus extends Command {
 
         // ── Docker ───────────────────────────────────────────────
         // For release/bluegreen strategies, the active container has a version
-        // suffix (e.g. ghostagent-v0.1.1) set via .env.bluegreen. We must read
+        // suffix (e.g. ghostagent-v0.1.1) set via .protocol/deployment.json. We must read
         // the patched name from that file, not from the compose file which has
         // an unresolved ${CONTAINER_NAME:-ghostagent} variable.
         $dockerDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
         $containers = [];
         $releaseDockerDir = null;
 
+        $containers = ContainerName::resolveAll($repo_dir);
+        if (empty($containers) && $dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
+            $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
+        }
+
+        // Determine the effective docker dir for release strategies
         if (BlueGreen::isEnabled($repo_dir)) {
             $activeVersion = BlueGreen::getActiveVersion($repo_dir);
             if ($activeVersion) {
                 $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                 if (is_dir($releaseDir)) {
                     $releaseDockerDir = $releaseDir;
-                    $envName = BlueGreen::getContainerName($releaseDir);
-                    if ($envName) {
-                        $containers[] = $envName;
-                    }
                 }
             }
-        }
-
-        // Fallback: if no release containers found, use compose file from dockerDir
-        if (empty($containers) && $dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
-            $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
         }
 
         $effectiveDockerDir = $releaseDockerDir ?: $dockerDir;
@@ -379,7 +377,8 @@ Class ProtocolStatus extends Command {
             if ($secretsMode === 'aws') {
                 $this->writeLine($output, 'Secrets', '<fg=green>AWS Secrets Manager</>');
             } else {
-                $decryptedFiles = JsonLock::read('configuration.decrypted_files', [], $lockDir);
+                $cfgProject = DeploymentState::resolveProjectName($lockDir);
+                $decryptedFiles = $cfgProject ? NodeConfig::read($cfgProject, 'configuration.decrypted_files', []) : [];
                 if (!empty($decryptedFiles)) {
                     $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
                 } elseif (Secrets::hasKey()) {
@@ -401,7 +400,8 @@ Class ProtocolStatus extends Command {
             }
 
             // Symlinks
-            $symlinks = JsonLock::read('configuration.symlinks', [], $lockDir);
+            $symProject = DeploymentState::resolveProjectName($lockDir);
+            $symlinks = $symProject ? NodeConfig::read($symProject, 'configuration.symlinks', []) : [];
             if (!empty($symlinks)) {
                 $this->writeLine($output, 'Symlinks', '<fg=white>' . count($symlinks) . ' linked</>');
             }

@@ -47,7 +47,6 @@ use Gitcd\Helpers\Str;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
 Class ConfigSwitch extends Command {
 

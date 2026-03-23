@@ -41,7 +41,6 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class DeployStatus extends Command {
@@ -72,7 +71,7 @@ Class DeployStatus extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $strategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $strategy = Json::read('deployment.strategy', 'none', $repo_dir);
 
         $rows = [];
         $rows[] = ['Deployment Strategy', "<info>{$strategy}</info>"];

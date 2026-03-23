@@ -40,17 +40,12 @@ class NodeConfig
     }
 
     /**
-     * Read a value from a node config.
+     * Read a value from a node config (with shared file lock).
      */
     public static function read(string $projectName, string $key, $default = null)
     {
-        $path = self::configPath($projectName);
-        if (!is_file($path)) {
-            return $default;
-        }
-
-        $data = json_decode(file_get_contents($path), true);
-        if (!is_array($data)) {
+        $data = self::load($projectName);
+        if (empty($data)) {
             return $default;
         }
 
@@ -67,7 +62,7 @@ class NodeConfig
     }
 
     /**
-     * Write a node config file.
+     * Write a node config file (atomic read-modify-write with exclusive lock).
      */
     public static function save(string $projectName, array $data): void
     {
@@ -86,7 +81,70 @@ class NodeConfig
     }
 
     /**
-     * Load the full config array for a project.
+     * Atomically load, modify, and save a node config.
+     * The callback receives the current data array and must return the modified array.
+     * The file is held under exclusive lock for the entire read-modify-write cycle.
+     *
+     * @param string $projectName
+     * @param callable(array): array $callback
+     */
+    public static function modify(string $projectName, callable $callback): void
+    {
+        $dir = self::nodesDir();
+        if (!is_dir($dir)) {
+            mkdir($dir, 0700, true);
+        }
+
+        $path = self::configPath($projectName);
+        $lockFile = $path . '.lock';
+
+        $lockHandle = fopen($lockFile, 'c');
+        if (!$lockHandle) {
+            // Fallback to non-atomic save
+            $data = self::load($projectName);
+            $data = $callback($data);
+            self::save($projectName, $data);
+            return;
+        }
+
+        // Acquire exclusive lock — blocks until available
+        if (!flock($lockHandle, LOCK_EX)) {
+            fclose($lockHandle);
+            $data = self::load($projectName);
+            $data = $callback($data);
+            self::save($projectName, $data);
+            return;
+        }
+
+        try {
+            // Read under lock
+            $data = [];
+            if (is_file($path)) {
+                $content = file_get_contents($path);
+                $decoded = json_decode($content, true);
+                if (is_array($decoded)) {
+                    $data = $decoded;
+                }
+            }
+
+            // Modify
+            $data = $callback($data);
+
+            // Write under lock
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+                LOCK_EX
+            );
+            chmod($path, 0600);
+        } finally {
+            flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    /**
+     * Load the full config array for a project (with shared file lock).
      */
     public static function load(string $projectName): array
     {
@@ -95,8 +153,21 @@ class NodeConfig
             return [];
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        return is_array($data) ? $data : [];
+        // Acquire shared lock for consistent reads
+        $handle = fopen($path, 'r');
+        if (!$handle) {
+            return [];
+        }
+
+        try {
+            flock($handle, LOCK_SH);
+            $content = stream_get_contents($handle);
+            $data = json_decode($content, true);
+            return is_array($data) ? $data : [];
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
     }
 
     /**
@@ -188,7 +259,7 @@ class NodeConfig
      */
     public static function resolveActiveDir(array $data): string
     {
-        $strategy = $data['deployment']['strategy'] ?? 'branch';
+        $strategy = $data['deployment']['strategy'] ?? 'none';
         $releasesDir = $data['bluegreen']['releases_dir'] ?? null;
         $currentRelease = $data['release']['current'] ?? null;
         $currentBranch = $data['deployment']['branch'] ?? $data['git']['branch'] ?? null;

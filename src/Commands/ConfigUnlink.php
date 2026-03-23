@@ -44,7 +44,8 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigUnlink extends Command {
 
@@ -94,7 +95,8 @@ Class ConfigUnlink extends Command {
 
         $ignored = ['.gitignore', 'README.md', '.git'];
         $configfiles = Dir::dirToArray($configrepo, $ignored);
-        $configfiles2 = JsonLock::read('configuration.symlinks', [], $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $configfiles2 = $project ? NodeConfig::read($project, 'configuration.symlinks', []) : [];
 
         foreach($configfiles + $configfiles2 as $sourcepath)
         {
@@ -105,9 +107,13 @@ Class ConfigUnlink extends Command {
                 Shell::run($command);
             }
         }
-        JsonLock::write('configuration.symlinks', [], $repo_dir);
-        JsonLock::write('configuration.active', false, $repo_dir);
-        JsonLock::save($repo_dir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nd) {
+                $nd['configuration']['symlinks'] = [];
+                $nd['configuration']['active'] = false;
+                return $nd;
+            });
+        }
 
         $output->writeln("<info>Done removing symlinks</info>");
         return Command::SUCCESS;

@@ -43,7 +43,8 @@ use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\DeploymentState;
+use Gitcd\Utils\NodeConfig;
 
 Class ShadowStatus extends Command {
 
@@ -87,7 +88,8 @@ Class ShadowStatus extends Command {
         $activeVersion = BlueGreen::getActiveVersion($repo_dir);
         $previousVersion = BlueGreen::getPreviousVersion($repo_dir);
         $shadowVersion = BlueGreen::getShadowVersion($repo_dir);
-        $promotedAt = JsonLock::read('bluegreen.promoted_at', null, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $promotedAt = $project ? NodeConfig::read($project, 'bluegreen.promoted_at') : null;
         $releases = BlueGreen::listReleases($repo_dir);
         $releasesDir = BlueGreen::getReleasesDir($repo_dir);
 

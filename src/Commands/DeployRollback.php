@@ -44,7 +44,6 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class DeployRollback extends Command {
@@ -86,7 +85,7 @@ Class DeployRollback extends Command {
             $prev = DeploymentState::previous($repo_dir);
             $targetVersion = $prev['version'] ?? null;
             if (!$targetVersion) {
-                $output->writeln('<error>No previous release found in protocol.lock. Specify a version: protocol deploy:rollback v1.0.0</error>');
+                $output->writeln('<error>No previous release found. Specify a version: protocol deploy:rollback v1.0.0</error>');
                 return Command::FAILURE;
             }
         }
