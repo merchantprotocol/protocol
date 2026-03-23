@@ -39,6 +39,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Log;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
@@ -104,8 +105,7 @@ Class DeployReleaseSlave extends Command {
             $output->writeln("<comment>Parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}</comment>");
         }
 
-        $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $repo_dir;
-        $logFile = $logDir . 'release-watcher.log';
+        $logFile = Log::getLogFile();
         $cmd = "cd " . escapeshellarg(rtrim($repo_dir, '/')) . " && nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"

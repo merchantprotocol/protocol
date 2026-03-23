@@ -33,6 +33,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Log;
 use Gitcd\Helpers\Config;
 
 Class Crontab
@@ -161,11 +162,8 @@ Class Crontab
         file_put_contents($tmpFile, $tooverwrite);
         $result = Shell::run("crontab " . escapeshellarg($tmpFile), $returnVar);
         if ($returnVar !== 0) {
-            // Log failure for debugging
-            $logFile = is_writable('/var/log/protocol/') ? '/var/log/protocol/protocol-start.log' : null;
-            if ($logFile) {
-                @file_put_contents($logFile, "[" . date('H:i:s') . "] [crontab] overwrite failed (exit={$returnVar}): {$result}\n[crontab] content: " . str_replace("\n", "\\n", $tooverwrite) . "\n", FILE_APPEND | LOCK_EX);
-            }
+            Log::error('crontab', "overwrite failed (exit={$returnVar}): {$result}");
+            Log::write('crontab', "content: " . str_replace("\n", "\\n", $tooverwrite));
         }
         unlink($tmpFile);
         return $result;

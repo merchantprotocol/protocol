@@ -7,7 +7,7 @@
  *   [protocol] Infrastructure provisioning.... OK (4.1s)
  *   [protocol] Running security audit......... PASS (1.3s)
  *
- * All stage activity is logged to NODE_DATA_DIR/protocol-start.log
+ * All stage activity is logged to /var/log/protocol/protocol.log
  */
 namespace Gitcd\Helpers;
 
@@ -39,28 +39,8 @@ class StageRunner
      */
     private function initLog(): void
     {
-        $logDir = '/var/log/protocol/';
-        if (!is_dir($logDir)) {
-            // /var/log is typically root-owned; use sudo to create
-            Shell::run("sudo mkdir -p /var/log/protocol 2>/dev/null");
-        }
-        if (is_dir($logDir) && !is_writable($logDir)) {
-            Shell::run("sudo chmod 1777 /var/log/protocol 2>/dev/null");
-        }
-        // Fallback if /var/log/protocol still isn't available
-        if (!is_dir($logDir) || !is_writable($logDir)) {
-            $logDir = (defined('NODE_DATA_DIR') ? NODE_DATA_DIR : sys_get_temp_dir() . '/protocol/') . 'log/';
-            if (!is_dir($logDir)) {
-                @mkdir($logDir, 0755, true);
-            }
-        }
-        $this->logFile = $logDir . 'protocol-start.log';
-
-        // Rotate: keep last run's log as .prev
-        if (is_file($this->logFile)) {
-            @rename($this->logFile, $this->logFile . '.prev');
-        }
-
+        // Use the consolidated log file from Log helper
+        $this->logFile = Log::getLogFile();
         $this->log("=== Protocol start at " . date('Y-m-d H:i:s') . " ===");
     }
 
@@ -69,22 +49,12 @@ class StageRunner
      */
     public function log(string $message): void
     {
-        $timestamp = date('H:i:s');
-        $prefix = $this->currentStage ? "[{$this->currentStage}] " : '';
-
-        if ($this->logFile) {
-            @file_put_contents(
-                $this->logFile,
-                "[{$timestamp}] {$prefix}{$message}\n",
-                FILE_APPEND | LOCK_EX
-            );
-        }
-
-        // Also write to the consolidated protocol.log
         $tag = $this->currentStage ? 'stage:' . $this->currentStage : 'stage';
         Log::write($tag, $message);
 
         if ($this->verbose) {
+            $timestamp = date('H:i:s');
+            $prefix = $this->currentStage ? "[{$this->currentStage}] " : '';
             $this->output->writeln("[{$timestamp}] {$prefix}{$message}");
         }
     }

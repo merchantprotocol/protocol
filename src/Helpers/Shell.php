@@ -242,21 +242,12 @@ Class Shell
             @chdir('/tmp');
         }
 
-        $outputfile = '/var/log/protocol/background_process.log';
-        if (!file_exists($outputfile)) {
-            $dir = dirname($outputfile);
-            if (!is_dir($dir)) {
-                @mkdir($dir, 0755, true);
-            }
-            if (is_dir($dir)) {
-                touch($outputfile);
-            }
-        }
+        $outputfile = Log::getLogFile();
 
         Log::write('shell:background', "launching: {$command}");
         Log::write('shell:background', "output → {$outputfile}");
 
-        $command = sprintf("%s > %s 2>&1 & echo $!", $command, $outputfile);
+        $command = sprintf("%s >> %s 2>&1 & echo $!", $command, $outputfile);
         exec($command, $response);
 
         if (is_array($response)) {
