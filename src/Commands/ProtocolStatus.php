@@ -234,9 +234,12 @@ Class ProtocolStatus extends Command {
         $this->writeSection($output, 'Services');
 
         // Deploy watcher — check lock files in the active directory
+        // Skip for strategy=none (local dev) — no watchers are used
         $lockDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
 
-        if (!$lockDir || !is_dir($lockDir)) {
+        if ($strategy === 'none') {
+            // No watchers in local dev mode — nothing to report
+        } elseif (!$lockDir || !is_dir($lockDir)) {
             $this->writeService($output, 'watchers', 'stopped', 'no active deployment directory');
         } elseif ($strategy === 'release') {
             $pid = DeploymentState::watcherPid($lockDir);
@@ -276,35 +279,39 @@ Class ProtocolStatus extends Command {
             }
         }
 
-        // Crontab
-        $hasCron = Crontab::hasCrontabRestart($repo_dir);
-        if ($hasCron) {
-            $this->writeService($output, 'crontab', 'installed');
-        } else {
-            $this->writeService($output, 'crontab', 'missing');
-            $issues[] = 'Crontab reboot recovery not installed';
-        }
-
-        // Wazuh SIEM agent
-        $wazuhInstalled = is_dir('/var/ossec') || is_dir('/Library/Ossec');
-        if ($wazuhInstalled) {
-            if (is_file('/var/ossec/bin/wazuh-control')) {
-                $status = Shell::run('/var/ossec/bin/wazuh-control status 2>/dev/null');
-                $wazuhRunning = strpos($status, 'running') !== false;
-            } elseif (is_file('/Library/Ossec/bin/wazuh-control')) {
-                $status = Shell::run('sudo /Library/Ossec/bin/wazuh-control status 2>/dev/null');
-                $wazuhRunning = strpos($status, 'running') !== false;
-            } elseif (trim(Shell::run('which systemctl 2>/dev/null'))) {
-                $status = trim(Shell::run('systemctl is-active wazuh-agent 2>/dev/null'));
-                $wazuhRunning = $status === 'active';
+        // Crontab — skip for strategy=none (local dev doesn't use crontab)
+        $wazuhRunning = false;
+        $wazuhInstalled = false;
+        if ($strategy !== 'none') {
+            $hasCron = Crontab::hasCrontabRestart($repo_dir);
+            if ($hasCron) {
+                $this->writeService($output, 'crontab', 'installed');
+            } else {
+                $this->writeService($output, 'crontab', 'missing');
+                $issues[] = 'Crontab reboot recovery not installed';
             }
 
-            if ($wazuhRunning) {
-                $lastEvent = $this->getWazuhLastEvent();
-                $this->writeService($output, 'wazuh-agent', 'running', $lastEvent);
-            } else {
-                $this->writeService($output, 'wazuh-agent', 'stopped');
-                $issues[] = 'Wazuh SIEM agent is not running';
+            // Wazuh SIEM agent
+            $wazuhInstalled = is_dir('/var/ossec') || is_dir('/Library/Ossec');
+            if ($wazuhInstalled) {
+                if (is_file('/var/ossec/bin/wazuh-control')) {
+                    $status = Shell::run('/var/ossec/bin/wazuh-control status 2>/dev/null');
+                    $wazuhRunning = strpos($status, 'running') !== false;
+                } elseif (is_file('/Library/Ossec/bin/wazuh-control')) {
+                    $status = Shell::run('sudo /Library/Ossec/bin/wazuh-control status 2>/dev/null');
+                    $wazuhRunning = strpos($status, 'running') !== false;
+                } elseif (trim(Shell::run('which systemctl 2>/dev/null'))) {
+                    $status = trim(Shell::run('systemctl is-active wazuh-agent 2>/dev/null'));
+                    $wazuhRunning = $status === 'active';
+                }
+
+                if ($wazuhRunning) {
+                    $lastEvent = $this->getWazuhLastEvent();
+                    $this->writeService($output, 'wazuh-agent', 'running', $lastEvent);
+                } else {
+                    $this->writeService($output, 'wazuh-agent', 'stopped');
+                    $issues[] = 'Wazuh SIEM agent is not running';
+                }
             }
         }
 
@@ -410,88 +417,91 @@ Class ProtocolStatus extends Command {
         }
 
         // ── Security ─────────────────────────────────────────────
-        $output->writeln('');
-        $this->writeSection($output, 'Security');
+        // Skip entire section for strategy=none (local dev)
+        if ($strategy !== 'none') {
+            $output->writeln('');
+            $this->writeSection($output, 'Security');
 
-        // SOC 2 checks
-        $soc2Dir = $activeDir ?: $repo_dir;
-        if ($soc2Dir && is_dir($soc2Dir)) {
-            $soc2 = new Soc2Check($soc2Dir);
-            $soc2->runAll();
-            $soc2Results = $soc2->getResults();
-            $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
-            $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
+            // SOC 2 checks
+            $soc2Dir = $activeDir ?: $repo_dir;
+            if ($soc2Dir && is_dir($soc2Dir)) {
+                $soc2 = new Soc2Check($soc2Dir);
+                $soc2->runAll();
+                $soc2Results = $soc2->getResults();
+                $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
+                $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
 
-            if (empty($soc2Failures) && empty($soc2Warns)) {
-                $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
-            } elseif (empty($soc2Failures)) {
-                $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
+                if (empty($soc2Failures) && empty($soc2Warns)) {
+                    $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
+                } elseif (empty($soc2Failures)) {
+                    $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
+                } else {
+                    $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
+                    foreach ($soc2Failures as $f) {
+                        $issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
+                    }
+                }
             } else {
-                $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
-                foreach ($soc2Failures as $f) {
-                    $issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
-                }
-            }
-        } else {
-            $this->writeLine($output, 'SOC 2', '<fg=gray>skipped (no active directory)</>');
-        }
-
-        // SIEM
-        if ($wazuhInstalled) {
-            $configFile = is_file('/var/ossec/etc/ossec.conf') ? '/var/ossec/etc/ossec.conf' : '/Library/Ossec/etc/ossec.conf';
-            $siemManager = '';
-            $protocolLogConfigured = false;
-            if (is_file($configFile)) {
-                $config = file_get_contents($configFile);
-                if (preg_match('/<address>(.*?)<\/address>/', $config, $m)) {
-                    $siemManager = $m[1];
-                }
-                $protocolLogConfigured = strpos($config, 'Protocol deployment audit log') !== false;
+                $this->writeLine($output, 'SOC 2', '<fg=gray>skipped (no active directory)</>');
             }
 
-            if ($wazuhRunning) {
-                $siemDetail = "connected";
-                if ($siemManager) {
-                    $siemDetail .= " to {$siemManager}";
+            // SIEM
+            if ($wazuhInstalled) {
+                $configFile = is_file('/var/ossec/etc/ossec.conf') ? '/var/ossec/etc/ossec.conf' : '/Library/Ossec/etc/ossec.conf';
+                $siemManager = '';
+                $protocolLogConfigured = false;
+                if (is_file($configFile)) {
+                    $config = file_get_contents($configFile);
+                    if (preg_match('/<address>(.*?)<\/address>/', $config, $m)) {
+                        $siemManager = $m[1];
+                    }
+                    $protocolLogConfigured = strpos($config, 'Protocol deployment audit log') !== false;
                 }
-                if ($protocolLogConfigured) {
-                    $siemDetail .= ' <fg=gray>log forwarding active</>';
+
+                if ($wazuhRunning) {
+                    $siemDetail = "connected";
+                    if ($siemManager) {
+                        $siemDetail .= " to {$siemManager}";
+                    }
+                    if ($protocolLogConfigured) {
+                        $siemDetail .= ' <fg=gray>log forwarding active</>';
+                    }
+                    $this->writeLine($output, 'SIEM', "<fg=green>{$siemDetail}</>");
+                } else {
+                    $this->writeLine($output, 'SIEM', '<fg=yellow>installed but not running</>');
                 }
-                $this->writeLine($output, 'SIEM', "<fg=green>{$siemDetail}</>");
             } else {
-                $this->writeLine($output, 'SIEM', '<fg=yellow>installed but not running</>');
+                $this->writeLine($output, 'SIEM', '<fg=gray>not installed</> <fg=gray>(run protocol siem:install)</>');
             }
-        } else {
-            $this->writeLine($output, 'SIEM', '<fg=gray>not installed</> <fg=gray>(run protocol siem:install)</>');
-        }
 
-        // Encryption key
-        if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
-            $keyPerms = fileperms(Secrets::keyPath()) & 0777;
-            $keyOk = $keyPerms === 0600;
-            $this->writeLine($output, 'Encryption', $keyOk
-                ? '<fg=green>AES-256-GCM key present (0600)</>'
-                : sprintf('<fg=yellow>key permissions %04o (should be 0600)</>', $keyPerms));
-        } elseif ($secretsMode === 'encrypted') {
-            $this->writeLine($output, 'Encryption', '<fg=red>key missing</>');
-        } else {
-            $this->writeLine($output, 'Encryption', '<fg=gray>not configured</>');
-        }
+            // Encryption key
+            if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
+                $keyPerms = fileperms(Secrets::keyPath()) & 0777;
+                $keyOk = $keyPerms === 0600;
+                $this->writeLine($output, 'Encryption', $keyOk
+                    ? '<fg=green>AES-256-GCM key present (0600)</>'
+                    : sprintf('<fg=yellow>key permissions %04o (should be 0600)</>', $keyPerms));
+            } elseif ($secretsMode === 'encrypted') {
+                $this->writeLine($output, 'Encryption', '<fg=red>key missing</>');
+            } else {
+                $this->writeLine($output, 'Encryption', '<fg=gray>not configured</>');
+            }
 
-        // Audit log
-        $logPath = AuditLog::logPath();
-        if (is_file($logPath)) {
-            $lastLines = AuditLog::read(1);
-            $logDetail = 'active';
-            if (!empty($lastLines)) {
-                if (preg_match('/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)/', $lastLines[0], $m)) {
-                    $ago = $this->timeAgo($m[1]);
-                    $logDetail .= " <fg=gray>last entry {$ago}</>";
+            // Audit log
+            $logPath = AuditLog::logPath();
+            if (is_file($logPath)) {
+                $lastLines = AuditLog::read(1);
+                $logDetail = 'active';
+                if (!empty($lastLines)) {
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)/', $lastLines[0], $m)) {
+                        $ago = $this->timeAgo($m[1]);
+                        $logDetail .= " <fg=gray>last entry {$ago}</>";
+                    }
                 }
+                $this->writeLine($output, 'Audit log', "<fg=green>{$logDetail}</>");
+            } else {
+                $this->writeLine($output, 'Audit log', '<fg=yellow>no entries yet</>');
             }
-            $this->writeLine($output, 'Audit log', "<fg=green>{$logDetail}</>");
-        } else {
-            $this->writeLine($output, 'Audit log', '<fg=yellow>no entries yet</>');
         }
 
         // ── Disk ─────────────────────────────────────────────────
