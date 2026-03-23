@@ -315,18 +315,26 @@ Class ProtocolStart extends Command {
             $runner->log("strategy={$strategy} isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
 
             // Release and bluegreen strategies both use release directories.
-            // Start the active version's containers from the release dir.
+            // Start the target version's containers from the release dir.
+            // Priority: release.target (what the watcher wants deployed) > release.active (what's running)
             if (BlueGreen::isEnabled($repo_dir)) {
-                $activeVersion = BlueGreen::getActiveVersion($repo_dir);
-                $runner->log("getActiveVersion={$activeVersion}");
+                // 1. Check release.target — set by the watcher before stop+start
+                $activeVersion = DeploymentState::target($repo_dir);
+                if ($activeVersion) {
+                    $runner->log("release.target={$activeVersion}");
+                }
+
+                // 2. Fall back to release.active (current running version)
+                if (!$activeVersion) {
+                    $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                    $runner->log("getActiveVersion={$activeVersion}");
+                }
                 if (!$activeVersion) {
                     $curDeploy = DeploymentState::current($repo_dir);
                     $activeVersion = $curDeploy['version'] ?? null;
                     $runner->log("DeploymentState::current fallback version={$activeVersion}");
                 }
-                // Final fallback: read release.active from node config.
-                // The watcher persists the active version here before calling
-                // protocol stop+start.
+                // 3. Final fallback: read release.active from node config.
                 if (!$activeVersion || $activeVersion === 'main') {
                     $project = NodeConfig::findByRepoDir($repo_dir);
                     if ($project) {
@@ -619,10 +627,17 @@ Class ProtocolStart extends Command {
                 return;
             }
 
-            // For release/bluegreen, check the active release's container
+            // For release/bluegreen, check the release's container
+            // Use same priority as container start: target > active
             if (BlueGreen::isEnabled($repo_dir)) {
-                $activeVersion = BlueGreen::getActiveVersion($repo_dir);
-                $runner->log("Health check: getActiveVersion={$activeVersion}");
+                $activeVersion = DeploymentState::target($repo_dir);
+                if ($activeVersion) {
+                    $runner->log("Health check: release.target={$activeVersion}");
+                }
+                if (!$activeVersion) {
+                    $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+                    $runner->log("Health check: getActiveVersion={$activeVersion}");
+                }
                 if (!$activeVersion) {
                     $curDeploy = DeploymentState::current($repo_dir);
                     $activeVersion = $curDeploy['version'] ?? null;
