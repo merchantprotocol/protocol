@@ -294,6 +294,11 @@ Class ProtocolStart extends Command {
                     $dirExists = is_dir($releaseDir);
                     $runner->log("releaseDir={$releaseDir} exists={$dirExists}");
                     if ($dirExists) {
+                        // Ensure docker-compose.yml has parameterized container
+                        // name and ports. The watcher patches this on initial clone,
+                        // but git operations may restore the original file.
+                        BlueGreen::patchComposeFile($releaseDir);
+
                         // For release strategy, ensure production ports are set
                         if ($strategy === 'release') {
                             $runner->log("Writing production ports (80/443) for release strategy");
