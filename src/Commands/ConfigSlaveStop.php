@@ -43,8 +43,8 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
-use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigSlaveStop extends Command {
 
@@ -85,12 +85,17 @@ Class ConfigSlaveStop extends Command {
         $killed = false;
 
         // Try the tracked PID first
-        $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $pid = $project ? NodeConfig::read($project, 'configuration.slave_pid') : null;
         $running = Shell::isRunning( $pid );
         if ($pid && $running) {
             Shell::run("kill " . intval($pid));
-            JsonLock::write('configuration.slave.pid', null, $repo_dir);
-            JsonLock::save($repo_dir);
+            if ($project) {
+                NodeConfig::modify($project, function (array $nd) {
+                    $nd['configuration']['slave_pid'] = null;
+                    return $nd;
+                });
+            }
             $output->writeln("Slave mode stopped on the config repo (PID: $pid)");
             $killed = true;
         }

@@ -119,7 +119,7 @@ protocol start
 
 ### "Slave mode is already running"
 
-A previous watcher is still alive, or the PID file is stale.
+A previous watcher is still alive, or the PID recorded in NodeConfig is stale.
 
 **Fix:**
 ```bash
@@ -131,8 +131,7 @@ protocol deploy:slave:stop     # for release mode
 ps aux | grep -E "git-repo-watcher|release-watcher"
 kill <pid>
 
-# Clean up and restart
-rm protocol.lock
+# Restart (Protocol will reset stale state in NodeConfig automatically)
 protocol start
 ```
 

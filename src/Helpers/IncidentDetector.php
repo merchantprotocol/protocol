@@ -8,7 +8,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Helpers\DeploymentState;
 
 class IncidentDetector
@@ -48,7 +48,7 @@ class IncidentDetector
         if (!$isDev) {
             // Check for containers that should be running but aren't
             if ($repoDir && Docker::isDockerInitialized($repoDir)) {
-                $containerNames = Docker::getContainerNamesFromDockerComposeFile($repoDir);
+                $containerNames = ContainerName::resolveAll($repoDir);
                 $downContainers = [];
                 foreach ($containerNames as $name) {
                     if (!Docker::isDockerContainerRunning($name)) {

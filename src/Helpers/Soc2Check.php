@@ -72,12 +72,12 @@ class Soc2Check extends BaseAuditChecker
      */
     protected function checkDeployStrategy(): void
     {
-        $strategy = Json::read('deployment.strategy', 'branch', $this->repoDir);
+        $strategy = Json::read('deployment.strategy', 'none', $this->repoDir);
 
         // On slave nodes the release directory's protocol.json may not have
         // deployment.strategy set. Fall back to NodeConfig which stores the
         // authoritative strategy for deployed projects.
-        if ($strategy === 'branch') {
+        if ($strategy === 'none' || $strategy === 'branch') {
             $projectName = NodeConfig::findByRepoDir($this->repoDir);
             if (!$projectName) {
                 $result = NodeConfig::findByActiveDir($this->repoDir);

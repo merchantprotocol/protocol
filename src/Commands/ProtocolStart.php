@@ -56,12 +56,14 @@ use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\SecurityAudit;
 use Gitcd\Helpers\Soc2Check;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\ContainerName;
+use Gitcd\Helpers\DevCompose;
+use Gitcd\Helpers\PortConflict;
 use Gitcd\Helpers\Lifecycle;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Helpers\DiskCheck;
 use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 Class ProtocolStart extends Command {
@@ -111,6 +113,9 @@ Class ProtocolStart extends Command {
             $repo_dir = $activeDir;
         }
 
+        // Migrate from protocol.lock if it exists (one-time, idempotent)
+        DeploymentState::migrateFromLockFile($repo_dir);
+
         // For non-slave nodes, require a git repo
         if (!$nodeConfig) {
             Git::checkInitializedRepo($output, $repo_dir);
@@ -147,8 +152,8 @@ Class ProtocolStart extends Command {
         $isDev = (in_array($environment, $devEnvs) || strpos($environment, 'localhost') !== false);
 
         $strategy = $nodeConfig
-            ? ($nodeData['deployment']['strategy'] ?? 'branch')
-            : Json::read('deployment.strategy', 'branch', $repo_dir);
+            ? ($nodeData['deployment']['strategy'] ?? 'none')
+            : Json::read('deployment.strategy', 'none', $repo_dir);
 
         // Prepare sub-command inputs
         $force = $input->getOption('force');
@@ -236,6 +241,14 @@ Class ProtocolStart extends Command {
                 $app->find('deploy:slave')->run($arrInput, $subOutput);
                 $runner->log("deploy:slave returned");
 
+            } elseif ($strategy === 'none') {
+                // No deployment strategy — skip watchers entirely, just link configs
+                $runner->log("strategy=none, skipping watchers");
+                if ($hasConfigRepo) {
+                    $runner->log("Running config:link");
+                    $app->find('config:link')->run($arrInput, $subOutput);
+                }
+
             } else {
                 // Legacy branch-based deployment mode
                 if (!$isDev) {
@@ -266,17 +279,39 @@ Class ProtocolStart extends Command {
                 }
             }
 
-            // Add crontab restart command
-            $runner->log("Adding crontab restart");
-            Crontab::addCrontabRestart($repo_dir);
+            // Add crontab restart command (skip for local dev — no deployment to restart)
+            if ($strategy !== 'none') {
+                $runner->log("Adding crontab restart");
+                Crontab::addCrontabRestart($repo_dir);
+            } else {
+                $runner->log("strategy=none, skipping crontab");
+            }
         });
+
+        // ── Port conflict detection (none strategy only) ─────────
+        $portOverrideFile = null;
+        if ($strategy === 'none') {
+            $conflicts = PortConflict::detectConflicts($repo_dir);
+            if (!empty($conflicts)) {
+                $alternatives = PortConflict::suggestAlternatives($conflicts);
+                $resolution = PortConflict::promptUser($conflicts, $alternatives, $input, $output, $repo_dir);
+                if ($resolution === null) {
+                    $output->writeln('  <fg=red>Startup aborted due to port conflicts.</>');
+                    return Command::FAILURE;
+                }
+                if ($resolution === 'remap') {
+                    $portOverrideFile = PortConflict::generateOverrideFile($repo_dir, $alternatives);
+                    $runner->log("Port override file generated: {$portOverrideFile}");
+                }
+            }
+        }
 
         // ── Stage 3: Container build & start ────────────────────
         // Handles all three strategies:
         //   "release"   — Start the active release's containers on production ports
         //   "bluegreen" — Start the active version's containers (may be on shadow or production ports)
         //   "branch"    — Standard in-place build from repo_dir
-        $runner->run('Container build & start', function() use ($runner, $repo_dir, $strategy) {
+        $runner->run('Container build & start', function() use ($runner, $repo_dir, $strategy, $portOverrideFile) {
             $runner->log("strategy={$strategy} isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
 
             // Release and bluegreen strategies both use release directories.
@@ -289,15 +324,14 @@ Class ProtocolStart extends Command {
                     $activeVersion = $curDeploy['version'] ?? null;
                     $runner->log("DeploymentState::current fallback version={$activeVersion}");
                 }
-                // Final fallback: read release.current from node config.
+                // Final fallback: read release.active from node config.
                 // The watcher persists the active version here before calling
-                // protocol stop+start, so this survives even when protocol.lock
-                // in the release dir hasn't been written yet.
+                // protocol stop+start.
                 if (!$activeVersion || $activeVersion === 'main') {
                     $project = NodeConfig::findByRepoDir($repo_dir);
                     if ($project) {
                         $nd = NodeConfig::load($project);
-                        $nodeRelease = $nd['release']['current'] ?? null;
+                        $nodeRelease = $nd['release']['active'] ?? null;
                         if ($nodeRelease) {
                             $activeVersion = $nodeRelease;
                             $runner->log("NodeConfig fallback version={$activeVersion} (project={$project})");
@@ -315,7 +349,7 @@ Class ProtocolStart extends Command {
                         //   ports: "8090:80"            →  ports: "${PROTOCOL_PORT_HTTP:-80}:80"
                         //
                         // Without this, writeReleaseEnv() sets CONTAINER_NAME=mp-gateway-v1.0.0
-                        // in .env.bluegreen, but docker-compose ignores it because the compose
+                        // in .env.deployment, but docker-compose ignores it because the compose
                         // file has a hardcoded name. The result is containers named "mp-gateway"
                         // with no version info, making it impossible to tell which release is
                         // running or to run multiple releases side-by-side.
@@ -336,7 +370,7 @@ Class ProtocolStart extends Command {
                             );
                         }
 
-                        $containerName = BlueGreen::getContainerName($releaseDir);
+                        $containerName = ContainerName::resolveFromDir($releaseDir);
                         $runner->log("Starting containers: release={$activeVersion} container={$containerName} dir={$releaseDir}");
 
                         // Inject secrets (encrypted or AWS) into containers,
@@ -350,7 +384,7 @@ Class ProtocolStart extends Command {
 
                             $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
                             $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
-                            $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
+                            $envFile = rtrim($releaseDir, '/') . '/.env.deployment';
                             $dockerCommand = Docker::getDockerCommand();
 
                             $runner->log("{$dockerCommand} up -d (with secrets + bluegreen env)");
@@ -371,9 +405,23 @@ Class ProtocolStart extends Command {
                         $runner->log("startContainers result=" . ($started ? 'ok' : 'failed'));
 
                         // Verify the container is actually running
+                        $isRunning = false;
                         if ($containerName) {
                             $isRunning = Docker::isDockerContainerRunning($containerName);
                             $runner->log("Post-start verify: container={$containerName} running={$isRunning}");
+                        }
+
+                        // Mark this version as active NOW that containers are confirmed running.
+                        // The watcher set release.target earlier; this closes the gap so target == active.
+                        // If we never reach here (crash/failure), target != active and the next
+                        // watcher startup will detect the failed deploy and retry.
+                        if ($isRunning || $started) {
+                            $runner->log("Setting release.active={$activeVersion} (containers confirmed running)");
+                            BlueGreen\ReleaseState::setActiveVersion($repo_dir, $activeVersion);
+                            DeploymentState::writeDeploymentJson($releaseDir, [
+                                'status' => 'active',
+                                'deployed_at' => date('c'),
+                            ]);
                         }
                         return;
                     }
@@ -414,6 +462,13 @@ Class ProtocolStart extends Command {
             $dockerCommand = Docker::getDockerCommand();
             $tmpEnv = SecretsProvider::resolveToTempFile($repo_dir);
 
+            // Build the compose command with optional override files
+            $portOverrideFlag = '';
+            if ($portOverrideFile && is_file($portOverrideFile)) {
+                $portOverrideFlag = ' -f ' . escapeshellarg($portOverrideFile);
+                $runner->log("Using port override: {$portOverrideFile}");
+            }
+
             if ($tmpEnv) {
                 // Write secrets into the project dir so compose can reference it
                 $secretsFile = rtrim($repo_dir, '/') . '/.env.protocol-secrets';
@@ -428,6 +483,7 @@ Class ProtocolStart extends Command {
                 Shell::run("cd " . escapeshellarg($repo_dir)
                     . " && {$dockerCommand} -f " . escapeshellarg($composePath)
                     . " -f " . escapeshellarg($overrideFile)
+                    . $portOverrideFlag
                     . " up --build -d 2>&1");
 
                 // Clean up secrets files immediately
@@ -436,16 +492,55 @@ Class ProtocolStart extends Command {
                 $runner->log("Secrets temp files cleaned up");
             } else {
                 $runner->log("{$dockerCommand} up --build -d");
-                Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} up --build -d 2>&1");
+                Shell::run("cd " . escapeshellarg($repo_dir)
+                    . " && {$dockerCommand}"
+                    . " -f " . escapeshellarg($composePath)
+                    . $portOverrideFlag
+                    . " up --build -d 2>&1");
+            }
+
+            // Clean up port override file
+            if ($portOverrideFile && is_file($portOverrideFile)) {
+                unlink($portOverrideFile);
+                $runner->log("Port override file cleaned up");
             }
 
         });
 
+        // ── Dev compose services ─────────────────────────────────
+        // Only for "none" strategy (local dev). Check for dev compose files
+        // and offer to start their containers too.
+        if ($strategy === 'none') {
+            $devComposePath = DevCompose::find($repo_dir);
+            if ($devComposePath) {
+                $shouldStart = DevCompose::shouldAct($repo_dir, 'Start', $input, $output, $devComposePath);
+                if ($shouldStart) {
+                    $runner->run('Starting dev services', function() use ($runner, $repo_dir, $devComposePath) {
+                        $result = DevCompose::start($repo_dir, $devComposePath);
+                        $runner->log("output=" . trim($result));
+                    });
+                }
+            }
+        }
+
         // ── Stage 4: Post-start lifecycle hooks ──────────────────
+        // For "none" strategy (local dev), use lifecycle.post_start_dev if defined,
+        // otherwise fall back to lifecycle.post_start.
         $runner->run('Post-start hooks', function() use ($runner, $repo_dir, $strategy) {
-            $postStart = Json::read('lifecycle.post_start', [], $repo_dir);
+            $hookKey = 'lifecycle.post_start';
+            if ($strategy === 'none') {
+                $devHooks = Json::read('lifecycle.post_start_dev', null, $repo_dir);
+                if (is_array($devHooks)) {
+                    $hookKey = 'lifecycle.post_start_dev';
+                    $runner->log("strategy=none, using {$hookKey}");
+                } else {
+                    $runner->log("strategy=none, no post_start_dev defined, falling back to post_start");
+                }
+            }
+
+            $postStart = Json::read($hookKey, [], $repo_dir);
             if (empty($postStart) || !is_array($postStart)) {
-                $runner->log("No post_start hooks configured");
+                $runner->log("No {$hookKey} hooks configured");
                 return;
             }
 
@@ -462,7 +557,7 @@ Class ProtocolStart extends Command {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                     if (is_dir($releaseDir)) {
                         $hookDir = $releaseDir;
-                        $bgEnv = rtrim($releaseDir, '/') . '/.env.bluegreen';
+                        $bgEnv = rtrim($releaseDir, '/') . '/.env.deployment';
                         if (is_file($bgEnv)) {
                             $envFile = $bgEnv;
                         }
@@ -470,39 +565,59 @@ Class ProtocolStart extends Command {
                 }
             }
 
-            $runner->log("Running " . count($postStart) . " post_start hook(s) in {$hookDir}");
+            $runner->log("Running " . count($postStart) . " {$hookKey} hook(s) in {$hookDir}");
             Lifecycle::runPostStart($hookDir, function($msg) use ($runner) {
                 $runner->log($msg);
-            }, $envFile);
+            }, $envFile, $hookKey);
         });
 
         // ── Stage 5: Security audit ─────────────────────────────
-        $runner->run('Running security audit', function() use ($repo_dir) {
-            $audit = new SecurityAudit($repo_dir);
-            $audit->runAll();
-            Webhook::notifyAudit('security_audit', $repo_dir, $audit->getResults(), $audit->passed());
-            if (!$audit->passed()) {
-                $failures = array_filter($audit->getResults(), fn($r) => $r['status'] === 'fail');
-                $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
-                throw new \RuntimeException(implode("\n", $messages));
-            }
-        }, 'PASS');
+        // Skip for local dev — security/compliance checks are for deployed environments
+        if ($strategy !== 'none') {
+            $runner->run('Running security audit', function() use ($repo_dir) {
+                $audit = new SecurityAudit($repo_dir);
+                $audit->runAll();
+                Webhook::notifyAudit('security_audit', $repo_dir, $audit->getResults(), $audit->passed());
+                if (!$audit->passed()) {
+                    $failures = array_filter($audit->getResults(), fn($r) => $r['status'] === 'fail');
+                    $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
+                    throw new \RuntimeException(implode("\n", $messages));
+                }
+            }, 'PASS');
+        }
 
         // ── Stage 6: SOC 2 readiness check ───────────────────────
-        $runner->run('SOC 2 readiness check', function() use ($repo_dir) {
-            $check = new Soc2Check($repo_dir);
-            $check->runAll();
-            Webhook::notifyAudit('soc2_check', $repo_dir, $check->getResults(), $check->passed());
-            if (!$check->passed()) {
-                $failures = array_filter($check->getResults(), fn($r) => $r['status'] === 'fail');
-                $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
-                throw new \RuntimeException(implode("\n", $messages));
-            }
-        }, 'PASS');
+        // Skip for local dev — compliance checks are for deployed environments
+        if ($strategy !== 'none') {
+            $runner->run('SOC 2 readiness check', function() use ($repo_dir) {
+                $check = new Soc2Check($repo_dir);
+                $check->runAll();
+                Webhook::notifyAudit('soc2_check', $repo_dir, $check->getResults(), $check->passed());
+                if (!$check->passed()) {
+                    $failures = array_filter($check->getResults(), fn($r) => $r['status'] === 'fail');
+                    $messages = array_map(fn($r) => $r['name'] . ': ' . $r['message'], $failures);
+                    throw new \RuntimeException(implode("\n", $messages));
+                }
+            }, 'PASS');
+        }
 
         // ── Stage 7: Health checks ──────────────────────────────
         $runner->run('Health checks', function() use ($runner, $repo_dir, $strategy) {
             $runner->log("Health check: strategy={$strategy} isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
+
+            // For local dev, just verify containers are running — no watchers to check
+            if ($strategy === 'none') {
+                $containerNames = Docker::getContainerNamesFromDockerComposeFile($repo_dir);
+                $runner->log("Health check (none): compose containers=" . implode(',', $containerNames));
+                foreach ($containerNames as $name) {
+                    $isRunning = Docker::isDockerContainerRunning($name);
+                    $runner->log("Health check: container={$name} running={$isRunning}");
+                    if (!$isRunning) {
+                        throw new \RuntimeException("Container '{$name}' is not running");
+                    }
+                }
+                return;
+            }
 
             // For release/bluegreen, check the active release's container
             if (BlueGreen::isEnabled($repo_dir)) {
@@ -517,7 +632,7 @@ Class ProtocolStart extends Command {
                     $project = NodeConfig::findByRepoDir($repo_dir);
                     if ($project) {
                         $nd = NodeConfig::load($project);
-                        $nodeRelease = $nd['release']['current'] ?? null;
+                        $nodeRelease = $nd['release']['active'] ?? null;
                         if ($nodeRelease) {
                             $activeVersion = $nodeRelease;
                             $runner->log("Health check: NodeConfig fallback version={$activeVersion}");
@@ -526,7 +641,7 @@ Class ProtocolStart extends Command {
                 }
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
-                    $containerName = BlueGreen::getContainerName($releaseDir);
+                    $containerName = ContainerName::resolveFromDir($releaseDir);
                     $runner->log("Health check: releaseDir={$releaseDir} containerName={$containerName}");
                     if ($containerName) {
                         $isRunning = Docker::isDockerContainerRunning($containerName);
@@ -542,7 +657,7 @@ Class ProtocolStart extends Command {
                         }
                         return;
                     } else {
-                        $runner->log("Health check: no .env.bluegreen container name found, falling through to compose check");
+                        $runner->log("Health check: no .env.deployment container name found, falling through to compose check");
                     }
                 }
             }
@@ -578,46 +693,7 @@ Class ProtocolStart extends Command {
         }, 'PASS');
 
         // ── Summary ─────────────────────────────────────────────
-        $curDeploy = DeploymentState::current($repo_dir);
-        $version = ($curDeploy['version'] ?? null)
-            ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
-        $secretsStatus = Secrets::hasKey() ? 'decrypted' : 'no key found';
-        $cronStatus = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
-
-        $watcherType = DeploymentState::strategy($repo_dir);
-        $watcherPid = DeploymentState::watcherPid($repo_dir);
-        $watcherStatus = ($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running';
-
-        // Collect container names: use patched names from .env.bluegreen
-        // for release dirs, compose file names for branch dirs.
-        $containerNames = [];
-
-        // Release dir containers (by patched name from .env.bluegreen)
-        if (BlueGreen::isEnabled($repo_dir)) {
-            $activeVersion = BlueGreen::getActiveVersion($repo_dir);
-            $runner->log("Summary: activeVersion={$activeVersion}");
-            if ($activeVersion) {
-                $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
-                $envName = BlueGreen::getContainerName($releaseDir);
-                $runner->log("Summary: releaseDir={$releaseDir} envName={$envName}");
-                if ($envName) {
-                    $containerNames[] = $envName;
-                }
-            }
-        }
-
-        // Non-release dirs (branch strategy)
-        foreach (DeploymentState::allKnownDirs($repo_dir) as $dir) {
-            if (file_exists(rtrim($dir, '/') . '/.env.bluegreen')) {
-                continue; // Already handled above by patched name
-            }
-            $names = Docker::getContainerNamesFromDockerComposeFile($dir);
-            foreach ($names as $name) {
-                if (!in_array($name, $containerNames)) {
-                    $containerNames[] = $name;
-                }
-            }
-        }
+        $containerNames = ContainerName::resolveAll($repo_dir);
 
         $runner->log("Summary: containerNames=" . implode(',', $containerNames));
         $runningCount = 0;
@@ -629,17 +705,25 @@ Class ProtocolStart extends Command {
             ? "{$runningCount}/{$containerTotal} running"
             : 'none configured';
 
-        $cleanupCron = Crontab::hasDockerCleanup($repo_dir) ? 'scheduled' : 'not scheduled';
-
         $summaryInfo = [
             'Environment' => $environment,
-            'Strategy'    => $strategy . ($version !== 'unknown' ? " ({$version})" : ''),
-            'Secrets'     => $secretsStatus,
+            'Strategy'    => $strategy,
             'Containers'  => $containerStatus,
-            'Watchers'    => "{$watcherType} watcher {$watcherStatus}",
-            'Crontab'     => $cronStatus,
-            'Cleanup'     => $cleanupCron,
         ];
+
+        if ($strategy !== 'none') {
+            $curDeploy = DeploymentState::current($repo_dir);
+            $version = ($curDeploy['version'] ?? null)
+                ?: trim(Shell::run("cd " . escapeshellarg($repo_dir) . " && git describe --tags --always 2>/dev/null") ?: 'unknown');
+            $summaryInfo['Strategy'] = $strategy . ($version !== 'unknown' ? " ({$version})" : '');
+            $summaryInfo['Secrets'] = Secrets::hasKey() ? 'decrypted' : 'no key found';
+
+            $watcherType = DeploymentState::strategy($repo_dir);
+            $watcherPid = DeploymentState::watcherPid($repo_dir);
+            $summaryInfo['Watchers'] = "{$watcherType} watcher " . (($watcherPid && Shell::isRunning($watcherPid)) ? 'running' : 'not running');
+            $summaryInfo['Crontab'] = Crontab::hasCrontabRestart($repo_dir) ? 'installed' : 'not installed';
+            $summaryInfo['Cleanup'] = Crontab::hasDockerCleanup($repo_dir) ? 'scheduled' : 'not scheduled';
+        }
 
         $runner->writeSummary($summaryInfo);
 

@@ -81,7 +81,7 @@ Class Json extends Config
 			}
 		}
 		$json_pretty = json_encode($this->data, JSON_PRETTY_PRINT);
-		return ($file) ?file_put_contents( $file, $json_pretty ) :false;
+		return ($file) ?file_put_contents( $file, $json_pretty, LOCK_EX ) :false;
 	}
 
 	/**
@@ -99,25 +99,6 @@ Class Json extends Config
         $self->put();
 	}
 
-    /**
-     * Creates a lock file
-     *
-     * @param boolean $file
-     * @return void
-     */
-    public static function lock( $file = false, $repo_dir = false )
-    {
-		if (!$repo_dir) {
-			$repo_dir = WORKING_DIR;
-		}
-		if (!$file) {
-			$file = $repo_dir.'protocol.lock';
-		}
-		$class = get_called_class();
-		$self = $class::getInstance( false, $repo_dir );
-        $self->put( $file );
-    }
-	
 	/**
 	 * Constructor.
 	 * 

@@ -46,7 +46,8 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\FileEncryption;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigLink extends Command {
 
@@ -137,14 +138,17 @@ Class ConfigLink extends Command {
             $linkcmd = "cd " . escapeshellarg($linkdir) . " && ln -s " . escapeshellarg($relpath) . " " . escapeshellarg($filename) . " && cd " . escapeshellarg($working_dir);
             Shell::run($linkcmd);
         }
-        JsonLock::write('configuration.symlinks', $configfiles, $repo_dir);
-        if (!empty($decryptedFiles)) {
-            JsonLock::write('configuration.decrypted_files', $decryptedFiles, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nd) use ($configfiles, $decryptedFiles) {
+                $nd['configuration']['symlinks'] = $configfiles;
+                if (!empty($decryptedFiles)) {
+                    $nd['configuration']['decrypted_files'] = $decryptedFiles;
+                }
+                $nd['configuration']['active'] = \Gitcd\Helpers\Config::read('env', false);
+                return $nd;
+            });
         }
-
-        $environment = Config::read('env', false);
-        JsonLock::write('configuration.active', $environment, $repo_dir);
-        JsonLock::save($repo_dir);
 
         // Also write decrypted file tracking to the config repo's own lock file
         if (!empty($decryptedFiles)) {

@@ -40,7 +40,8 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 abstract class BaseSlaveCommand extends Command {
 
@@ -101,9 +102,9 @@ abstract class BaseSlaveCommand extends Command {
      * @param string          $command    The shell command to execute
      * @param bool            $daemon     Whether to run as a background daemon
      * @param int             $increment  Sleep interval in seconds
-     * @param array           $lockData   Key-value pairs to write to JsonLock before launching daemon
-     * @param string          $pidKey     The JsonLock key to store the daemon PID
-     * @param string          $repo_dir   The repo directory for JsonLock operations
+     * @param array           $lockData   Key-value pairs to write to NodeConfig before launching daemon
+     * @param string          $pidKey     The dotted key to store the daemon PID
+     * @param string          $repo_dir   The repo directory
      * @param OutputInterface $output
      * @return int Command exit code
      */
@@ -117,15 +118,44 @@ abstract class BaseSlaveCommand extends Command {
         OutputInterface $output
     ): int {
         if ($daemon) {
-            // Write all lock data
-            foreach ($lockData as $key => $value) {
-                JsonLock::write($key, $value, $repo_dir);
-            }
+            $project = DeploymentState::resolveProjectName($repo_dir);
+            if ($project) {
+                $pid = Shell::background($command);
+                sleep(1);
 
-            $pid = Shell::background($command);
-            JsonLock::write($pidKey, $pid, $repo_dir);
-            sleep(1);
-            JsonLock::save($repo_dir);
+                NodeConfig::modify($project, function (array $nodeData) use ($lockData, $pidKey, $pid) {
+                    // Write all lock data as nested keys
+                    foreach ($lockData as $key => $value) {
+                        $parts = explode('.', $key);
+                        $ref = &$nodeData;
+                        foreach ($parts as $part) {
+                            if (!isset($ref[$part]) || !is_array($ref[$part])) {
+                                $ref[$part] = [];
+                            }
+                            $ref = &$ref[$part];
+                        }
+                        $ref = $value;
+                        unset($ref);
+                    }
+
+                    // Write the PID key
+                    $parts = explode('.', $pidKey);
+                    $ref = &$nodeData;
+                    foreach ($parts as $part) {
+                        if (!isset($ref[$part]) || !is_array($ref[$part])) {
+                            $ref[$part] = [];
+                        }
+                        $ref = &$ref[$part];
+                    }
+                    $ref = $pid;
+                    unset($ref);
+
+                    return $nodeData;
+                });
+            } else {
+                Shell::background($command);
+                sleep(1);
+            }
 
             return Command::SUCCESS;
         }

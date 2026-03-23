@@ -41,7 +41,6 @@ use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\DeploymentState;
-use Gitcd\Utils\JsonLock;
 
 Class NodeRollback extends Command {
 
@@ -77,7 +76,7 @@ Class NodeRollback extends Command {
         $prev = DeploymentState::previous($repo_dir);
         $previousRelease = $prev['version'] ?? null;
         if (!$previousRelease) {
-            $output->writeln('<error>No previous release found in protocol.lock.</error>');
+            $output->writeln('<error>No previous release found. Nothing to roll back to.</error>');
             return Command::FAILURE;
         }
 

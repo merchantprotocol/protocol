@@ -45,7 +45,6 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\StageRunner;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Commands\Init\DotMenuTrait;
 
 Class ShadowInit extends Command {

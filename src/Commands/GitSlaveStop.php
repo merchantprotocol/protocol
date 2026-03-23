@@ -42,8 +42,7 @@ use Symfony\Component\Console\Command\LockableTrait;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
-use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 use Gitcd\Helpers\DeploymentState;
 
 Class GitSlaveStop extends Command {
@@ -83,7 +82,8 @@ Class GitSlaveStop extends Command {
 
         // Check to see if the PID is still running, fail if it is
         $pids = [];
-        $pid = JsonLock::read('slave.pid', null, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $pid = $project ? NodeConfig::read($project, 'deploy.watcher_pid') : null;
         if ($pid) {
             $pids = [$pid];
         }
@@ -110,8 +110,12 @@ Class GitSlaveStop extends Command {
             Shell::passthru($command);
             $count++;
         }
-        JsonLock::write('slave.pid', null, $repo_dir);
-        JsonLock::save($repo_dir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nd) {
+                $nd['deploy']['watcher_pid'] = null;
+                return $nd;
+            });
+        }
         DeploymentState::setWatcherPid($repo_dir, null);
 
         $output->writeln("$count slave commands stopped out of ". count($pids));

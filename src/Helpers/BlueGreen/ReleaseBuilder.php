@@ -15,6 +15,8 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\ContainerName;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Helpers\Log;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
@@ -28,15 +30,15 @@ class ReleaseBuilder
     public static function getGitRemote(string $repo_dir): ?string
     {
         // Check node config first
-        $projectName = NodeConfig::findByRepoDir($repo_dir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repo_dir);
-            if ($match) {
-                $projectName = $match[0];
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        if ($project) {
+            $nodeData = NodeConfig::load($project);
+            // Primary: release.git_remote
+            $remote = $nodeData['release']['git_remote'] ?? null;
+            if ($remote) {
+                return $remote;
             }
-        }
-        if ($projectName) {
-            $nodeData = NodeConfig::load($projectName);
+            // Migration fallback: bluegreen.git_remote
             $remote = $nodeData['bluegreen']['git_remote'] ?? null;
             if ($remote) {
                 return $remote;
@@ -129,11 +131,14 @@ class ReleaseBuilder
     }
 
     /**
-     * Write the .env file for a release with port configuration.
+     * Write the deployment files for a release with port configuration.
+     *
+     * Creates two files:
+     *   .protocol/deployment.json  — structured data (version, ports, container, status)
+     *   .env.deployment            — flat KEY=VALUE for docker compose --env-file
      */
     public static function writeReleaseEnv(string $releaseDir, int $httpPort, int $httpsPort, string $version): void
     {
-        $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
         $safeName = BlueGreen::sanitizeVersion($version);
         $baseName = 'app';
 
@@ -147,9 +152,22 @@ class ReleaseBuilder
         }
 
         $containerName = $baseName . '-' . $safeName;
-
-        $content = "# Shadow deployment port configuration (auto-generated)\n";
         $projectName = str_replace('.', '-', $safeName);
+
+        // Write .protocol/deployment.json
+        DeploymentState::writeDeploymentJson($releaseDir, [
+            'version' => $version,
+            'compose_project_name' => "protocol-{$projectName}",
+            'port_http' => $httpPort,
+            'port_https' => $httpsPort,
+            'docker_hostname' => $containerName,
+            'container_name' => $containerName,
+            'status' => 'pending',
+        ]);
+
+        // Write .env.deployment (flat KEY=VALUE for docker compose)
+        $envFile = rtrim($releaseDir, '/') . '/.env.deployment';
+        $content = "# Deployment port configuration (auto-generated)\n";
         $content .= "COMPOSE_PROJECT_NAME=protocol-{$projectName}\n";
         $content .= "PROTOCOL_PORT_HTTP={$httpPort}\n";
         $content .= "PROTOCOL_PORT_HTTPS={$httpsPort}\n";
@@ -186,8 +204,7 @@ class ReleaseBuilder
             : file_get_contents($composePath);
 
         // Strip ALL existing port mappings and replace with only the
-        // two shadow-configurable ports (HTTP → 80, HTTPS → 443).
-        // This prevents collisions with the production container's ports.
+        // two configurable ports (HTTP → 80, HTTPS → 443).
         $content = preg_replace(
             '/^(\s+)ports:\s*\n(\s+-\s*".+"\s*\n)+/m',
             "$1ports:\n$1    - \"\${PROTOCOL_PORT_HTTP:-80}:80\"\n$1    - \"\${PROTOCOL_PORT_HTTPS:-443}:443\"\n",
@@ -223,7 +240,7 @@ class ReleaseBuilder
             return false;
         }
 
-        $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
+        $envFile = rtrim($releaseDir, '/') . '/.env.deployment';
         $dockerCommand = Docker::getDockerCommand();
 
         $content = file_get_contents($composePath);
@@ -269,7 +286,7 @@ class ReleaseBuilder
 
         // Run composer install if needed
         if (file_exists(rtrim($releaseDir, '/') . '/composer.json')) {
-            $containerName = BlueGreen::getContainerName($releaseDir);
+            $containerName = ContainerName::resolveFromDir($releaseDir);
             if ($containerName) {
                 Shell::run("docker exec " . escapeshellarg($containerName) . " composer install --no-interaction 2>&1");
             }
@@ -281,7 +298,7 @@ class ReleaseBuilder
     /**
      * Start containers for a release (fast -- image already built).
      *
-     * Uses --env-file .env.bluegreen so docker compose resolves the
+     * Uses --env-file .env.deployment so docker compose resolves the
      * patched container name (e.g. ghostagent-v0.1.1) and port vars.
      */
     public static function startContainers(string $releaseDir): bool
@@ -292,9 +309,9 @@ class ReleaseBuilder
             return false;
         }
 
-        $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
+        $envFile = rtrim($releaseDir, '/') . '/.env.deployment';
         $dockerCommand = Docker::getDockerCommand();
-        $containerName = BlueGreen::getContainerName($releaseDir);
+        $containerName = ContainerName::resolveFromDir($releaseDir);
 
         Log::context('bluegreen', [
             'action'    => 'start_containers',
@@ -317,11 +334,8 @@ class ReleaseBuilder
     /**
      * Stop containers for a release.
      *
-     * Uses --env-file .env.bluegreen (if it exists) so docker compose
-     * resolves the patched container name correctly. Without this flag,
-     * compose uses the default name from the compose file, which won't
-     * match the running container (e.g. stops 'ghostagent' instead of
-     * 'ghostagent-v0.1.1').
+     * Uses --env-file .env.deployment (if it exists) so docker compose
+     * resolves the patched container name correctly.
      */
     public static function stopContainers(string $releaseDir): bool
     {
@@ -330,10 +344,10 @@ class ReleaseBuilder
             return false;
         }
 
-        $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
+        $envFile = rtrim($releaseDir, '/') . '/.env.deployment';
         $dockerCommand = Docker::getDockerCommand();
         $envFlag = file_exists($envFile) ? " --env-file " . escapeshellarg($envFile) : "";
-        $containerName = BlueGreen::getContainerName($releaseDir);
+        $containerName = ContainerName::resolveFromDir($releaseDir);
 
         Log::context('bluegreen', [
             'action'    => 'stop_containers',

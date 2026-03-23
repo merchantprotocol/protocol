@@ -44,7 +44,6 @@ use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\Webhook;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Helpers\DeploymentState;
 
 Class Deploy extends Command {

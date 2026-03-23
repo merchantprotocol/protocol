@@ -38,7 +38,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 use Gitcd\Helpers\DeploymentState;
 
 Class GitSlave extends BaseSlaveCommand {
@@ -67,14 +67,19 @@ Class GitSlave extends BaseSlaveCommand {
         $output->writeln('<comment>Continuously monitoring git repo for remote changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
-        $existingPid = JsonLock::read('slave.pid', null, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $existingPid = $project ? NodeConfig::read($project, 'deploy.watcher_pid') : null;
         if ($existingPid && Shell::isRunning($existingPid)) {
             $output->writeln("Slave mode is already running (PID: {$existingPid})");
             return Command::SUCCESS;
         }
-        // Clear only the stale PID, not the entire lock file
-        JsonLock::write('slave.pid', null, $repo_dir);
-        JsonLock::save($repo_dir);
+        // Clear only the stale PID
+        if ($project) {
+            NodeConfig::modify($project, function (array $nd) {
+                $nd['deploy']['watcher_pid'] = null;
+                return $nd;
+            });
+        }
         $remoteName = Git::remoteName( $repo_dir );
         $remoteurl = Git::RemoteUrl( $repo_dir );
 
@@ -102,21 +107,23 @@ Class GitSlave extends BaseSlaveCommand {
             $daemon,
             $increment,
             [
-                'git.branch'     => $branch,
-                'git.remote'     => $remoteurl,
-                'git.remotename' => $remoteName,
-                'git.local'      => $repo_dir,
-                'slave.increment' => $increment,
+                'deploy.branch'     => $branch,
+                'deploy.remote'     => $remoteurl,
+                'deploy.remotename' => $remoteName,
+                'deploy.local'      => $repo_dir,
+                'deploy.increment'  => $increment,
             ],
-            'slave.pid',
+            'deploy.watcher_pid',
             $repo_dir,
             $output
         );
 
         // Also write unified watcher PID
-        $pid = JsonLock::read('slave.pid', null, $repo_dir);
-        if ($pid) {
-            DeploymentState::setWatcherPid($repo_dir, (int)$pid);
+        if ($project) {
+            $pid = NodeConfig::read($project, 'deploy.watcher_pid');
+            if ($pid) {
+                DeploymentState::setWatcherPid($repo_dir, (int)$pid);
+            }
         }
 
         return $result;

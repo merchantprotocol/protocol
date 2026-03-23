@@ -15,7 +15,6 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\IncidentDetector;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 
 class IncidentStatus extends Command
 {

@@ -42,7 +42,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
-use Gitcd\Helpers\Docker;
+use Gitcd\Helpers\ContainerName;
 use Gitcd\Utils\Json;
 
 Class DockerLogs extends Command {
@@ -79,17 +79,13 @@ Class DockerLogs extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo( $output, $repo_dir );
 
-        $name = Json::read('docker.container_name', false, $repo_dir);
+        $name = ContainerName::resolveActive($repo_dir);
         if (!$name) {
-            $names = Docker::getContainerNamesFromDockerComposeFile();
-            if (count($names)==1) {
-                $name = array_pop($names);
-                Json::write('docker.container_name', $name, $repo_dir);
-                Json::save($repo_dir);
-            }
+            $output->writeln('<error>No container found</error>');
+            return Command::FAILURE;
         }
 
-        $command = "docker logs --follow $name";
+        $command = "docker logs --follow " . escapeshellarg($name);
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;

@@ -352,8 +352,9 @@ README
         // Save the JSON file
         Json::save($repo_dir);
 
-        // Add protocol.lock to .gitignore
-        Git::addIgnore('protocol.lock', $repo_dir);
+        // Add deployment files to .gitignore
+        Git::addIgnore('.protocol/', $repo_dir);
+        Git::addIgnore('.env.deployment', $repo_dir);
 
         $output->writeln('  <info>✓</info> Created: <comment>protocol.json</comment>');
     }

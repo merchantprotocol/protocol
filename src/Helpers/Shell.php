@@ -33,7 +33,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
 
 Class Shell
 {
@@ -278,7 +278,16 @@ Class Shell
      */
     public static function isLockedPIDStillRunning()
     {
-        $pid = JsonLock::read('slave.pid');
+        $pid = null;
+        // Try to read watcher PID from NodeConfig
+        $projects = NodeConfig::listProjects();
+        foreach ($projects as $proj) {
+            $p = NodeConfig::read($proj, 'deploy.watcher_pid');
+            if ($p) {
+                $pid = $p;
+                break;
+            }
+        }
         return self::isRunning( $pid );
     }
 

@@ -5,7 +5,7 @@
  * Shared infrastructure for both "release" and "bluegreen" deployment
  * strategies. Both strategies clone version-tagged releases into dedicated
  * directories (<project>-releases/v1.2.0/), patch container names with
- * version suffixes, and generate per-release .env.bluegreen files.
+ * version suffixes, and generate per-release .env.deployment files.
  *
  * STRATEGY DIFFERENCES
  * --------------------
@@ -38,7 +38,6 @@ use Gitcd\Helpers\BlueGreen\HealthChecker;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Log;
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 
 class BlueGreen
@@ -161,13 +160,20 @@ class BlueGreen
      * Get the releases directory path.
      *
      * Default: sibling directory named <project>-releases/
-     * Custom path can be set in protocol.json as bluegreen.releases_dir
+     * Custom path can be set in node config as release.releases_dir
      */
     public static function getReleasesDir(string $repo_dir): string
     {
         // Node config is the source of truth for deployment paths
         $nodeData = self::getNodeData($repo_dir);
-        $custom = $nodeData['bluegreen']['releases_dir'] ?? null;
+
+        // Primary: release.releases_dir
+        $custom = $nodeData['release']['releases_dir'] ?? null;
+
+        // Migration fallback: bluegreen.releases_dir
+        if (!$custom) {
+            $custom = $nodeData['bluegreen']['releases_dir'] ?? null;
+        }
 
         // Fall back to protocol.json for non-slave usage
         if (!$custom) {
@@ -190,14 +196,8 @@ class BlueGreen
      */
     private static function getNodeData(string $repo_dir): array
     {
-        $projectName = NodeConfig::findByRepoDir($repo_dir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repo_dir);
-            if ($match) {
-                $projectName = $match[0];
-            }
-        }
-        return $projectName ? NodeConfig::load($projectName) : [];
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        return $project ? NodeConfig::load($project) : [];
     }
 
     /**
@@ -210,21 +210,25 @@ class BlueGreen
     }
 
     /**
-     * Read the container name from a release's .env.bluegreen file.
+     * Check if a directory is inside the releases directory.
+     * Used to distinguish release dirs from branch dirs without
+     * relying on per-release file existence.
+     */
+    public static function isReleaseDir(string $dir, string $repoDir): bool
+    {
+        $releasesDir = self::getReleasesDir($repoDir);
+        $dir = rtrim($dir, '/') . '/';
+        return str_starts_with($dir, $releasesDir);
+    }
+
+    /**
+     * Read the container name from a release directory.
+     *
+     * @deprecated Use ContainerName::resolveFromDir() instead.
      */
     public static function getContainerName(string $releaseDir): ?string
     {
-        $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
-        if (!is_file($envFile)) {
-            return null;
-        }
-
-        $content = file_get_contents($envFile);
-        if (preg_match('/^CONTAINER_NAME=(.+)$/m', $content, $m)) {
-            return trim($m[1]);
-        }
-
-        return null;
+        return ContainerName::resolveFromDir($releaseDir);
     }
 
     /**
@@ -299,16 +303,10 @@ class BlueGreen
     /**
      * Promote a shadow version to production (BLUEGREEN STRATEGY ONLY).
      *
-     * This method is specific to the "bluegreen" strategy where a shadow
-     * version has been pre-built and health-checked on shadow ports. It:
-     *
      * 1. Rewrites env files with production ports for the new version
      * 2. Starts the new version on production ports (instant — image pre-built)
      * 3. Stops the old version and restarts it on shadow ports for standby rollback
      * 4. Updates state
-     *
-     * For the "release" strategy, use the simpler flow in release-watcher.php:
-     * stop old → writeReleaseEnv with production ports → startContainers.
      *
      * Returns the promoted version string, or null on failure.
      */
@@ -349,12 +347,19 @@ class BlueGreen
             }
         }
 
-        // Update state
+        // Update state in NodeConfig
+        Log::info('bluegreen', "promote: updating state — active={$newVersion}, clearing shadow");
         self::setActiveVersion($repo_dir, $newVersion);
         self::setReleaseState($repo_dir, $newVersion, self::PRODUCTION_HTTP, 'serving');
         self::setShadowVersion($repo_dir, null);
-        JsonLock::write('bluegreen.promoted_at', date('Y-m-d\TH:i:sP'), $repo_dir);
-        JsonLock::save($repo_dir);
+
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nodeData) {
+                $nodeData['bluegreen']['promoted_at'] = date('Y-m-d\TH:i:sP');
+                return $nodeData;
+            });
+        }
 
         Log::info('bluegreen', "promote complete: {$newVersion} is now serving on production ports");
         return $newVersion;

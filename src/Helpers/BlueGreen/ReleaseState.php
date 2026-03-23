@@ -2,13 +2,17 @@
 /**
  * Release State Management.
  *
- * Manages version state (active, shadow, previous) stored in protocol.lock,
- * and queries release metadata from protocol.json.
+ * Manages version state (active, shadow, previous) stored in NodeConfig,
+ * and per-release metadata in .protocol/deployment.json files.
  *
  * STRATEGY OVERVIEW
  * -----------------
  * Three deployment strategies exist. This class uses `deployment.strategy`
  * (from node config or protocol.json) to decide which features are active:
+ *
+ *   "none"      — No deployment strategy. Pure development mode. Containers
+ *                 run in the repo directory via docker compose. No watchers,
+ *                 no release directories, no deployment state tracking.
  *
  *   "branch"    — Legacy git-polling. In-place checkout + rebuild in repo_dir.
  *                 Does NOT use release directories or BlueGreen infrastructure.
@@ -33,9 +37,10 @@
 namespace Gitcd\Helpers\BlueGreen;
 
 use Gitcd\Utils\Json;
-use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\DeploymentState;
+use Gitcd\Helpers\Log;
 
 class ReleaseState
 {
@@ -58,24 +63,21 @@ class ReleaseState
     /**
      * Get the deployment strategy for a repo.
      *
-     * Returns "branch", "release", or "bluegreen".
+     * Returns "none", "branch", "release", or "bluegreen".
      * Node config is the source of truth; falls back to protocol.json.
      */
     public static function getStrategy(string $repo_dir): string
     {
         $nodeData = self::getNodeData($repo_dir);
         if (!empty($nodeData)) {
-            return $nodeData['deployment']['strategy'] ?? 'branch';
+            return $nodeData['deployment']['strategy'] ?? 'none';
         }
 
-        return Json::read('deployment.strategy', 'branch', $repo_dir);
+        return Json::read('deployment.strategy', 'none', $repo_dir);
     }
 
     /**
      * Check if the strategy is "bluegreen" (shadow ports + health checks + promote).
-     *
-     * Use this to gate bluegreen-specific behavior: shadow port allocation,
-     * health check verification, promote/rollback with dual containers.
      */
     public static function isBlueGreenStrategy(string $repo_dir): bool
     {
@@ -84,9 +86,6 @@ class ReleaseState
 
     /**
      * Check if the strategy is "release" (simple one-at-a-time deployment).
-     *
-     * Use this to gate release-specific behavior: direct production ports,
-     * stop-old-then-start-new, no shadow ports or health checks.
      */
     public static function isReleaseStrategy(string $repo_dir): bool
     {
@@ -98,32 +97,28 @@ class ReleaseState
      */
     private static function getNodeData(string $repo_dir): array
     {
-        $projectName = NodeConfig::findByRepoDir($repo_dir);
-        if (!$projectName) {
-            $match = NodeConfig::findByActiveDir($repo_dir);
-            if ($match) {
-                $projectName = $match[0];
-            }
-        }
-        return $projectName ? NodeConfig::load($projectName) : [];
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        return $project ? NodeConfig::load($project) : [];
+    }
+
+    /**
+     * Resolve the project name for a repo directory.
+     */
+    private static function resolveProjectName(string $repo_dir): ?string
+    {
+        return DeploymentState::resolveProjectName($repo_dir);
     }
 
     /**
      * Get the currently active version (serving production traffic).
-     *
-     * Checks bluegreen.active_version first (written by new strategy code),
-     * then falls back to release.current (written by legacy/older watcher code).
-     * This ensures backward compatibility when upgrading from older protocol versions.
      */
     public static function getActiveVersion(string $repo_dir): ?string
     {
-        $version = JsonLock::read('bluegreen.active_version', null, $repo_dir);
-        if ($version) {
-            return $version;
+        $project = self::resolveProjectName($repo_dir);
+        if (!$project) {
+            return null;
         }
-
-        // Fallback: release.current was written by the old watcher code
-        return JsonLock::read('release.current', null, $repo_dir);
+        return NodeConfig::read($project, 'release.active');
     }
 
     /**
@@ -131,58 +126,98 @@ class ReleaseState
      */
     public static function getPreviousVersion(string $repo_dir): ?string
     {
-        return JsonLock::read('bluegreen.previous_version', null, $repo_dir);
+        $project = self::resolveProjectName($repo_dir);
+        if (!$project) {
+            return null;
+        }
+        return NodeConfig::read($project, 'release.previous');
     }
 
     /**
      * Get the shadow version (currently building or ready to promote).
+     * Bluegreen strategy only.
      */
     public static function getShadowVersion(string $repo_dir): ?string
     {
-        return JsonLock::read('bluegreen.shadow_version', null, $repo_dir);
+        $project = self::resolveProjectName($repo_dir);
+        if (!$project) {
+            return null;
+        }
+        return NodeConfig::read($project, 'bluegreen.shadow_version');
     }
 
     /**
-     * Get the state of a release from protocol.lock.
+     * Get the state of a release from its .protocol/deployment.json.
      */
     public static function getReleaseState(string $repo_dir, string $version): array
     {
-        $key = 'bluegreen.releases.' . BlueGreen::sanitizeVersion($version);
-        return JsonLock::read($key, [], $repo_dir) ?: [];
+        $releaseDir = BlueGreen::getReleaseDir($repo_dir, $version);
+        $data = DeploymentState::readDeploymentJson($releaseDir);
+        return is_array($data) ? $data : [];
     }
 
     /**
-     * Update the state of a release in protocol.lock.
+     * Update the state of a release in its .protocol/deployment.json.
      */
     public static function setReleaseState(string $repo_dir, string $version, int $port, string $status): void
     {
-        $key = 'bluegreen.releases.' . BlueGreen::sanitizeVersion($version);
-        JsonLock::write("{$key}.version", $version, $repo_dir);
-        JsonLock::write("{$key}.port", $port, $repo_dir);
-        JsonLock::write("{$key}.status", $status, $repo_dir);
-        JsonLock::save($repo_dir);
+        Log::info('deployment', "setReleaseState: version={$version} port={$port} status={$status}");
+
+        $releaseDir = BlueGreen::getReleaseDir($repo_dir, $version);
+        DeploymentState::writeDeploymentJson($releaseDir, [
+            'version' => $version,
+            'port_http' => $port,
+            'status' => $status,
+        ]);
     }
 
     /**
-     * Set the active version in protocol.lock.
+     * Set the active version in NodeConfig.
+     * Moves previous active to previous.
      */
     public static function setActiveVersion(string $repo_dir, string $version): void
     {
-        $previousVersion = self::getActiveVersion($repo_dir);
-        if ($previousVersion && $previousVersion !== $version) {
-            JsonLock::write('bluegreen.previous_version', $previousVersion, $repo_dir);
+        $project = self::resolveProjectName($repo_dir);
+        if (!$project) {
+            return;
         }
-        JsonLock::write('bluegreen.active_version', $version, $repo_dir);
-        JsonLock::save($repo_dir);
+
+        Log::info('deployment', "setActiveVersion: version={$version} project={$project}");
+
+        NodeConfig::modify($project, function (array $nodeData) use ($version) {
+            $previousVersion = $nodeData['release']['active'] ?? null;
+            if ($previousVersion && $previousVersion !== $version) {
+                $nodeData['release']['previous'] = $previousVersion;
+            }
+            $nodeData['release']['active'] = $version;
+
+            // Update versions list
+            $versions = $nodeData['release']['versions'] ?? [];
+            if (!in_array($version, $versions, true)) {
+                $versions[] = $version;
+                $nodeData['release']['versions'] = $versions;
+            }
+
+            return $nodeData;
+        });
     }
 
     /**
-     * Set the shadow version in protocol.lock.
+     * Set the shadow version in NodeConfig (bluegreen only).
      */
     public static function setShadowVersion(string $repo_dir, ?string $version): void
     {
-        JsonLock::write('bluegreen.shadow_version', $version, $repo_dir);
-        JsonLock::save($repo_dir);
+        $project = self::resolveProjectName($repo_dir);
+        if (!$project) {
+            return;
+        }
+
+        Log::info('deployment', "setShadowVersion: version=" . ($version ?? 'null') . " project={$project}");
+
+        NodeConfig::modify($project, function (array $nodeData) use ($version) {
+            $nodeData['bluegreen']['shadow_version'] = $version;
+            return $nodeData;
+        });
     }
 
     /**

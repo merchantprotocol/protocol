@@ -54,7 +54,7 @@ class DeployStrategy extends Command
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $currentStrategy = Json::read('deployment.strategy', 'branch', $repo_dir);
+        $currentStrategy = Json::read('deployment.strategy', 'none', $repo_dir);
 
         // Also check node config
         $projectName = NodeConfig::findByRepoDir($repo_dir);
@@ -79,7 +79,7 @@ class DeployStrategy extends Command
         }
         $output->writeln('');
 
-        $validStrategies = ['branch', 'release', 'bluegreen'];
+        $validStrategies = ['none', 'branch', 'release', 'bluegreen'];
         $newStrategy = $input->getArgument('strategy');
 
         if (!$newStrategy) {
@@ -108,17 +108,18 @@ class DeployStrategy extends Command
 
         // Update node config if it exists
         if ($projectName) {
-            $nodeData['deployment']['strategy'] = $newStrategy;
-            unset($nodeData['deployment']['awaiting_release']);
+            NodeConfig::modify($projectName, function (array $nd) use ($newStrategy, $repo_dir) {
+                $nd['deployment']['strategy'] = $newStrategy;
+                unset($nd['deployment']['awaiting_release']);
 
-            if ($newStrategy === 'branch') {
-                $branch = Git::branch($repo_dir);
-                $nodeData['deployment']['branch'] = $branch;
-            }
-            // Keep deployment.branch even when switching to release —
-            // protocol stop needs it to find containers started under branch strategy
+                if ($newStrategy === 'branch') {
+                    $nd['deployment']['branch'] = Git::branch($repo_dir);
+                }
+                // Keep deployment.branch even when switching to release —
+                // protocol stop needs it to find containers started under branch strategy
 
-            NodeConfig::save($projectName, $nodeData);
+                return $nd;
+            });
         }
 
         AuditLog::logConfig($repo_dir, 'strategy_switch', "{$currentStrategy} -> {$newStrategy}");

@@ -217,9 +217,11 @@ Class GitPull extends Command {
                     DeploymentState::setStrategy($repo_dir, 'release');
 
                     // Update node config — keep deployment.branch for stop
-                    $nodeData['deployment']['strategy'] = 'release';
-                    unset($nodeData['deployment']['awaiting_release']);
-                    NodeConfig::save($projectName, $nodeData);
+                    NodeConfig::modify($projectName, function (array $nd) {
+                        $nd['deployment']['strategy'] = 'release';
+                        unset($nd['deployment']['awaiting_release']);
+                        return $nd;
+                    });
 
                     AuditLog::logConfig($repo_dir, 'strategy_switch', "branch -> release (detected {$activeRelease})");
 

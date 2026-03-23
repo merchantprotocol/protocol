@@ -207,8 +207,6 @@ Use `--json` for machine-readable output.
 {
     "bluegreen": {
         "enabled": true,
-        "releases_dir": "myapp-releases",
-        "git_remote": "git@github.com:yourorg/yourapp.git",
         "auto_promote": false,
         "health_checks": [
             {"type": "http", "path": "/health", "expect_status": 200},
@@ -219,13 +217,24 @@ Use `--json` for machine-readable output.
 }
 ```
 
+Shared release settings (`releases_dir`, `git_remote`, `active`, `previous`, `target`, `versions`) are stored in NodeConfig under the `release.*` namespace. Only bluegreen-specific settings remain in `protocol.json`:
+
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `false` | Enable shadow deployment mode |
-| `releases_dir` | string | `<project>-releases` | Releases directory (relative to parent, or absolute path) |
-| `git_remote` | string | repo's remote | Git URL to clone releases from |
 | `auto_promote` | boolean | `false` | Automatically promote after successful shadow build |
 | `health_checks` | array | `[]` | Health checks to run after build and promote |
+
+NodeConfig (`release.*` namespace):
+
+| Key | Type | Description |
+|---|---|---|
+| `release.releases_dir` | string | Releases directory (absolute path) |
+| `release.git_remote` | string | Git URL to clone releases from |
+| `release.active` | string | Currently serving version |
+| `release.previous` | string | Previous version (rollback target) |
+| `release.target` | string | Version being built/promoted |
+| `release.versions` | array | All known version tags |
 
 ### Health Check Types
 
@@ -256,35 +265,38 @@ Runs a command inside the version's Docker container and checks the exit code.
 | `command` | (required) | Command to run in the container |
 | `expect_exit` | `0` | Expected exit code |
 
-### protocol.lock State
+### State Storage
 
-Shadow deployment state is tracked in `protocol.lock` (gitignored):
+Shadow deployment state is split between two locations:
+
+**NodeConfig** (`~/.protocol/.node/nodes/<project>.json`) stores shared release tracking and bluegreen-specific settings:
 
 ```json
 {
-    "bluegreen": {
-        "active_version": "v1.2.0",
-        "previous_version": "v1.1.0",
-        "shadow_version": "v1.3.0",
-        "promoted_at": "2026-03-10T21:00:00+00:00",
-        "releases": {
-            "v1.2.0": {
-                "version": "v1.2.0",
-                "port": 80,
-                "status": "serving"
-            },
-            "v1.3.0": {
-                "version": "v1.3.0",
-                "port": 8080,
-                "status": "ready"
-            },
-            "v1.1.0": {
-                "version": "v1.1.0",
-                "port": 8080,
-                "status": "standby"
-            }
-        }
-    }
+    "release.releases_dir": "/opt/myapp-releases",
+    "release.git_remote": "git@github.com:yourorg/yourapp.git",
+    "release.active": "v1.2.0",
+    "release.previous": "v1.1.0",
+    "release.target": "v1.3.0",
+    "release.versions": ["v1.1.0", "v1.2.0", "v1.3.0"],
+    "bluegreen.shadow_version": "v1.3.0",
+    "bluegreen.auto_promote": false,
+    "bluegreen.health_checks": [
+        {"type": "http", "path": "/health", "expect_status": 200}
+    ],
+    "bluegreen.promoted_at": "2026-03-10T21:00:00+00:00"
+}
+```
+
+**Per-release deployment.json** (`<release_dir>/<version>/.protocol/deployment.json`) stores per-release runtime state:
+
+```json
+{
+    "port": 80,
+    "status": "serving",
+    "container_name": "myapp-v1_2_0",
+    "deployed_at": "2026-03-10T21:00:00+00:00",
+    "watcher_pid": 12345
 }
 ```
 
@@ -322,18 +334,21 @@ The watcher handles the shadow mechanics automatically. The only difference is w
 /opt/
 ├── myapp/                     ← project directory (protocol.json lives here)
 │   ├── protocol.json          ← bluegreen config
-│   ├── protocol.lock          ← runtime state (gitignored)
 │   └── docker-compose.yml     ← original (not used in shadow mode)
 │
 └── myapp-releases/            ← sibling releases directory
     ├── v1.2.0/
     │   ├── .git/
-    │   ├── .env.bluegreen     ← port config (auto-generated)
+    │   ├── .env.deployment    ← port config (auto-generated)
+    │   ├── .protocol/
+    │   │   └── deployment.json ← per-release runtime state
     │   ├── docker-compose.yml ← patched with parameterized ports
     │   └── ...app files...
     ├── v1.3.0/
     │   ├── .git/
-    │   ├── .env.bluegreen
+    │   ├── .env.deployment
+    │   ├── .protocol/
+    │   │   └── deployment.json
     │   ├── docker-compose.yml
     │   └── ...app files...
     └── v1.1.0/

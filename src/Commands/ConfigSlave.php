@@ -39,7 +39,8 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Git;
-use Gitcd\Utils\JsonLock;
+use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigSlave extends BaseSlaveCommand {
 
@@ -81,7 +82,8 @@ Class ConfigSlave extends BaseSlaveCommand {
         $output->writeln('<comment>Continuously monitoring configuration repo for changes</comment>');
 
         // Check to see if the PID is still running, fail if it is
-        $pid = JsonLock::read('configuration.slave.pid', null, $repo_dir);
+        $project = DeploymentState::resolveProjectName($repo_dir);
+        $pid = $project ? NodeConfig::read($project, 'configuration.slave_pid') : null;
         $running = Shell::isRunning( $pid );
         if ($running) {
             $output->writeln("Slave mode is already running on the config repo");
@@ -114,13 +116,13 @@ Class ConfigSlave extends BaseSlaveCommand {
             $daemon,
             $increment,
             [
-                'configuration.slave.branch'     => $branch,
-                'configuration.slave.remote'     => $remoteurl,
-                'configuration.slave.remotename' => $remoteName,
-                'configuration.slave.local'      => $configrepo,
-                'configuration.slave.increment'  => $increment,
+                'configuration.slave_branch'     => $branch,
+                'configuration.slave_remote'     => $remoteurl,
+                'configuration.slave_remotename' => $remoteName,
+                'configuration.slave_local'      => $configrepo,
+                'configuration.slave_increment'  => $increment,
             ],
-            'configuration.slave.pid',
+            'configuration.slave_pid',
             $repo_dir,
             $output
         );

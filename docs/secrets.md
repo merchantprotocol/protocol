@@ -182,7 +182,7 @@ protocol secrets:key --scp=user@host
 
 **Decryption during startup:** When `config:link` encounters a `.enc` file, it decrypts to plaintext in the config repo directory, sets `0600` permissions, adds the plaintext filename to `.gitignore`, and symlinks the plaintext file into your project.
 
-**Tracking:** Decrypted files are tracked in `.protocol-secrets.json` in the config repo and `protocol.lock` in your project, including a key fingerprint so Protocol knows which key was used.
+**Tracking:** Decrypted files are tracked in `.protocol-secrets.json` in the config repo and NodeConfig (`~/.protocol/.node/nodes/<project>.json`), including a key fingerprint so Protocol knows which key was used.
 
 ## Important Things to Know
 
