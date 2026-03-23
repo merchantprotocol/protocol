@@ -13,6 +13,7 @@ require __DIR__ . '/../src/bootstrap.php';
 
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Log;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\BlueGreen;
@@ -65,8 +66,7 @@ function protocolStopStart(string $stopDir, string $startDir): void
         return;
     }
 
-    $logDir = is_writable('/var/log/protocol/') ? '/var/log/protocol/' : $startDir;
-    $logFile = $logDir . 'protocol-restart.log';
+    $logFile = Log::getLogFile();
 
     $phpBin = escapeshellarg($protocolBin);
     $stopArg = escapeshellarg($stopDir);

@@ -104,28 +104,73 @@ class Log
      */
     public static function cmd(string $command, ?string $output, int $exitCode, ?float $duration = null): void
     {
-        // Sanitize: mask tokens/passwords in the command for log safety
-        $safeCmd = preg_replace('/x-access-token:[^@]+@/', 'x-access-token:***@', $command);
+        $safeCmd = self::sanitize($command);
+        $isSensitive = self::isSensitiveCommand($command);
 
         $durationStr = $duration !== null ? ' (' . round($duration, 2) . 's)' : '';
 
         self::write('shell', $safeCmd);
 
-        if ($output !== null && trim($output) !== '') {
-            // Indent output lines for readability, cap at 50 lines
+        // Never log output of sensitive commands (API calls with tokens, secrets)
+        if (!$isSensitive && $output !== null && trim($output) !== '') {
             $lines = explode("\n", trim($output));
             $total = count($lines);
             $lines = array_slice($lines, 0, 50);
             foreach ($lines as $line) {
-                self::write('shell', "  | {$line}");
+                self::write('shell', "  | " . self::sanitize($line));
             }
             if ($total > 50) {
                 self::write('shell', "  | ... ({$total} total lines, truncated)");
             }
+        } elseif ($isSensitive && $output !== null && trim($output) !== '') {
+            self::write('shell', "  | [output redacted — sensitive command]");
         }
 
         $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
         self::write('shell', "  → {$status}{$durationStr}");
+    }
+
+    /**
+     * Check if a command is sensitive (output should not be logged).
+     */
+    private static function isSensitiveCommand(string $command): bool
+    {
+        $patterns = [
+            'Authorization:',
+            'Bearer ',
+            'x-access-token',
+            'api.github.com',
+            'gh api',
+            'credential',
+            'secret',
+            'token',
+        ];
+        $lower = strtolower($command);
+        foreach ($patterns as $pattern) {
+            if (stripos($lower, strtolower($pattern)) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Sanitize a string by masking tokens, keys, and secrets.
+     */
+    private static function sanitize(string $text): string
+    {
+        // GitHub access tokens: x-access-token:ghs_xxxx@
+        $text = preg_replace('/x-access-token:[^@]+@/', 'x-access-token:***@', $text);
+        // Authorization headers: Bearer xxx, token xxx
+        $text = preg_replace('/(?:Bearer|token)\s+[A-Za-z0-9_\-\.]+/i', 'Bearer ***', $text);
+        // Authorization header value in curl -H
+        $text = preg_replace('/Authorization:\s*[^\'"]+/i', 'Authorization: ***', $text);
+        // GitHub App tokens (ghs_, ghu_, ghp_)
+        $text = preg_replace('/\b(ghs_|ghu_|ghp_)[A-Za-z0-9_]+/', '$1***', $text);
+        // JWT tokens (eyJ...)
+        $text = preg_replace('/\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/', 'JWT:***', $text);
+
+        return $text;
     }
 
     /**
