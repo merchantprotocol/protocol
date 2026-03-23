@@ -230,29 +230,45 @@ Class Shell
 
         $outputfile = Log::getLogFile();
 
-        // Write PID to a temp file instead of capturing via stdout pipe.
-        // PHP's exec() blocks until ALL holders of the stdout pipe close it.
-        // A backgrounded process inherits the pipe FD, so exec() hangs
-        // until the daemon exits. Redirecting the group's stdout to /dev/null
-        // closes the pipe immediately.
-        $pidFile = sys_get_temp_dir() . '/protocol-bg-' . substr(md5($command), 0, 8) . '.pid';
-        @unlink($pidFile);
-
+        // Use proc_open() instead of exec() to avoid pipe-blocking.
+        // exec() blocks forever when a backgrounded child inherits
+        // the stdout pipe FD. proc_open() lets us read with a timeout.
         $wrapped = sprintf(
-            "{ %s >> %s 2>&1 </dev/null & echo \$! > %s; } >/dev/null 2>&1",
+            "%s >> %s 2>&1 </dev/null & echo \$!",
             $command,
-            escapeshellarg($outputfile),
-            escapeshellarg($pidFile)
+            escapeshellarg($outputfile)
         );
-        exec($wrapped);
 
-        $response = '';
-        if (is_file($pidFile)) {
-            $response = trim(file_get_contents($pidFile));
-            @unlink($pidFile);
+        $descriptors = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['file', '/dev/null', 'w'],
+        ];
+
+        $process = proc_open($wrapped, $descriptors, $pipes);
+        if (!is_resource($process)) {
+            return '';
         }
 
-        return $response;
+        stream_set_blocking($pipes[1], false);
+        $response = '';
+        $deadline = microtime(true) + 5.0;
+
+        while (microtime(true) < $deadline) {
+            $chunk = fread($pipes[1], 4096);
+            if ($chunk !== false && $chunk !== '') {
+                $response .= $chunk;
+            }
+            if (feof($pipes[1])) {
+                break;
+            }
+            usleep(50000);
+        }
+
+        fclose($pipes[1]);
+        proc_close($process);
+
+        return trim($response);
     }
 
     /**

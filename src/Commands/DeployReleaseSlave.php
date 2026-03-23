@@ -143,21 +143,15 @@ Class DeployReleaseSlave extends Command {
         $logFile = Log::getLogFile();
         $watcherLog = dirname($logFile) . '/watcher.log';
 
-        // Write PID to a temp file instead of capturing via pipe.
-        // PHP's exec() blocks until ALL processes holding the stdout pipe
-        // close it. The nohup'd watcher inherits the pipe FD from the shell,
-        // so exec() hangs forever. By redirecting the group's stdout to
-        // /dev/null we close the pipe immediately, and read the PID from file.
-        $pidFile = sys_get_temp_dir() . '/protocol-watcher-' . substr(md5($repo_dir), 0, 8) . '.pid';
-        @unlink($pidFile); // clean any stale file
-
-        $cmd = "{ cd " . escapeshellarg(rtrim($repo_dir, '/'))
+        // Spawn daemon using proc_open() with non-blocking pipe reads.
+        // PHP's exec() blocks forever because the nohup'd child inherits
+        // the stdout pipe FD, keeping it open until the daemon exits.
+        // proc_open() lets us read the PID with a timeout and move on.
+        $cmd = "cd " . escapeshellarg(rtrim($repo_dir, '/'))
             . " && nohup php " . escapeshellarg($watcherScript)
             . " --dir=" . escapeshellarg($repo_dir)
             . " --interval={$interval}"
-            . " >> " . escapeshellarg($watcherLog) . " 2>&1 </dev/null &"
-            . " echo \$! > " . escapeshellarg($pidFile)
-            . "; } >/dev/null 2>&1";
+            . " >> " . escapeshellarg($watcherLog) . " 2>&1 </dev/null & echo \$!";
 
         Log::context('deploy:slave', [
             'event'          => 'spawning_daemon',
@@ -166,17 +160,9 @@ Class DeployReleaseSlave extends Command {
             'watcher_script' => $watcherScript,
             'script_exists'  => is_file($watcherScript) ? 'yes' : 'no',
             'cwd'            => getcwd() ?: 'FALSE',
-            'pid_file'       => $pidFile,
         ]);
 
-        Shell::run($cmd);
-
-        // Read PID from temp file
-        $newPid = '';
-        if (is_file($pidFile)) {
-            $newPid = trim(file_get_contents($pidFile));
-            @unlink($pidFile);
-        }
+        $newPid = self::spawnDaemon($cmd);
 
         Log::context('deploy:slave', [
             'event'      => 'spawn_result',
@@ -214,5 +200,51 @@ Class DeployReleaseSlave extends Command {
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Spawn a background command via proc_open() and return its PID.
+     *
+     * PHP's exec() blocks forever when a backgrounded child inherits
+     * the stdout pipe. proc_open() lets us read the PID from "echo $!"
+     * with a timeout and move on, even if the pipe stays open.
+     */
+    private static function spawnDaemon(string $cmd): string
+    {
+        $descriptors = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['file', '/dev/null', 'w'],
+        ];
+
+        $process = proc_open($cmd, $descriptors, $pipes);
+        if (!is_resource($process)) {
+            Log::error('deploy:slave', "proc_open failed");
+            return '';
+        }
+
+        // Non-blocking read with 5s timeout to get PID from "echo $!"
+        stream_set_blocking($pipes[1], false);
+        $pidOutput = '';
+        $deadline = microtime(true) + 5.0;
+
+        while (microtime(true) < $deadline) {
+            $chunk = fread($pipes[1], 4096);
+            if ($chunk !== false && $chunk !== '') {
+                $pidOutput .= $chunk;
+            }
+            if (feof($pipes[1])) {
+                break;
+            }
+            usleep(50000); // 50ms
+        }
+
+        fclose($pipes[1]);
+
+        // proc_close() calls waitpid() — the shell should have exited
+        // after "echo $!" so this returns quickly.
+        proc_close($process);
+
+        return trim($pidOutput);
     }
 }
