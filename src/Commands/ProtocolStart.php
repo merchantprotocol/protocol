@@ -289,6 +289,21 @@ Class ProtocolStart extends Command {
                     $activeVersion = $curDeploy['version'] ?? null;
                     $runner->log("DeploymentState::current fallback version={$activeVersion}");
                 }
+                // Final fallback: read release.current from node config.
+                // The watcher persists the active version here before calling
+                // protocol stop+start, so this survives even when protocol.lock
+                // in the release dir hasn't been written yet.
+                if (!$activeVersion || $activeVersion === 'main') {
+                    $project = NodeConfig::findByRepoDir($repo_dir);
+                    if ($project) {
+                        $nd = NodeConfig::load($project);
+                        $nodeRelease = $nd['release']['current'] ?? null;
+                        if ($nodeRelease) {
+                            $activeVersion = $nodeRelease;
+                            $runner->log("NodeConfig fallback version={$activeVersion} (project={$project})");
+                        }
+                    }
+                }
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
                     $dirExists = is_dir($releaseDir);
@@ -497,6 +512,17 @@ Class ProtocolStart extends Command {
                     $curDeploy = DeploymentState::current($repo_dir);
                     $activeVersion = $curDeploy['version'] ?? null;
                     $runner->log("Health check: DeploymentState fallback version={$activeVersion}");
+                }
+                if (!$activeVersion || $activeVersion === 'main') {
+                    $project = NodeConfig::findByRepoDir($repo_dir);
+                    if ($project) {
+                        $nd = NodeConfig::load($project);
+                        $nodeRelease = $nd['release']['current'] ?? null;
+                        if ($nodeRelease) {
+                            $activeVersion = $nodeRelease;
+                            $runner->log("Health check: NodeConfig fallback version={$activeVersion}");
+                        }
+                    }
                 }
                 if ($activeVersion) {
                     $releaseDir = BlueGreen::getReleaseDir($repo_dir, $activeVersion);
