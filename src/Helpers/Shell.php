@@ -168,7 +168,11 @@ Class Shell
         // Recover from invalid cwd before spawning a shell
         if (@getcwd() === false) {
             @chdir('/tmp');
+            Log::error('shell', "cwd was invalid (deleted?), recovered to /tmp. Command: {$command}");
         }
+
+        Log::write('shell:passthru', $command);
+        $start = microtime(true);
 
         $descriptorSpec = array(
             0 => STDIN,
@@ -177,10 +181,16 @@ Class Shell
         );
         $pipes = array();
         $process = proc_open($command, $descriptorSpec, $pipes);
+        $exitCode = 0;
         if (is_resource($process)) {
-            proc_close($process);
+            $exitCode = proc_close($process);
         }
-        return 0;
+
+        $duration = microtime(true) - $start;
+        $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
+        Log::write('shell:passthru', "  → {$status} (" . round($duration, 2) . "s)");
+
+        return $exitCode;
     }
 
     /**
@@ -201,20 +211,19 @@ Class Shell
         if ($cwd === false) {
             $fallback = '/tmp';
             @chdir($fallback);
-            // Log so the caller can see what happened
-            file_put_contents(
-                'php://stderr',
-                "[Shell::run] WARNING: cwd was invalid (deleted?), recovered to {$fallback}. Command: {$command}\n",
-                FILE_APPEND
-            );
+            Log::error('shell', "cwd was invalid (deleted?), recovered to {$fallback}. Command: {$command}");
         }
 
+        $start = microtime(true);
         $response = null;
         exec($command, $response, $return_var);
 
         if (is_array($response)) {
             $response = implode(PHP_EOL, $response);
         }
+
+        $duration = microtime(true) - $start;
+        Log::cmd($command, $response, (int)$return_var, $duration);
 
         return $response;
     }
@@ -237,12 +246,15 @@ Class Shell
         if (!file_exists($outputfile)) {
             $dir = dirname($outputfile);
             if (!is_dir($dir)) {
-                self::run("mkdir -p " . escapeshellarg($dir));
+                @mkdir($dir, 0755, true);
             }
             if (is_dir($dir)) {
                 touch($outputfile);
             }
         }
+
+        Log::write('shell:background', "launching: {$command}");
+        Log::write('shell:background', "output → {$outputfile}");
 
         $command = sprintf("%s > %s 2>&1 & echo $!", $command, $outputfile);
         exec($command, $response);
@@ -250,6 +262,8 @@ Class Shell
         if (is_array($response)) {
             $response = array_pop($response);
         }
+
+        Log::write('shell:background', "PID: {$response}");
         return $response;
     }
 

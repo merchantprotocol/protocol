@@ -80,6 +80,10 @@ class StageRunner
             );
         }
 
+        // Also write to the consolidated protocol.log
+        $tag = $this->currentStage ? 'stage:' . $this->currentStage : 'stage';
+        Log::write($tag, $message);
+
         if ($this->verbose) {
             $this->output->writeln("[{$timestamp}] {$prefix}{$message}");
         }

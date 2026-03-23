@@ -38,6 +38,9 @@ class AuditLog
         }
         $entry .= "\n";
 
+        // Mirror to consolidated log
+        Log::write('audit', trim($entry));
+
         $path = self::logPath();
         $isNew = !is_file($path);
         file_put_contents($path, $entry, FILE_APPEND | LOCK_EX);
