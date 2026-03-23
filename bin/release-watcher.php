@@ -57,18 +57,25 @@ function protocolStopStart(string $stopDir, string $startDir): void
     $stopArg = escapeshellarg($stopDir);
     $startArg = escapeshellarg($startDir);
 
-    // Redirect group stdout/stderr to /dev/null so PHP's exec() pipe
-    // doesn't block waiting for the backgrounded process to exit.
-    $cmd = "{ nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
-        . " >> " . escapeshellarg($logFile) . " 2>&1 </dev/null &"
-        . " } >/dev/null 2>&1";
+    // Use proc_open() to avoid exec() pipe-blocking on daemon spawn.
+    $cmd = "nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
+        . " >> " . escapeshellarg($logFile) . " 2>&1 </dev/null &";
 
     Log::context('watcher', [
         'action'    => 'stop+start',
         'stop_dir'  => $stopDir,
         'start_dir' => $startDir,
     ]);
-    Shell::run($cmd);
+
+    $descriptors = [
+        0 => ['file', '/dev/null', 'r'],
+        1 => ['file', '/dev/null', 'w'],
+        2 => ['file', '/dev/null', 'w'],
+    ];
+    $process = proc_open($cmd, $descriptors, $pipes);
+    if (is_resource($process)) {
+        proc_close($process);
+    }
 
     sleep(2);
     Log::info('watcher', "stop+start spawned, watcher (PID: " . getmypid() . ") exiting");
