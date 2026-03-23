@@ -189,6 +189,12 @@ Class ProtocolStatus extends Command {
                 $this->writeLine($output, 'Branch', "<fg=white>{$branch}</>");
             }
         }
+        // Config repo branch
+        if ($configrepo && Git::isInitializedRepo($configrepo)) {
+            $configBranch = Git::branch($configrepo);
+            $this->writeLine($output, 'Config branch', "<fg=white>{$configBranch}</>");
+        }
+
         $this->writeLine($output, 'Strategy', "<fg=white>{$strategy}</>");
 
         // Releases directory info for slave nodes
