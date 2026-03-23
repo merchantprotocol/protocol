@@ -36,6 +36,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Command\LockableTrait;
@@ -57,6 +58,10 @@ Class ProtocolStop extends Command {
 
     use LockableTrait;
 
+    private StageRunner $runner;
+    private InputInterface $input;
+    private OutputInterface $output;
+
     protected static $defaultName = 'stop';
     protected static $defaultDescription = 'Stops running slave modes';
 
@@ -72,231 +77,335 @@ Class ProtocolStop extends Command {
         ;
         $this
             // configure an argument
-            ->addArgument('project', \Symfony\Component\Console\Input\InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
-            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', null)
             // ...
         ;
     }
 
-    /**
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     * @return integer
-     */
+    // ═══════════════════════════════════════════════════════════════
+    //  ROUTER
+    // ═══════════════════════════════════════════════════════════════
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $repo_dir = Dir::realpath($input->getOption('dir'));
-        $nodeConfig = null;
-        $nodeData = [];
+        $this->input = $input;
+        $this->output = $output;
+        $this->runner = new StageRunner($output);
 
-        // Detect slave node mode so stop works from anywhere
-        $projectArg = $input->getArgument('project');
-        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
-        if ($resolved) {
-            [$nodeConfig, $nodeData, $activeDir] = $resolved;
-            $repo_dir = $activeDir;
-        }
+        $output->writeln('');
 
-        // For non-slave nodes, require a git repo
-        if (!$nodeConfig) {
-            Git::checkInitializedRepo($output, $repo_dir);
-        }
-
-        // command should only have one running instance
         if (!$this->lock()) {
             $output->writeln('The command is already running in another process.');
             return Command::SUCCESS;
         }
 
-        // If the resolved dir has no docker-compose.yml, try to find the actual
-        // running directory from node config (handles strategy switches mid-flight)
-        $composePath = rtrim($repo_dir, '/') . '/docker-compose.yml';
-        if (!file_exists($composePath) && $nodeConfig) {
-            $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
-            $fallbackDirs = [];
+        $dir = $this->resolveDirectory();
+        if (!$dir) {
+            $output->writeln('<error>Could not determine which directory to stop.</error>');
+            return Command::FAILURE;
+        }
 
-            // Check branch directory
-            $branch = $nodeData['deployment']['branch'] ?? null;
-            if ($branch && $releasesDir) {
-                $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $branch;
+        return $this->stopDirect($dir);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  RESOLVER
+    // ═══════════════════════════════════════════════════════════════
+
+    private function resolveDirectory(): ?string
+    {
+        $explicitDir = $this->input->getOption('dir');
+
+        // 1. Explicit --dir passed: use it directly
+        if ($explicitDir !== null) {
+            return Dir::realpath($explicitDir);
+        }
+
+        // 2. Check if cwd is inside a project/release dir
+        $cwd = Git::getGitLocalFolder();
+        $repo_dir = $cwd ? Dir::realpath($cwd) : null;
+
+        if ($repo_dir) {
+            $match = NodeConfig::findByActiveDir($repo_dir);
+            if ($match) {
+                return $repo_dir;
             }
-
-            // Check current release directory
-            $release = $nodeData['release']['current'] ?? null;
-            if ($release && $releasesDir) {
-                $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $release;
-            }
-
-            // Check repo_dir from node config
-            $nodeRepoDir = $nodeData['repo_dir'] ?? null;
-            if ($nodeRepoDir) {
-                $fallbackDirs[] = rtrim($nodeRepoDir, '/');
-            }
-
-            foreach ($fallbackDirs as $dir) {
-                if (is_file(rtrim($dir, '/') . '/docker-compose.yml')) {
-                    $repo_dir = rtrim($dir, '/') . '/';
-                    break;
-                }
+            if (Git::isInitializedRepo($repo_dir)) {
+                return $repo_dir;
             }
         }
 
-        $arrInput = new ArrayInput(['--dir' => $repo_dir]);
-        $nullOutput = new NullOutput();
-        $app = $this->getApplication();
+        // 3. Ambient mode: resolve slave node, discover running dir
+        $projectArg = $this->input->getArgument('project');
+        $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
+        if ($resolved) {
+            [$nodeConfig, $nodeData, $activeDir] = $resolved;
+            return $this->findRunningDir($nodeData, $activeDir);
+        }
+
+        return $repo_dir;
+    }
+
+    private function findRunningDir(array $nodeData, string $defaultDir): string
+    {
+        // Check if the default dir has docker-compose.yml
+        $composePath = rtrim($defaultDir, '/') . '/docker-compose.yml';
+        if (file_exists($composePath)) {
+            return $defaultDir;
+        }
+
+        // Search fallback dirs for one with docker-compose.yml
+        $releasesDir = $nodeData['bluegreen']['releases_dir'] ?? null;
+        $fallbackDirs = [];
+
+        $branch = $nodeData['deployment']['branch'] ?? null;
+        if ($branch && $releasesDir) {
+            $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $branch;
+        }
+
+        $release = $nodeData['release']['active'] ?? $nodeData['release']['current'] ?? null;
+        if ($release && $releasesDir) {
+            $fallbackDirs[] = rtrim($releasesDir, '/') . '/' . $release;
+        }
+
+        $nodeRepoDir = $nodeData['repo_dir'] ?? null;
+        if ($nodeRepoDir) {
+            $fallbackDirs[] = rtrim($nodeRepoDir, '/');
+        }
+
+        foreach ($fallbackDirs as $dir) {
+            if (is_file(rtrim($dir, '/') . '/docker-compose.yml')) {
+                return rtrim($dir, '/') . '/';
+            }
+        }
+
+        return $defaultDir;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CONTROLLER
+    // ═══════════════════════════════════════════════════════════════
+
+    private function stopDirect(string $dir): int
+    {
+        $ctx = $this->buildContext($dir);
+
+        $this->runner->log("repo_dir={$dir}");
+        $this->runner->log("strategy={$ctx['strategy']}");
+
+        $this->stopWatchers($dir, $ctx);
+        $this->unlinkConfiguration($dir, $ctx);
+        $this->stopContainers($dir, $ctx);
+        $this->stopDevServices($dir, $ctx);
+        $this->removeCrontab($dir, $ctx);
+        $this->verifyShutdown($dir, $ctx);
+        $this->writeStopSummary($dir, $ctx);
+
+        return Command::SUCCESS;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CONTEXT BUILDER
+    // ═══════════════════════════════════════════════════════════════
+
+    private function buildContext(string $dir): array
+    {
+        $nodeConfig = null;
+        $nodeData = [];
+
+        $match = NodeConfig::findByActiveDir($dir);
+        if ($match) {
+            [$nodeConfig, $nodeData] = $match;
+        }
+
+        if (!$nodeConfig) {
+            $projectArg = $this->input->getArgument('project');
+            $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $dir ?: null);
+            if ($resolved) {
+                [$nodeConfig, $nodeData, ] = $resolved;
+            }
+        }
+
         $strategy = $nodeConfig
             ? ($nodeData['deployment']['strategy'] ?? 'none')
-            : Json::read('deployment.strategy', 'none', $repo_dir);
+            : Json::read('deployment.strategy', 'none', $dir);
 
-        $output->writeln('');
+        return [
+            'strategy'   => $strategy,
+            'nodeConfig' => $nodeConfig,
+            'nodeData'   => $nodeData,
+        ];
+    }
 
-        $runner = new StageRunner($output);
+    // ═══════════════════════════════════════════════════════════════
+    //  WORKERS
+    // ═══════════════════════════════════════════════════════════════
 
-        $runner->log("repo_dir={$repo_dir}");
-        $runner->log("strategy={$strategy}");
-        $runner->log("isEnabled=" . (BlueGreen::isEnabled($repo_dir) ? 'true' : 'false'));
-        $runner->log("activeVersion=" . (BlueGreen::getActiveVersion($repo_dir) ?: 'null'));
+    private function stopWatchers(string $dir, array $ctx): void
+    {
+        $runner = $this->runner;
+        $arrInput = new ArrayInput(['--dir' => $dir]);
+        $nullOutput = new NullOutput();
+        $app = $this->getApplication();
 
-        // ── Stage 1: Stopping watchers ──────────────────────────
         $runner->run('Stopping watchers', function() use ($runner, $app, $arrInput, $nullOutput) {
-            // Stop all watchers regardless of strategy
             try { $app->find('deploy:slave:stop')->run($arrInput, $nullOutput); $runner->log("deploy:slave:stop done"); } catch (\Throwable $e) { $runner->log("deploy:slave:stop error: " . $e->getMessage()); }
             try { $app->find('git:slave:stop')->run($arrInput, $nullOutput); $runner->log("git:slave:stop done"); } catch (\Throwable $e) { $runner->log("git:slave:stop error: " . $e->getMessage()); }
             try { $app->find('config:slave:stop')->run($arrInput, $nullOutput); $runner->log("config:slave:stop done"); } catch (\Throwable $e) { $runner->log("config:slave:stop error: " . $e->getMessage()); }
         });
+    }
 
-        // ── Stage 2: Unlinking configuration ────────────────────
-        $runner->run('Unlinking configuration', function() use ($runner, $app, $arrInput, $nullOutput, $repo_dir) {
-            $hasRemote = Json::read('configuration.remote', false, $repo_dir);
+    private function unlinkConfiguration(string $dir, array $ctx): void
+    {
+        $runner = $this->runner;
+        $arrInput = new ArrayInput(['--dir' => $dir]);
+        $nullOutput = new NullOutput();
+        $app = $this->getApplication();
+
+        $runner->run('Unlinking configuration', function() use ($runner, $app, $arrInput, $nullOutput, $dir) {
+            $hasRemote = Json::read('configuration.remote', false, $dir);
             $runner->log("configuration.remote=" . ($hasRemote ?: 'false'));
             if ($hasRemote) {
                 $app->find('config:unlink')->run($arrInput, $nullOutput);
                 $runner->log("config:unlink done");
             }
         });
+    }
 
-        // ── Stage 3: Stopping containers ────────────────────────
-        // For release/bluegreen: uses BlueGreen::stopContainers() which passes
-        // --env-file .env.deployment so docker compose resolves the patched
-        // container name (e.g. ghostagent-v0.1.1 instead of bare ghostagent).
-        //
-        // For none: uses raw docker compose down in repo_dir directly.
-        // For branch: uses raw docker compose down in repo_dir.
-        $runner->run('Stopping containers', function() use ($runner, $repo_dir, $strategy) {
-            // No deployment strategy — just docker compose down in repo dir
-            if ($strategy === 'none') {
+    private function stopContainers(string $dir, array $ctx): void
+    {
+        $runner = $this->runner;
+
+        $runner->run('Stopping containers', function() use ($runner, $dir, $ctx) {
+            // Simple case: just docker compose down in the given directory
+            if ($ctx['strategy'] === 'none') {
                 $dockerCommand = Docker::getDockerCommand();
-                $runner->log("strategy=none, running {$dockerCommand} down in {$repo_dir}");
-                $result = Shell::run("cd " . escapeshellarg($repo_dir) . " && {$dockerCommand} down 2>&1");
+                $runner->log("strategy=none, running {$dockerCommand} down in {$dir}");
+                $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
                 $runner->log("output=" . trim($result));
-                $running = trim(Shell::run("docker ps --format '{{.Names}}' 2>/dev/null"));
-                $runner->log("docker ps after stop: " . ($running ?: '(none)'));
                 return;
             }
 
-            // 1. Stop containers in all dirs tracked by DeploymentState.
-            //    For dirs with .env.deployment, use BlueGreen::stopContainers()
-            //    so the patched container name is resolved correctly.
-            $dirs = DeploymentState::allKnownDirs($repo_dir);
-            $runner->log("allKnownDirs returned " . count($dirs) . " dirs: " . implode(', ', $dirs));
+            // Release dir: stop via BlueGreen (resolves .env.deployment container name)
+            if (BlueGreen::isReleaseDir($dir, $dir) || is_file(rtrim($dir, '/') . '/.env.deployment')) {
+                $containerName = ContainerName::resolveFromDir($dir);
+                $runner->log("Stopping release dir {$dir} via BlueGreen::stopContainers (container={$containerName})");
+                $stopped = BlueGreen::stopContainers($dir);
+                $runner->log("result=" . ($stopped ? 'ok' : 'failed'));
+            } else {
+                $dockerCommand = Docker::getDockerCommand();
+                $runner->log("Stopping dir {$dir} via {$dockerCommand} down");
+                $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
+                $runner->log("output=" . trim($result));
+            }
 
-            foreach ($dirs as $dir) {
-                if (BlueGreen::isReleaseDir($dir, $repo_dir)) {
-                    $containerName = ContainerName::resolveFromDir($dir);
-                    $runner->log("Stopping release dir {$dir} via BlueGreen::stopContainers (container={$containerName})");
-                    $stopped = BlueGreen::stopContainers($dir);
-                    $runner->log("  result=" . ($stopped ? 'ok' : 'failed'));
-                } else {
-                    $dockerCommand = Docker::getDockerCommand();
-                    $runner->log("Stopping dir {$dir} via {$dockerCommand} down (not a release dir)");
-                    $result = Shell::run("cd " . escapeshellarg($dir) . " && {$dockerCommand} down 2>&1");
-                    $runner->log("  output=" . trim($result));
+            // Also stop all known release dirs tracked by DeploymentState
+            $dirs = DeploymentState::allKnownDirs($dir);
+            $runner->log("allKnownDirs returned " . count($dirs) . " dirs");
+            foreach ($dirs as $knownDir) {
+                if ($knownDir === $dir) continue; // already stopped above
+                if (BlueGreen::isReleaseDir($knownDir, $dir)) {
+                    $containerName = ContainerName::resolveFromDir($knownDir);
+                    $runner->log("Stopping release dir {$knownDir} (container={$containerName})");
+                    BlueGreen::stopContainers($knownDir);
                 }
             }
 
-            // 2. Also iterate ALL release directories on disk.
-            //    This catches orphaned releases not tracked in deploy state,
-            //    and ensures we don't miss anything.
-            if (BlueGreen::isEnabled($repo_dir)) {
-                $releases = BlueGreen::listReleases($repo_dir);
-                $runner->log("listReleases returned " . count($releases) . " releases: " . implode(', ', $releases));
+            // Sweep all release directories on disk for orphans
+            if (BlueGreen::isEnabled($dir)) {
+                $releases = BlueGreen::listReleases($dir);
+                $runner->log("listReleases returned " . count($releases) . " releases");
                 foreach ($releases as $release) {
-                    $releaseDir = BlueGreen::getReleaseDir($repo_dir, $release);
+                    $releaseDir = BlueGreen::getReleaseDir($dir, $release);
                     if (is_dir($releaseDir)) {
                         $containerName = ContainerName::resolveFromDir($releaseDir);
-                        $runner->log("Stopping release {$release} dir={$releaseDir} container={$containerName}");
-                        $stopped = BlueGreen::stopContainers($releaseDir);
-                        $runner->log("  result=" . ($stopped ? 'ok' : 'failed'));
-                    } else {
-                        $runner->log("Skipping release {$release} — dir does not exist: {$releaseDir}");
+                        $runner->log("Stopping release {$release} (container={$containerName})");
+                        BlueGreen::stopContainers($releaseDir);
                     }
                 }
-            } else {
-                $runner->log("BlueGreen not enabled, skipping release dir scan");
             }
 
-            // 3. Nuclear option: check docker ps for any containers matching
-            //    the project name pattern and force-stop them.
             $running = trim(Shell::run("docker ps --format '{{.Names}}' 2>/dev/null"));
             $runner->log("docker ps after stop: " . ($running ?: '(none)'));
         });
+    }
 
-        // ── Dev compose services ─────────────────────────────────
-        // Only for "none" strategy (local dev). Check for dev compose files
-        // and offer to stop their containers too.
-        if ($strategy === 'none') {
-            $devComposePath = DevCompose::find($repo_dir);
-            if ($devComposePath) {
-                $runningDev = DevCompose::getRunningContainers($devComposePath);
-                if (!empty($runningDev)) {
-                    $shouldStop = DevCompose::shouldAct($repo_dir, 'Stop', $input, $output, $devComposePath);
-                    if ($shouldStop) {
-                        $runner->run('Stopping dev services', function() use ($runner, $repo_dir, $devComposePath) {
-                            $result = DevCompose::stop($repo_dir, $devComposePath);
-                            $runner->log("output=" . trim($result));
-                        });
-                    }
-                }
-            }
+    private function stopDevServices(string $dir, array $ctx): void
+    {
+        if ($ctx['strategy'] !== 'none') {
+            return;
         }
 
-        // ── Stage 4: Removing crontab ───────────────────────────
-        // Skip for local dev — no crontab was installed
-        if ($strategy !== 'none') {
-            $runner->run('Removing crontab entry', function() use ($runner, $repo_dir) {
-                Crontab::removeCrontabRestart($repo_dir);
-                $runner->log("Crontab entry removed");
+        $devComposePath = DevCompose::find($dir);
+        if (!$devComposePath) {
+            return;
+        }
+
+        $runningDev = DevCompose::getRunningContainers($devComposePath);
+        if (empty($runningDev)) {
+            return;
+        }
+
+        $shouldStop = DevCompose::shouldAct($dir, 'Stop', $this->input, $this->output, $devComposePath);
+        if ($shouldStop) {
+            $runner = $this->runner;
+            $runner->run('Stopping dev services', function() use ($runner, $dir, $devComposePath) {
+                $result = DevCompose::stop($dir, $devComposePath);
+                $runner->log("output=" . trim($result));
             });
         }
+    }
 
-        // ── Stage 5: Verifying shutdown ─────────────────────────
-        $runner->run('Verifying shutdown', function() use ($runner, $repo_dir, $strategy) {
-            // Verify all known containers are stopped
-            $allNames = ContainerName::resolveAll($repo_dir);
+    private function removeCrontab(string $dir, array $ctx): void
+    {
+        if ($ctx['strategy'] === 'none') {
+            return;
+        }
+        $runner = $this->runner;
+        $runner->run('Removing crontab entry', function() use ($runner, $dir) {
+            Crontab::removeCrontabRestart($dir);
+            $runner->log("Crontab entry removed");
+        });
+    }
+
+    private function verifyShutdown(string $dir, array $ctx): void
+    {
+        $runner = $this->runner;
+        $runner->run('Verifying shutdown', function() use ($runner, $dir, $ctx) {
+            $allNames = ContainerName::resolveAll($dir);
+            if (empty($allNames)) {
+                $allNames = Docker::getContainerNamesFromDockerComposeFile($dir);
+            }
             foreach ($allNames as $name) {
                 $isRunning = Docker::isDockerContainerRunning($name);
-                $runner->log("Verify container={$name} running={$isRunning}");
+                $runner->log("Verify container={$name} running=" . ($isRunning ? 'yes' : 'no'));
                 if ($isRunning) {
                     throw new \RuntimeException("Container '{$name}' is still running");
                 }
             }
 
-            // Verify watcher is stopped (skip for local dev — no watchers)
-            if ($strategy !== 'none') {
-                $watcherRunning = DeploymentState::isWatcherRunning($repo_dir);
-                $runner->log("Watcher running={$watcherRunning}");
+            if ($ctx['strategy'] !== 'none') {
+                $watcherRunning = DeploymentState::isWatcherRunning($dir);
+                $runner->log("Watcher running=" . ($watcherRunning ? 'yes' : 'no'));
                 if ($watcherRunning) {
                     throw new \RuntimeException('Deployment watcher is still running');
                 }
             }
         }, 'PASS');
+    }
 
-        // ── Summary ─────────────────────────────────────────────
+    private function writeStopSummary(string $dir, array $ctx): void
+    {
         $environment = Config::read('env', 'unknown');
 
-        $containerNames = ContainerName::resolveAll($repo_dir);
+        $containerNames = ContainerName::resolveAll($dir);
+        if (empty($containerNames)) {
+            $containerNames = Docker::getContainerNamesFromDockerComposeFile($dir);
+        }
+
         foreach ($containerNames as $name) {
-            $runner->log("Summary: container={$name} running=" . (Docker::isDockerContainerRunning($name) ? 'yes' : 'no'));
+            $this->runner->log("Summary: container={$name} running=" . (Docker::isDockerContainerRunning($name) ? 'yes' : 'no'));
         }
 
         $stoppedCount = 0;
@@ -308,21 +417,19 @@ Class ProtocolStop extends Command {
             ? "{$stoppedCount}/{$containerTotal} stopped"
             : 'none configured';
 
-        $runner->log("Summary totals: {$stoppedCount}/{$containerTotal} stopped, names=" . implode(',', $containerNames));
+        $this->runner->log("Summary totals: {$stoppedCount}/{$containerTotal} stopped, names=" . implode(',', $containerNames));
 
         $summaryInfo = [
             'Environment' => $environment,
             'Containers'  => $containerStatus,
         ];
 
-        if ($strategy !== 'none') {
-            $summaryInfo['Watchers'] = DeploymentState::isWatcherRunning($repo_dir) ? 'still running' : 'stopped';
-            $summaryInfo['Crontab'] = Crontab::hasCrontabRestart($repo_dir) ? 'still installed' : 'removed';
+        if ($ctx['strategy'] !== 'none') {
+            $summaryInfo['Watchers'] = DeploymentState::isWatcherRunning($dir) ? 'still running' : 'stopped';
+            $summaryInfo['Crontab'] = Crontab::hasCrontabRestart($dir) ? 'still installed' : 'removed';
         }
 
-        $runner->writeSummary($summaryInfo, 'Shutdown complete.', 'Shutdown completed with issues.');
-
-        return Command::SUCCESS;
+        $this->runner->writeSummary($summaryInfo, 'Shutdown complete.', 'Shutdown completed with issues.');
     }
 
 }
