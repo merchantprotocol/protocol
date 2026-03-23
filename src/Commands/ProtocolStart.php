@@ -236,6 +236,9 @@ Class ProtocolStart extends Command {
         $this->checkDiskSpace();
         $this->writeSummary($dir, $ctx);
 
+        // Clear cached data so status reads fresh state from disk
+        Json::clearInstances();
+
         // Run protocol status to show full dashboard
         $statusArgs = new ArrayInput(['--dir' => $dir]);
         $this->getApplication()->find('status')->run($statusArgs, $this->output);
