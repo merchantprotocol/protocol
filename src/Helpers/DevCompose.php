@@ -6,7 +6,7 @@
  * docker-compose files (docker-compose-dev.yml, docker-compose.dev.yml, etc.)
  * for the "none" deployment strategy (local development).
  *
- * Preferences are stored in protocol.json under docker.dev_compose:
+ * Preferences are stored in .protocol/preferences.json under docker.dev_compose:
  *   "always" — always start/stop dev services without asking
  *   "never"  — never start/stop dev services
  *   "ask"    — prompt the user each time (default when not set)
