@@ -39,7 +39,7 @@ class AuditLog
         $entry .= "\n";
 
         // Mirror to consolidated log
-        Log::write('audit', trim($entry));
+        Log::info('audit', trim($entry));
 
         $path = self::logPath();
         $isNew = !is_file($path);

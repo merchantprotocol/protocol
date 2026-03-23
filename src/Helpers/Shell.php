@@ -3,19 +3,19 @@
  * NOTICE OF LICENSE
  *
  * MIT License
- * 
+ *
  * Copyright (c) 2019 Merchant Protocol
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- * 
+ *
  * @category   merchantprotocol
  * @package    merchantprotocol/protocol
  * @copyright  Copyright (c) 2019 Merchant Protocol, LLC (https://merchantprotocol.com/)
@@ -168,11 +168,7 @@ Class Shell
         // Recover from invalid cwd before spawning a shell
         if (@getcwd() === false) {
             @chdir('/tmp');
-            Log::error('shell', "cwd was invalid (deleted?), recovered to /tmp. Command: {$command}");
         }
-
-        Log::write('shell:passthru', $command);
-        $start = microtime(true);
 
         $descriptorSpec = array(
             0 => STDIN,
@@ -185,10 +181,6 @@ Class Shell
         if (is_resource($process)) {
             $exitCode = proc_close($process);
         }
-
-        $duration = microtime(true) - $start;
-        $status = $exitCode === 0 ? 'ok' : "FAIL(exit={$exitCode})";
-        Log::write('shell:passthru', "  → {$status} (" . round($duration, 2) . "s)");
 
         return $exitCode;
     }
@@ -209,12 +201,9 @@ Class Shell
         // Recover by chdir'ing to /tmp so the shell can initialize cleanly.
         $cwd = @getcwd();
         if ($cwd === false) {
-            $fallback = '/tmp';
-            @chdir($fallback);
-            Log::error('shell', "cwd was invalid (deleted?), recovered to {$fallback}. Command: {$command}");
+            @chdir('/tmp');
         }
 
-        $start = microtime(true);
         $response = null;
         exec($command, $response, $return_var);
 
@@ -222,14 +211,11 @@ Class Shell
             $response = implode(PHP_EOL, $response);
         }
 
-        $duration = microtime(true) - $start;
-        Log::cmd($command, $response, (int)$return_var, $duration);
-
         return $response;
     }
 
     /**
-     * Run this command in the background. This launches the command $cmd, redirects 
+     * Run this command in the background. This launches the command $cmd, redirects
      * the command output to $outputfile, and writes the process id to $pidfile.
      *
      * @param [type] $command
@@ -244,9 +230,6 @@ Class Shell
 
         $outputfile = Log::getLogFile();
 
-        Log::write('shell:background', "launching: {$command}");
-        Log::write('shell:background', "output → {$outputfile}");
-
         $command = sprintf("%s >> %s 2>&1 & echo $!", $command, $outputfile);
         exec($command, $response);
 
@@ -254,12 +237,11 @@ Class Shell
             $response = array_pop($response);
         }
 
-        Log::write('shell:background', "PID: {$response}");
         return $response;
     }
 
     /**
-     * 
+     *
      *
      * @return boolean
      */
@@ -287,9 +269,7 @@ Class Shell
             if( count(preg_split("/\n/", $result)) > 2){
                 return true;
             }
-        } catch(\Exception $e) {
-            error_log('Shell::isRunning() failed for PID ' . $pid . ': ' . $e->getMessage());
-        }
+        } catch(\Exception $e) {}
 
         return false;
     }

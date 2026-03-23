@@ -36,6 +36,7 @@ use Gitcd\Helpers\BlueGreen\ReleaseState;
 use Gitcd\Helpers\BlueGreen\ReleaseBuilder;
 use Gitcd\Helpers\BlueGreen\HealthChecker;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Log;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\JsonLock;
 use Gitcd\Utils\NodeConfig;
@@ -60,10 +61,12 @@ class BlueGreen
             $httpInUse = Shell::run("ss -tlnp 'sport = :{$http}' 2>/dev/null | tail -n +2");
             $httpsInUse = Shell::run("ss -tlnp 'sport = :{$https}' 2>/dev/null | tail -n +2");
             if (empty(trim($httpInUse)) && empty(trim($httpsInUse))) {
+                Log::debug('bluegreen', "found available shadow ports: {$http}/{$https}");
                 return [$http, $https];
             }
         }
         // Fallback if all ports are exhausted
+        Log::warn('bluegreen', "all shadow ports exhausted (18080-18280), falling back to " . self::SHADOW_PORT_RANGE_START);
         return [self::SHADOW_PORT_RANGE_START, self::SHADOW_PORT_RANGE_START + 1];
     }
 
@@ -314,13 +317,20 @@ class BlueGreen
         $activeVersion = self::getActiveVersion($repo_dir);
         $newDir = self::getReleaseDir($repo_dir, $newVersion);
 
+        Log::context('bluegreen', [
+            'action'         => 'promote',
+            'new_version'    => $newVersion,
+            'active_version' => $activeVersion ?: 'none',
+            'new_dir'        => $newDir,
+        ]);
+
         // Write production ports for new version
         self::writeReleaseEnv($newDir, self::PRODUCTION_HTTP, self::PRODUCTION_HTTPS, $newVersion);
 
         // Start new version on production ports FIRST (zero-downtime)
         $started = self::startContainers($newDir);
         if (!$started) {
-            // New version failed to start — old containers are still running, no damage done
+            Log::error('bluegreen', "promote aborted: new version {$newVersion} failed to start on production ports");
             return null;
         }
 
@@ -335,6 +345,7 @@ class BlueGreen
                 // Start old version on shadow ports for instant rollback
                 self::startContainers($activeDir);
                 self::setReleaseState($repo_dir, $activeVersion, $standbyHttp, 'standby');
+                Log::info('bluegreen', "old version {$activeVersion} moved to standby on port {$standbyHttp}");
             }
         }
 
@@ -345,6 +356,7 @@ class BlueGreen
         JsonLock::write('bluegreen.promoted_at', date('Y-m-d\TH:i:sP'), $repo_dir);
         JsonLock::save($repo_dir);
 
+        Log::info('bluegreen', "promote complete: {$newVersion} is now serving on production ports");
         return $newVersion;
     }
 }

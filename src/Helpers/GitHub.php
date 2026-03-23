@@ -51,6 +51,7 @@ class GitHub
 
             $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
         } else {
+            Log::warn('github', "no access token available, falling back to gh CLI for {$method} {$endpoint}");
             $cmd = "gh api -X " . escapeshellarg($method)
                 . " -H 'Accept: application/vnd.github+json'";
 
@@ -67,11 +68,28 @@ class GitHub
             $cmd .= " " . escapeshellarg($endpoint) . " 2>/dev/null";
         }
 
+        Log::debug('github', "API {$method} {$endpoint}");
+        $start = microtime(true);
         $result = Shell::run($cmd);
-        if (!$result) return null;
+        $duration = round(microtime(true) - $start, 2);
+
+        if (!$result) {
+            Log::warn('github', "API {$method} {$endpoint} returned empty response ({$duration}s)");
+            return null;
+        }
 
         $data = json_decode($result, true);
-        return is_array($data) ? $data : null;
+        if (!is_array($data)) {
+            Log::warn('github', "API {$method} {$endpoint} returned non-JSON response ({$duration}s)");
+            return null;
+        }
+
+        // Log API errors (rate limit, auth failures, not found)
+        if (isset($data['message'])) {
+            Log::warn('github', "API {$method} {$endpoint} error: {$data['message']} ({$duration}s)");
+        }
+
+        return $data;
     }
 
     /**
@@ -104,10 +122,19 @@ class GitHub
     public static function getVariable(string $name, ?string $repo_dir = null): ?string
     {
         $slug = self::getRepoSlug($repo_dir);
-        if (!$slug) return null;
+        if (!$slug) {
+            Log::warn('github', "getVariable({$name}) failed: could not resolve repo slug");
+            return null;
+        }
 
         $data = self::apiRequest('GET', "/repos/{$slug}/actions/variables/" . urlencode($name));
-        return $data['value'] ?? null;
+        $value = $data['value'] ?? null;
+
+        if ($value === null) {
+            Log::debug('github', "getVariable({$name}) returned null for {$slug}");
+        }
+
+        return $value;
     }
 
     /**

@@ -77,20 +77,28 @@ Class DeployReleaseSlave extends Command {
 
         $interval = (int) $input->getOption('interval');
 
+        Log::context('deploy:slave', [
+            'repo_dir' => $repo_dir,
+            'interval' => $interval,
+        ]);
+
         // Check if already running
         $pid = DeploymentState::watcherPid($repo_dir);
         if ($pid && Shell::isRunning($pid)) {
+            Log::info('deploy:slave', "watcher already running (PID: {$pid})");
             $output->writeln("<comment>Release watcher is already running (PID: {$pid})</comment>");
             return Command::SUCCESS;
         }
 
         $watcherScript = SCRIPT_DIR . 'release-watcher.php';
         if (!is_file($watcherScript)) {
+            Log::error('deploy:slave', "watcher script not found at {$watcherScript}");
             $output->writeln('<error>Release watcher script not found at: ' . $watcherScript . '</error>');
             return Command::FAILURE;
         }
 
         if ($input->getOption('no-daemon')) {
+            Log::info('deploy:slave', "running in foreground mode");
             $output->writeln('<comment>Running release watcher in foreground (Ctrl+C to stop)</comment>');
             Shell::passthru("php " . escapeshellarg($watcherScript) . " --dir=" . escapeshellarg($repo_dir) . " --interval={$interval}");
             return Command::SUCCESS;
@@ -102,6 +110,7 @@ Class DeployReleaseSlave extends Command {
         $parentCwd = @getcwd();
         if ($parentCwd === false || !is_dir($parentCwd)) {
             chdir($repo_dir);
+            Log::warn('deploy:slave', "parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}");
             $output->writeln("<comment>Parent cwd was invalid ({$parentCwd}), anchored to {$repo_dir}</comment>");
         }
 
@@ -118,9 +127,17 @@ Class DeployReleaseSlave extends Command {
             JsonLock::write('release.slave.pid', (int) $newPid, $repo_dir);
             JsonLock::save($repo_dir);
             DeploymentState::setWatcherPid($repo_dir, (int) $newPid);
+
+            Log::context('deploy:slave', [
+                'event'       => 'daemon_started',
+                'pid'         => $newPid,
+                'watcher_log' => $watcherLog,
+            ]);
+
             $output->writeln("<info>Release watcher started (PID: {$newPid})</info>");
             $output->writeln("Log: {$watcherLog}");
         } else {
+            Log::error('deploy:slave', "failed to start daemon, shell returned: " . ($newPid ?: '(empty)'));
             $output->writeln('<error>Failed to start release watcher daemon</error>');
             return Command::FAILURE;
         }

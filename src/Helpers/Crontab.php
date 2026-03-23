@@ -163,7 +163,7 @@ Class Crontab
         $result = Shell::run("crontab " . escapeshellarg($tmpFile), $returnVar);
         if ($returnVar !== 0) {
             Log::error('crontab', "overwrite failed (exit={$returnVar}): {$result}");
-            Log::write('crontab', "content: " . str_replace("\n", "\\n", $tooverwrite));
+            Log::debug('crontab', "content: " . str_replace("\n", "\\n", $tooverwrite));
         }
         unlink($tmpFile);
         return $result;

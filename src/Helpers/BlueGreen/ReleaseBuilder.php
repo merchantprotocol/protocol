@@ -15,6 +15,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Helpers\Docker;
 use Gitcd\Helpers\BlueGreen;
+use Gitcd\Helpers\Log;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
 
@@ -62,19 +63,36 @@ class ReleaseBuilder
         }
 
         if (is_dir($releaseDir . '.git')) {
+            Log::debug('bluegreen', "release dir already exists: {$releaseDir}");
             return true;
         }
 
         // Remove any partial directory
         if (is_dir($releaseDir)) {
+            Log::info('bluegreen', "removing partial release dir: {$releaseDir}");
             Shell::run("rm -rf " . escapeshellarg(rtrim($releaseDir, '/')));
         }
 
         $cloneUrl = \Gitcd\Helpers\GitHubApp::resolveUrl($gitRemote);
+        Log::context('bluegreen', [
+            'action'      => 'git_clone',
+            'version'     => $version,
+            'clone_url'   => Log::sanitize($cloneUrl),
+            'release_dir' => $releaseDir,
+        ]);
+
+        $start = microtime(true);
         $result = Shell::run(
             "GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg(rtrim($releaseDir, '/')) . " 2>&1",
             $returnVar
         );
+        $duration = round(microtime(true) - $start, 2);
+
+        if ($returnVar !== 0) {
+            Log::error('bluegreen', "git clone failed (exit={$returnVar}, {$duration}s): " . trim($result));
+        } else {
+            Log::info('bluegreen', "git clone succeeded ({$duration}s)");
+        }
 
         return $returnVar === 0;
     }
@@ -89,12 +107,14 @@ class ReleaseBuilder
         // Fetch tags using resolved HTTPS URL so credential helper works
         $remoteUrl = trim(Shell::run("git -C {$dir} remote get-url origin 2>/dev/null"));
         $fetchUrl = $remoteUrl ? GitHubApp::resolveUrl($remoteUrl) : 'origin';
+
+        Log::debug('bluegreen', "fetching tags for {$version} from " . Log::sanitize($fetchUrl));
         Shell::run(
             "GIT_TERMINAL_PROMPT=0 git -C {$dir} fetch " . escapeshellarg($fetchUrl) . " --tags 2>&1",
             $fetchReturn
         );
         if ($fetchReturn !== 0) {
-            // Tag fetch failed — caller logs the error context
+            Log::warn('bluegreen', "tag fetch failed (exit={$fetchReturn}) for {$version}");
         }
 
         $result = Shell::run(
@@ -102,7 +122,7 @@ class ReleaseBuilder
             $returnVar
         );
         if ($returnVar !== 0) {
-            // Checkout failed — caller logs the error context
+            Log::error('bluegreen', "checkout failed (exit={$returnVar}) for {$version}: " . trim($result));
         }
 
         return $returnVar === 0;
@@ -137,6 +157,14 @@ class ReleaseBuilder
         $content .= "CONTAINER_NAME={$containerName}\n";
 
         file_put_contents($envFile, $content);
+
+        Log::context('bluegreen', [
+            'action'    => 'write_env',
+            'version'   => $version,
+            'container' => $containerName,
+            'http'      => $httpPort,
+            'https'     => $httpsPort,
+        ]);
     }
 
     /**
@@ -146,6 +174,7 @@ class ReleaseBuilder
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
+            Log::error('bluegreen', "docker-compose.yml not found in {$releaseDir}");
             return false;
         }
 
@@ -190,6 +219,7 @@ class ReleaseBuilder
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
+            Log::error('bluegreen', "buildContainers: docker-compose.yml not found in {$releaseDir}");
             return false;
         }
 
@@ -198,6 +228,15 @@ class ReleaseBuilder
 
         $content = file_get_contents($composePath);
         $usesBuild = (bool) preg_match('/^\s+build:/m', $content);
+
+        Log::context('bluegreen', [
+            'action'      => 'build_containers',
+            'release_dir' => $releaseDir,
+            'uses_build'  => $usesBuild ? 'yes' : 'no',
+            'docker_cmd'  => $dockerCommand,
+        ]);
+
+        $start = microtime(true);
 
         if ($usesBuild) {
             Shell::run("{$dockerCommand} -f " . escapeshellarg($composePath) . " --env-file " . escapeshellarg($envFile) . " build 2>&1");
@@ -210,6 +249,7 @@ class ReleaseBuilder
                 $image = $raw['docker']['image'] ?? null;
             }
             if ($image) {
+                Log::info('bluegreen', "pulling image: {$image}");
                 Shell::run("docker pull " . escapeshellarg($image) . " 2>&1");
             }
         }
@@ -219,6 +259,13 @@ class ReleaseBuilder
             $returnVar
         );
         $output = $result;
+        $duration = round(microtime(true) - $start, 2);
+
+        if ($returnVar !== 0) {
+            Log::error('bluegreen', "buildContainers failed (exit={$returnVar}, {$duration}s)");
+        } else {
+            Log::info('bluegreen', "buildContainers succeeded ({$duration}s)");
+        }
 
         // Run composer install if needed
         if (file_exists(rtrim($releaseDir, '/') . '/composer.json')) {
@@ -241,14 +288,28 @@ class ReleaseBuilder
     {
         $composePath = rtrim($releaseDir, '/') . '/docker-compose.yml';
         if (!file_exists($composePath)) {
+            Log::error('bluegreen', "startContainers: docker-compose.yml not found in {$releaseDir}");
             return false;
         }
 
         $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
         $dockerCommand = Docker::getDockerCommand();
+        $containerName = BlueGreen::getContainerName($releaseDir);
+
+        Log::context('bluegreen', [
+            'action'    => 'start_containers',
+            'container' => $containerName ?: 'unknown',
+            'dir'       => $releaseDir,
+        ]);
 
         $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand} --env-file " . escapeshellarg($envFile) . " up -d 2>&1";
         $result = Shell::run($cmd, $returnVar);
+
+        if ($returnVar !== 0) {
+            Log::error('bluegreen', "startContainers failed (exit={$returnVar}): " . trim($result));
+        } else {
+            Log::info('bluegreen', "startContainers succeeded for {$containerName}");
+        }
 
         return $returnVar === 0;
     }
@@ -272,9 +333,20 @@ class ReleaseBuilder
         $envFile = rtrim($releaseDir, '/') . '/.env.bluegreen';
         $dockerCommand = Docker::getDockerCommand();
         $envFlag = file_exists($envFile) ? " --env-file " . escapeshellarg($envFile) : "";
+        $containerName = BlueGreen::getContainerName($releaseDir);
+
+        Log::context('bluegreen', [
+            'action'    => 'stop_containers',
+            'container' => $containerName ?: 'unknown',
+            'dir'       => $releaseDir,
+        ]);
 
         $cmd = "cd " . escapeshellarg(rtrim($releaseDir, '/')) . " && {$dockerCommand}{$envFlag} down 2>&1";
         $result = Shell::run($cmd, $returnVar);
+
+        if ($returnVar !== 0) {
+            Log::warn('bluegreen', "stopContainers failed (exit={$returnVar}): " . trim($result));
+        }
 
         return $returnVar === 0;
     }
@@ -289,6 +361,7 @@ class ReleaseBuilder
             return true;
         }
 
+        Log::info('bluegreen', "removing release {$version} from {$releaseDir}");
         self::stopContainers($releaseDir);
         Shell::run("rm -rf " . escapeshellarg(rtrim($releaseDir, '/')));
 
