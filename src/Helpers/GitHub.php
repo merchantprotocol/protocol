@@ -35,24 +35,37 @@ class GitHub
     private static function apiRequest(string $method, string $endpoint, ?array $body = null): ?array
     {
         $token = GitHubApp::getAccessToken();
-        if (!$token) {
-            return null;
+
+        if ($token) {
+            $url = "https://api.github.com" . $endpoint;
+
+            $cmd = "curl -s -X " . escapeshellarg($method)
+                . " -H " . escapeshellarg("Authorization: token {$token}")
+                . " -H 'Accept: application/vnd.github+json'"
+                . " -H 'X-GitHub-Api-Version: 2022-11-28'";
+
+            if ($body !== null && $method !== 'GET') {
+                $cmd .= " -H 'Content-Type: application/json'"
+                    . " -d " . escapeshellarg(json_encode($body));
+            }
+
+            $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
+        } else {
+            $cmd = "gh api -X " . escapeshellarg($method)
+                . " -H 'Accept: application/vnd.github+json'";
+
+            if ($body !== null && $method !== 'GET') {
+                foreach ($body as $key => $val) {
+                    if (is_bool($val)) {
+                        $cmd .= " -F " . escapeshellarg("{$key}=" . ($val ? 'true' : 'false'));
+                    } else {
+                        $cmd .= " -f " . escapeshellarg("{$key}={$val}");
+                    }
+                }
+            }
+
+            $cmd .= " " . escapeshellarg($endpoint) . " 2>/dev/null";
         }
-
-        $url = "https://api.github.com" . $endpoint;
-
-        $cmd = "curl -s -X " . escapeshellarg($method)
-            . " -H " . escapeshellarg("Authorization: token {$token}")
-            . " -H 'Accept: application/vnd.github+json'"
-            . " -H 'X-GitHub-Api-Version: 2022-11-28'";
-
-        if ($body !== null && $method !== 'GET') {
-            $cmd .= " -H 'Content-Type: application/json'"
-                . " -d " . escapeshellarg(json_encode($body));
-        }
-
-        $cmd .= " " . escapeshellarg($url) . " 2>/dev/null";
-
 
         $result = Shell::run($cmd);
         if (!$result) return null;
@@ -67,18 +80,19 @@ class GitHub
     private static function apiRequestRaw(string $method, string $endpoint): ?string
     {
         $token = GitHubApp::getAccessToken();
-        if (!$token) {
-            return null;
+
+        if ($token) {
+            $url = "https://api.github.com" . $endpoint;
+            $cmd = "curl -s -X " . escapeshellarg($method)
+                . " -H " . escapeshellarg("Authorization: token {$token}")
+                . " -H 'Accept: application/vnd.github+json'"
+                . " -H 'X-GitHub-Api-Version: 2022-11-28'"
+                . " " . escapeshellarg($url) . " 2>/dev/null";
+        } else {
+            $cmd = "gh api -X " . escapeshellarg($method)
+                . " -H 'Accept: application/vnd.github+json'"
+                . " " . escapeshellarg($endpoint) . " 2>/dev/null";
         }
-
-        $url = "https://api.github.com" . $endpoint;
-
-        $cmd = "curl -s -X " . escapeshellarg($method)
-            . " -H " . escapeshellarg("Authorization: token {$token}")
-            . " -H 'Accept: application/vnd.github+json'"
-            . " -H 'X-GitHub-Api-Version: 2022-11-28'"
-            . " " . escapeshellarg($url) . " 2>/dev/null";
-
 
         $result = Shell::run($cmd);
         return $result ?: null;

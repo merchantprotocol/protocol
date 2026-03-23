@@ -83,11 +83,6 @@ Class Deploy extends Command {
 
         $version = $input->getArgument('version');
 
-        // Validate GitHub App is configured for API access
-        if (!\Gitcd\Helpers\GitHubApp::isConfigured()) {
-            $output->writeln('<error>GitHub App must be configured for deploy:push. Run: protocol github:app:setup</error>');
-            return Command::FAILURE;
-        }
 
 
         // Verify tag exists

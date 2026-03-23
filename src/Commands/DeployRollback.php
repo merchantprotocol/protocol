@@ -35,6 +35,7 @@ namespace Gitcd\Commands;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Command\LockableTrait;
@@ -51,21 +52,20 @@ Class DeployRollback extends Command {
     use LockableTrait;
 
     protected static $defaultName = 'deploy:rollback';
-    protected static $defaultDescription = 'Roll back ALL nodes to the previous release';
+    protected static $defaultDescription = 'Roll back ALL nodes to a specified or previous release';
 
     protected function configure(): void
     {
         $this
             ->setHelp(<<<HELP
-            Rolls back the active release pointer to the previous version.
+            Rolls back the active release pointer to the specified version,
+            or to the previous version if none is specified.
             All nodes watching the pointer will revert.
-
-            The previous release is read from this node's protocol.lock.
-            For a specific version, use: protocol deploy:push <version>
 
             HELP)
         ;
         $this
+            ->addArgument('version', InputArgument::OPTIONAL, 'Version tag to roll back to (e.g., v1.0.0). Defaults to previous release.')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
         ;
     }
@@ -80,26 +80,30 @@ Class DeployRollback extends Command {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         Git::checkInitializedRepo($output, $repo_dir);
 
-        $prev = DeploymentState::previous($repo_dir);
-        $previousRelease = $prev['version'] ?? null;
-        if (!$previousRelease) {
-            $output->writeln('<error>No previous release found in protocol.lock. Use: protocol deploy:push <version></error>');
-            return Command::FAILURE;
+        $targetVersion = $input->getArgument('version');
+
+        if (!$targetVersion) {
+            $prev = DeploymentState::previous($repo_dir);
+            $targetVersion = $prev['version'] ?? null;
+            if (!$targetVersion) {
+                $output->writeln('<error>No previous release found in protocol.lock. Specify a version: protocol deploy:rollback v1.0.0</error>');
+                return Command::FAILURE;
+            }
         }
 
         $cur = DeploymentState::current($repo_dir);
         $currentRelease = $cur['version'] ?? null;
-        $output->writeln("<comment>Rolling back from {$currentRelease} to {$previousRelease}</comment>");
+        $output->writeln("<comment>Rolling back from {$currentRelease} to {$targetVersion}</comment>");
 
         // Delegate to deploy:push command
         $command = $this->getApplication()->find('deploy:push');
         $returnCode = $command->run(new ArrayInput([
-            'version' => $previousRelease,
+            'version' => $targetVersion,
             '--dir' => $repo_dir,
         ]), $output);
 
         if ($returnCode === Command::SUCCESS) {
-            AuditLog::logRollback($repo_dir, $currentRelease, $previousRelease, 'success', 'global');
+            AuditLog::logRollback($repo_dir, $currentRelease ?: 'none', $targetVersion, 'success', 'global');
         }
 
         return $returnCode;
