@@ -341,38 +341,41 @@ Class ProtocolStart extends Command {
 
     private function provisionInfrastructure(string $dir, array $ctx): void
     {
+        $this->provisionGitHubCredentials($dir, $ctx);
+        $this->provisionConfigRepo($dir, $ctx);
+        $this->provisionSlaveWatchers($dir, $ctx);
+        $this->provisionCrontab($dir, $ctx);
+    }
+
+    private function provisionGitHubCredentials(string $dir, array $ctx): void
+    {
+        if (!GitHubApp::isConfigured()) {
+            return;
+        }
+
         $runner = $this->runner;
-        $force = $this->input->getOption('force');
-        $arrInput = new ArrayInput(['--dir' => $dir] + ($force ? ['--force' => true] : []));
-        $arrInput1 = new ArrayInput(['--dir' => $dir, 'environment' => $ctx['environment']] + ($force ? ['--force' => true] : []));
-        $subOutput = $this->output->isVerbose() ? $this->output : new NullOutput();
-        $app = $this->getApplication();
-
-        $runner->run('Infrastructure provisioning', function() use ($runner, $app, $arrInput, $arrInput1, $subOutput, $dir, $ctx) {
-
-            // Refresh GitHub App credentials and fix remote URLs
-            if (GitHubApp::isConfigured()) {
-                $creds = GitHubApp::loadCredentials();
-                $appOwner = $creds['owner'] ?? null;
-                if ($appOwner) {
-                    $runner->log("Refreshing GitHub App credentials for {$appOwner}");
-                    $refreshed = GitHubApp::refreshGitCredentials($appOwner);
-                    if (!$refreshed) {
-                        throw new \RuntimeException("GitHub App credential refresh failed for {$appOwner}");
-                    }
-                    $runner->log("Credentials refreshed successfully");
+        $runner->run('GitHub App credentials', function() use ($runner, $dir, $ctx) {
+            $creds = GitHubApp::loadCredentials();
+            $appOwner = $creds['owner'] ?? null;
+            if ($appOwner) {
+                $runner->log("Refreshing credentials for {$appOwner}");
+                $refreshed = GitHubApp::refreshGitCredentials($appOwner);
+                if (!$refreshed) {
+                    throw new \RuntimeException("GitHub App credential refresh failed for {$appOwner}");
                 }
+                $runner->log("Credentials refreshed");
+            }
 
-                $currentRemote = trim(Shell::run("git -C " . escapeshellarg($dir) . " remote get-url origin 2>/dev/null") ?: '');
-                $resolvedRemote = GitHubApp::resolveUrl($currentRemote);
-                if ($currentRemote && $resolvedRemote !== $currentRemote) {
-                    $runner->log("Updating remote URL: {$currentRemote} → {$resolvedRemote}");
-                    Shell::run("git -C " . escapeshellarg($dir) . " remote set-url origin " . escapeshellarg($resolvedRemote) . " 2>/dev/null");
-                }
+            // Fix project remote URL
+            $currentRemote = trim(Shell::run("git -C " . escapeshellarg($dir) . " remote get-url origin 2>/dev/null") ?: '');
+            $resolvedRemote = GitHubApp::resolveUrl($currentRemote);
+            if ($currentRemote && $resolvedRemote !== $currentRemote) {
+                $runner->log("Updating remote URL: {$currentRemote} → {$resolvedRemote}");
+                Shell::run("git -C " . escapeshellarg($dir) . " remote set-url origin " . escapeshellarg($resolvedRemote) . " 2>/dev/null");
             }
 
             // Fix config repo remote URL
-            if (GitHubApp::isConfigured() && is_dir($ctx['configRepo'])) {
+            if (is_dir($ctx['configRepo'])) {
                 $configCurrentRemote = trim(Shell::run("git -C " . escapeshellarg($ctx['configRepo']) . " remote get-url origin 2>/dev/null") ?: '');
                 $configResolvedRemote = GitHubApp::resolveUrl($configCurrentRemote);
                 if ($configCurrentRemote && $configResolvedRemote !== $configCurrentRemote) {
@@ -380,53 +383,72 @@ Class ProtocolStart extends Command {
                     Shell::run("git -C " . escapeshellarg($ctx['configRepo']) . " remote set-url origin " . escapeshellarg($configResolvedRemote) . " 2>/dev/null");
                 }
             }
+        });
+    }
 
-            $runner->log("strategy={$ctx['strategy']} hasConfigRepo=" . ($ctx['hasConfigRepo'] ? 'yes' : 'no') . " isDev=" . ($ctx['isDev'] ? 'yes' : 'no'));
+    private function provisionConfigRepo(string $dir, array $ctx): void
+    {
+        if (!$ctx['hasConfigRepo']) {
+            return;
+        }
 
-            if (in_array($ctx['strategy'], ['release', 'bluegreen'])) {
-                if ($ctx['hasConfigRepo']) {
-                    if ($ctx['configRemote']) {
-                        $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $subOutput);
-                    }
-                    $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $subOutput);
-                }
+        $runner = $this->runner;
+        $force = $this->input->getOption('force');
+        $arrInput = new ArrayInput(['--dir' => $dir] + ($force ? ['--force' => true] : []));
+        $subOutput = $this->output->isVerbose() ? $this->output : new NullOutput();
+        $app = $this->getApplication();
+
+        $runner->run('Configuration repo', function() use ($runner, $app, $arrInput, $subOutput, $ctx) {
+            // Start config watcher for non-dev strategies with a remote
+            if ($ctx['strategy'] !== 'none' && $ctx['configRemote']) {
+                $runner->log("Running config:slave");
+                $app->find('config:slave')->run($arrInput, $subOutput);
+            }
+            // Link config for all strategies
+            $runner->log("Running config:link");
+            $app->find('config:link')->run($arrInput, $subOutput);
+        });
+    }
+
+    private function provisionSlaveWatchers(string $dir, array $ctx): void
+    {
+        $runner = $this->runner;
+        $force = $this->input->getOption('force');
+        $arrInput = new ArrayInput(['--dir' => $dir] + ($force ? ['--force' => true] : []));
+        $subOutput = $this->output->isVerbose() ? $this->output : new NullOutput();
+        $app = $this->getApplication();
+
+        if (in_array($ctx['strategy'], ['release', 'bluegreen'])) {
+            $runner->run('Deploy watcher', function() use ($runner, $app, $arrInput, $subOutput) {
                 $runner->log("Running deploy:slave");
                 $app->find('deploy:slave')->run($arrInput, $subOutput);
                 $runner->log("deploy:slave returned");
-
-            } elseif ($ctx['strategy'] === 'none') {
-                $runner->log("strategy=none, skipping watchers");
-                if ($ctx['hasConfigRepo']) {
-                    $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $subOutput);
-                }
-
-            } else {
-                // Legacy branch-based deployment
+            });
+        } elseif ($ctx['strategy'] === 'none') {
+            $runner->log("strategy=none, skipping watchers");
+        } else {
+            // Legacy branch-based deployment
+            $runner->run('Git watcher', function() use ($runner, $app, $arrInput, $subOutput, $ctx) {
                 if (!$ctx['isDev']) {
                     $runner->log("Running git:pull");
                     $app->find('git:pull')->run($arrInput, $subOutput);
                     $runner->log("Running git:slave");
                     $app->find('git:slave')->run($arrInput, $subOutput);
                 }
-                if ($ctx['hasConfigRepo']) {
-                    if (!$ctx['isDev'] && $ctx['configRemote']) {
-                        $runner->log("Running config:slave");
-                        $app->find('config:slave')->run($arrInput, $subOutput);
-                    }
-                    $runner->log("Running config:link");
-                    $app->find('config:link')->run($arrInput, $subOutput);
-                }
-            }
+            });
+        }
+    }
 
-            if ($ctx['strategy'] !== 'none') {
-                $runner->log("Adding crontab restart");
-                Crontab::addCrontabRestart($dir);
-            } else {
-                $runner->log("strategy=none, skipping crontab");
-            }
+    private function provisionCrontab(string $dir, array $ctx): void
+    {
+        if ($ctx['strategy'] === 'none') {
+            return;
+        }
+
+        $runner = $this->runner;
+        $runner->run('Crontab setup', function() use ($runner, $dir) {
+            $runner->log("Adding crontab restart");
+            Crontab::addCrontabRestart($dir);
         });
     }
 

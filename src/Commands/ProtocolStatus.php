@@ -57,6 +57,9 @@ Class ProtocolStatus extends Command {
     protected static $defaultName = 'status';
     protected static $defaultDescription = 'Checks on the system to see its health';
 
+    private OutputInterface $output;
+    private array $issues = [];
+
     protected function configure(): void
     {
         $this
@@ -65,19 +68,45 @@ Class ProtocolStatus extends Command {
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder());
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  ROUTER
+    // ═══════════════════════════════════════════════════════════════
+
     protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $this->output = $output;
+        $this->issues = [];
+
+        $ctx = $this->buildContext($input);
+
+        $output->writeln('');
+
+        $this->renderNodeInfo($ctx);
+        $this->renderServices($ctx);
+        $this->renderDocker($ctx);
+        $this->renderConfiguration($ctx);
+        if ($ctx['strategy'] !== 'none') {
+            $this->renderSecurity($ctx);
+        }
+        $this->renderDisk();
+        $this->renderSummary();
+
+        return empty($this->issues) ? Command::SUCCESS : Command::FAILURE;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CONTEXT BUILDER
+    // ═══════════════════════════════════════════════════════════════
+
+    private function buildContext(InputInterface $input): array
     {
         $repo_dir = Dir::realpath($input->getOption('dir'));
         $nodeConfig = null;
         $nodeData = [];
         $activeDir = null;
-        $issues = [];
-        $wazuhRunning = false;
-        $wazuhInstalled = false;
-
-        // Detect slave node mode so status works from anywhere
-        $projectArg = $input->getArgument('project');
         $resolveError = null;
+
+        $projectArg = $input->getArgument('project');
         try {
             $resolved = NodeConfig::resolveSlaveNode($projectArg ?: null, $repo_dir ?: null);
         } catch (\RuntimeException $e) {
@@ -89,19 +118,16 @@ Class ProtocolStatus extends Command {
             $repo_dir = $activeDir ?? $repo_dir;
         }
 
-        // For non-slave nodes, require a git repo as before
         if (!$nodeConfig && !$resolveError) {
-            Git::checkInitializedRepo($output, $repo_dir);
+            Git::checkInitializedRepo($this->output, $repo_dir);
         }
 
-        // If resolve failed but we have node configs, load the first one for partial status display
         if ($resolveError && !$nodeConfig) {
             $projects = NodeConfig::listProjects();
             $project = ($projectArg && NodeConfig::exists($projectArg)) ? $projectArg : ($projects[0] ?? null);
             if ($project) {
                 $nodeConfig = $project;
                 $nodeData = NodeConfig::load($project);
-                // Try to set activeDir from releases_dir even though full resolve failed
                 $relDir = $nodeData['bluegreen']['releases_dir'] ?? null;
                 if ($relDir && is_dir($relDir)) {
                     $activeDir = rtrim($relDir, '/') . '/';
@@ -109,7 +135,6 @@ Class ProtocolStatus extends Command {
             }
         }
 
-        // Read config: slave nodes use NodeConfig, others use protocol.json
         if ($nodeConfig) {
             $strategy = $nodeData['deployment']['strategy'] ?? 'none';
             $projectName = $nodeData['name'] ?? $nodeConfig;
@@ -133,38 +158,95 @@ Class ProtocolStatus extends Command {
             $activeDir = $repo_dir;
         }
 
-        // Config repo path (may be null if repo not set up)
         $configrepo = Config::repo($repo_dir);
+        $lockDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
 
-        $output->writeln('');
+        return [
+            'repo_dir'        => $repo_dir,
+            'nodeConfig'      => $nodeConfig,
+            'nodeData'        => $nodeData,
+            'activeDir'       => $activeDir,
+            'resolveError'    => $resolveError,
+            'strategy'        => $strategy,
+            'projectName'     => $projectName,
+            'releasesDir'     => $releasesDir,
+            'currentRelease'  => $currentRelease,
+            'currentBranch'   => $currentBranch,
+            'awaitingRelease' => $awaitingRelease,
+            'dockerImage'     => $dockerImage,
+            'secretsMode'     => $secretsMode,
+            'gitRemote'       => $gitRemote,
+            'configrepo'      => $configrepo,
+            'lockDir'         => $lockDir,
+        ];
+    }
 
-        // ── Node Info ────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  SECTION RENDERERS — each renders one dashboard section
+    // ═══════════════════════════════════════════════════════════════
+
+    private function renderNodeInfo(array $ctx): void
+    {
+        $output = $this->output;
         $this->writeSection($output, 'Protocol Status');
 
         $hostname = trim(Shell::run('hostname'));
         $environment = Config::read('env', 'not set');
 
         $this->writeLine($output, 'Node', "<fg=white>{$hostname}</>");
-        $this->writeLine($output, 'Project', "<fg=white>{$projectName}</>");
+        $this->writeLine($output, 'Project', "<fg=white>{$ctx['projectName']}</>");
         $this->writeLine($output, 'Environment', "<fg=cyan>{$environment}</>");
-        if ($nodeConfig) {
+
+        if ($ctx['nodeConfig']) {
             $this->writeLine($output, 'Node type', "<fg=white>slave</>");
-            $configPath = NodeConfig::configPath($nodeConfig);
+            $configPath = NodeConfig::configPath($ctx['nodeConfig']);
             $this->writeLine($output, 'Config', "<fg=gray>{$configPath}</>");
         }
-        if ($gitRemote) {
-            $this->writeLine($output, 'Remote', "<fg=white>{$gitRemote}</>");
+        if ($ctx['gitRemote']) {
+            $this->writeLine($output, 'Remote', "<fg=white>{$ctx['gitRemote']}</>");
         }
-        if ($nodeConfig) {
+        if ($ctx['nodeConfig']) {
             $ghConfigured = \Gitcd\Helpers\GitHubApp::isConfigured();
             $this->writeLine($output, 'GitHub App', $ghConfigured
                 ? '<fg=green>configured</>'
                 : '<fg=yellow>not configured</>');
         }
 
-        // Release info
+        $this->renderReleaseInfo($ctx);
+
+        // Config repo branch
+        if ($ctx['configrepo'] && Git::isInitializedRepo($ctx['configrepo'])) {
+            $configBranch = Git::branch($ctx['configrepo']);
+            $this->writeLine($output, 'Config branch', "<fg=white>{$configBranch}</>");
+        }
+
+        $this->writeLine($output, 'Strategy', "<fg=white>{$ctx['strategy']}</>");
+
+        $this->renderReleasesDir($ctx);
+
+        if ($ctx['nodeConfig'] && $ctx['activeDir'] && $ctx['activeDir'] !== $ctx['repo_dir']) {
+            $this->writeLine($output, 'Active dir', "<fg=white>{$ctx['activeDir']}</>");
+        }
+
+        if ($ctx['resolveError']) {
+            $this->writeLine($output, 'Deploy status', '<fg=yellow>not deployed yet</>');
+            $this->issues[] = $ctx['resolveError'];
+        }
+
+        $uptime = $this->getUptime();
+        if ($uptime) {
+            $this->writeLine($output, 'Uptime', "<fg=white>{$uptime}</>");
+        }
+    }
+
+    private function renderReleaseInfo(array $ctx): void
+    {
+        $output = $this->output;
+        $strategy = $ctx['strategy'];
+        $repo_dir = $ctx['repo_dir'];
+
         if ($strategy === 'release' || $strategy === 'bluegreen') {
-            // Fallback: check ReleaseState if DeploymentState didn't find it.
+            $currentRelease = $ctx['currentRelease'];
             if (!$currentRelease) {
                 $currentRelease = BlueGreen::getActiveVersion($repo_dir);
             }
@@ -178,9 +260,9 @@ Class ProtocolStatus extends Command {
             }
             $this->writeLine($output, 'Release', $releaseDisplay);
         } else {
-            if ($currentBranch) {
-                $branchDisplay = "<fg=white>{$currentBranch}</>";
-                if ($awaitingRelease) {
+            if ($ctx['currentBranch']) {
+                $branchDisplay = "<fg=white>{$ctx['currentBranch']}</>";
+                if ($ctx['awaitingRelease']) {
                     $branchDisplay .= " <fg=yellow>(awaiting first release)</>";
                 }
                 $this->writeLine($output, 'Branch', $branchDisplay);
@@ -189,62 +271,52 @@ Class ProtocolStatus extends Command {
                 $this->writeLine($output, 'Branch', "<fg=white>{$branch}</>");
             }
         }
-        // Config repo branch
-        if ($configrepo && Git::isInitializedRepo($configrepo)) {
-            $configBranch = Git::branch($configrepo);
-            $this->writeLine($output, 'Config branch', "<fg=white>{$configBranch}</>");
+    }
+
+    private function renderReleasesDir(array $ctx): void
+    {
+        if (!$ctx['nodeConfig'] || !$ctx['releasesDir']) {
+            return;
         }
 
-        $this->writeLine($output, 'Strategy', "<fg=white>{$strategy}</>");
+        $output = $this->output;
+        $releasesDir = $ctx['releasesDir'];
+        $currentRelease = $ctx['currentRelease'];
+        $currentBranch = $ctx['currentBranch'];
 
-        // Releases directory info for slave nodes
-        if ($nodeConfig && $releasesDir) {
-            $this->writeLine($output, 'Releases dir', "<fg=white>{$releasesDir}/</>");
-            if (is_dir($releasesDir)) {
-                $releases = array_filter(scandir($releasesDir), fn($d) => $d !== '.' && $d !== '..' && is_dir($releasesDir . '/' . $d));
-                sort($releases);
-                if (!empty($releases)) {
-                    foreach ($releases as $rel) {
-                        $marker = ($rel === $currentRelease || $rel === $currentBranch) ? '<fg=green>●</>' : '<fg=gray>·</>';
-                        $label = ($rel === $currentRelease || $rel === $currentBranch) ? "<fg=white;options=bold>{$rel}</>" : "<fg=gray>{$rel}</>";
-                        $this->writeLine($output, '', "  {$marker} {$label}");
-                    }
-                } else {
-                    $this->writeLine($output, '', '  <fg=yellow>no releases cloned</>');
+        $this->writeLine($output, 'Releases dir', "<fg=white>{$releasesDir}/</>");
+        if (is_dir($releasesDir)) {
+            $releases = array_filter(scandir($releasesDir), fn($d) => $d !== '.' && $d !== '..' && is_dir($releasesDir . '/' . $d));
+            sort($releases);
+            if (!empty($releases)) {
+                foreach ($releases as $rel) {
+                    $marker = ($rel === $currentRelease || $rel === $currentBranch) ? '<fg=green>●</>' : '<fg=gray>·</>';
+                    $label = ($rel === $currentRelease || $rel === $currentBranch) ? "<fg=white;options=bold>{$rel}</>" : "<fg=gray>{$rel}</>";
+                    $this->writeLine($output, '', "  {$marker} {$label}");
                 }
             } else {
-                $this->writeLine($output, '', '  <fg=red>directory does not exist</>');
-                $issues[] = "Releases directory {$releasesDir} does not exist";
+                $this->writeLine($output, '', '  <fg=yellow>no releases cloned</>');
             }
+        } else {
+            $this->writeLine($output, '', '  <fg=red>directory does not exist</>');
+            $this->issues[] = "Releases directory {$releasesDir} does not exist";
         }
+    }
 
-        // Active directory
-        if ($nodeConfig && $activeDir && $activeDir !== $repo_dir) {
-            $this->writeLine($output, 'Active dir', "<fg=white>{$activeDir}</>");
-        }
+    private function renderServices(array $ctx): void
+    {
+        $output = $this->output;
+        $strategy = $ctx['strategy'];
+        $lockDir = $ctx['lockDir'];
+        $repo_dir = $ctx['repo_dir'];
+        $configrepo = $ctx['configrepo'];
 
-        // Show resolve error as a setup issue, not a crash
-        if ($resolveError) {
-            $this->writeLine($output, 'Deploy status', '<fg=yellow>not deployed yet</>');
-            $issues[] = $resolveError;
-        }
-
-        // Uptime
-        $uptime = $this->getUptime();
-        if ($uptime) {
-            $this->writeLine($output, 'Uptime', "<fg=white>{$uptime}</>");
-        }
-
-        // ── Services ─────────────────────────────────────────────
         $output->writeln('');
         $this->writeSection($output, 'Services');
 
-        // Deploy watcher — check lock files in the active directory
-        // Skip for strategy=none (local dev) — no watchers are used
-        $lockDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
-
+        // Deploy watcher — skip for strategy=none (local dev)
         if ($strategy === 'none') {
-            // No watchers in local dev mode — nothing to report
+            // No watchers in local dev mode
         } elseif (!$lockDir || !is_dir($lockDir)) {
             $this->writeService($output, 'watchers', 'stopped', 'no active deployment directory');
         } elseif ($strategy === 'release') {
@@ -254,7 +326,7 @@ Class ProtocolStatus extends Command {
                 $this->writeService($output, 'deploy:slave', 'watching', "pid {$pid}");
             } else {
                 $this->writeService($output, 'deploy:slave', 'stopped');
-                $issues[] = 'Release watcher is not running';
+                $this->issues[] = 'Release watcher is not running';
 
                 $processes = Shell::hasProcess("release-watcher.php --dir=");
                 if (!empty($processes)) {
@@ -269,7 +341,7 @@ Class ProtocolStatus extends Command {
                 $this->writeService($output, 'git:slave', 'watching', "pid {$pid}");
             } else {
                 $this->writeService($output, 'git:slave', 'stopped');
-                $issues[] = 'Git watcher is not running';
+                $this->issues[] = 'Git watcher is not running';
             }
         }
 
@@ -285,57 +357,70 @@ Class ProtocolStatus extends Command {
             }
         }
 
-        // Crontab — skip for strategy=none (local dev doesn't use crontab)
-        $wazuhRunning = false;
-        $wazuhInstalled = false;
+        // Crontab + Wazuh — skip for strategy=none
         if ($strategy !== 'none') {
-            $hasCron = Crontab::hasCrontabRestart($repo_dir);
-            if ($hasCron) {
-                $this->writeService($output, 'crontab', 'installed');
-            } else {
-                $this->writeService($output, 'crontab', 'missing');
-                $issues[] = 'Crontab reboot recovery not installed';
-            }
+            $this->renderCrontabService($ctx);
+            $this->renderWazuhService($ctx);
+        }
+    }
 
-            // Wazuh SIEM agent
-            $wazuhInstalled = is_dir('/var/ossec') || is_dir('/Library/Ossec');
-            if ($wazuhInstalled) {
-                if (is_file('/var/ossec/bin/wazuh-control')) {
-                    $status = Shell::run('/var/ossec/bin/wazuh-control status 2>/dev/null');
-                    $wazuhRunning = strpos($status, 'running') !== false;
-                } elseif (is_file('/Library/Ossec/bin/wazuh-control')) {
-                    $status = Shell::run('sudo /Library/Ossec/bin/wazuh-control status 2>/dev/null');
-                    $wazuhRunning = strpos($status, 'running') !== false;
-                } elseif (trim(Shell::run('which systemctl 2>/dev/null'))) {
-                    $status = trim(Shell::run('systemctl is-active wazuh-agent 2>/dev/null'));
-                    $wazuhRunning = $status === 'active';
-                }
+    private function renderCrontabService(array $ctx): void
+    {
+        $hasCron = Crontab::hasCrontabRestart($ctx['repo_dir']);
+        if ($hasCron) {
+            $this->writeService($this->output, 'crontab', 'installed');
+        } else {
+            $this->writeService($this->output, 'crontab', 'missing');
+            $this->issues[] = 'Crontab reboot recovery not installed';
+        }
+    }
 
-                if ($wazuhRunning) {
-                    $lastEvent = $this->getWazuhLastEvent();
-                    $this->writeService($output, 'wazuh-agent', 'running', $lastEvent);
-                } else {
-                    $this->writeService($output, 'wazuh-agent', 'stopped');
-                    $issues[] = 'Wazuh SIEM agent is not running';
-                }
-            }
+    private function renderWazuhService(array &$ctx): void
+    {
+        $wazuhInstalled = is_dir('/var/ossec') || is_dir('/Library/Ossec');
+        $wazuhRunning = false;
+
+        if (!$wazuhInstalled) {
+            $ctx['wazuhInstalled'] = false;
+            $ctx['wazuhRunning'] = false;
+            return;
         }
 
-        // ── Docker ───────────────────────────────────────────────
-        // For release/bluegreen strategies, the active container has a version
-        // suffix (e.g. ghostagent-v0.1.1) set via .protocol/deployment.json. We must read
-        // the patched name from that file, not from the compose file which has
-        // an unresolved ${CONTAINER_NAME:-ghostagent} variable.
-        $dockerDir = ($nodeConfig && $activeDir) ? $activeDir : $repo_dir;
-        $containers = [];
-        $releaseDockerDir = null;
+        if (is_file('/var/ossec/bin/wazuh-control')) {
+            $status = Shell::run('/var/ossec/bin/wazuh-control status 2>/dev/null');
+            $wazuhRunning = strpos($status, 'running') !== false;
+        } elseif (is_file('/Library/Ossec/bin/wazuh-control')) {
+            $status = Shell::run('sudo /Library/Ossec/bin/wazuh-control status 2>/dev/null');
+            $wazuhRunning = strpos($status, 'running') !== false;
+        } elseif (trim(Shell::run('which systemctl 2>/dev/null'))) {
+            $status = trim(Shell::run('systemctl is-active wazuh-agent 2>/dev/null'));
+            $wazuhRunning = $status === 'active';
+        }
+
+        if ($wazuhRunning) {
+            $lastEvent = $this->getWazuhLastEvent();
+            $this->writeService($this->output, 'wazuh-agent', 'running', $lastEvent);
+        } else {
+            $this->writeService($this->output, 'wazuh-agent', 'stopped');
+            $this->issues[] = 'Wazuh SIEM agent is not running';
+        }
+
+        $ctx['wazuhInstalled'] = $wazuhInstalled;
+        $ctx['wazuhRunning'] = $wazuhRunning;
+    }
+
+    private function renderDocker(array $ctx): void
+    {
+        $output = $this->output;
+        $repo_dir = $ctx['repo_dir'];
+        $dockerDir = ($ctx['nodeConfig'] && $ctx['activeDir']) ? $ctx['activeDir'] : $repo_dir;
 
         $containers = ContainerName::resolveAll($repo_dir);
         if (empty($containers) && $dockerDir && is_dir($dockerDir) && Docker::isDockerInitialized($dockerDir)) {
             $containers = Docker::getContainerNamesFromDockerComposeFile($dockerDir);
         }
 
-        // Determine the effective docker dir for release strategies
+        $releaseDockerDir = null;
         if (BlueGreen::isEnabled($repo_dir)) {
             $activeVersion = BlueGreen::getActiveVersion($repo_dir);
             if ($activeVersion) {
@@ -347,171 +432,216 @@ Class ProtocolStatus extends Command {
         }
 
         $effectiveDockerDir = $releaseDockerDir ?: $dockerDir;
-        if (!empty($containers) || ($effectiveDockerDir && is_dir($effectiveDockerDir) && Docker::isDockerInitialized($effectiveDockerDir))) {
-            $output->writeln('');
-            $this->writeSection($output, 'Docker');
+        if (empty($containers) && (!$effectiveDockerDir || !is_dir($effectiveDockerDir) || !Docker::isDockerInitialized($effectiveDockerDir))) {
+            return;
+        }
 
-            foreach ($containers as $container) {
-                $running = Docker::isDockerContainerRunning($container);
+        $output->writeln('');
+        $this->writeSection($output, 'Docker');
 
-                if ($running) {
-                    $stats = $this->getContainerStats($container);
-                    $this->writeService($output, $container, 'running', $stats);
-                } else {
-                    $this->writeService($output, $container, 'stopped');
-                    $issues[] = "Container '{$container}' is not running";
-                }
-            }
-
-            // Image info
-            $image = $dockerImage ?: Json::read('docker.image', null, $effectiveDockerDir);
-            if ($image) {
-                $this->writeLine($output, 'Image', "<fg=white>{$image}</>");
-            }
-
-            // Docker disk
-            $diskUsage = $this->getDockerDiskUsage($containers);
-            if ($diskUsage) {
-                $this->writeLine($output, 'Disk', "<fg=white>{$diskUsage}</>");
+        foreach ($containers as $container) {
+            $running = Docker::isDockerContainerRunning($container);
+            if ($running) {
+                $stats = $this->getContainerStats($container);
+                $this->writeService($output, $container, 'running', $stats);
+            } else {
+                $this->writeService($output, $container, 'stopped');
+                $this->issues[] = "Container '{$container}' is not running";
             }
         }
 
-        // ── Config ───────────────────────────────────────────────
+        $image = $ctx['dockerImage'] ?: Json::read('docker.image', null, $effectiveDockerDir);
+        if ($image) {
+            $this->writeLine($output, 'Image', "<fg=white>{$image}</>");
+        }
+
+        $diskUsage = $this->getDockerDiskUsage($containers);
+        if ($diskUsage) {
+            $this->writeLine($output, 'Disk', "<fg=white>{$diskUsage}</>");
+        }
+    }
+
+    private function renderConfiguration(array $ctx): void
+    {
+        $output = $this->output;
+        $configrepo = $ctx['configrepo'];
+        $secretsMode = $ctx['secretsMode'];
+        $lockDir = $ctx['lockDir'];
+
         $output->writeln('');
         $this->writeSection($output, 'Configuration');
 
-        if ($configrepo && Git::isInitializedRepo($configrepo)) {
-            $branch = Git::branch($configrepo);
-            $envMatch = Config::read('env', 'not set') === $branch;
-            $branchColor = $envMatch ? 'green' : 'yellow';
-            $this->writeLine($output, 'Config branch', "<fg={$branchColor}>{$branch}</>");
+        if (!$configrepo || !Git::isInitializedRepo($configrepo)) {
+            $this->writeLine($output, 'Config repo', '<fg=yellow>not initialized</>');
+            return;
+        }
 
-            // Secrets status
-            if ($secretsMode === 'aws') {
-                $this->writeLine($output, 'Secrets', '<fg=green>AWS Secrets Manager</>');
+        $branch = Git::branch($configrepo);
+        $envMatch = Config::read('env', 'not set') === $branch;
+        $branchColor = $envMatch ? 'green' : 'yellow';
+        $this->writeLine($output, 'Config branch', "<fg={$branchColor}>{$branch}</>");
+
+        $this->renderSecretsStatus($secretsMode, $configrepo, $lockDir);
+
+        $symProject = DeploymentState::resolveProjectName($lockDir);
+        $symlinks = $symProject ? NodeConfig::read($symProject, 'configuration.symlinks', []) : [];
+        if (!empty($symlinks)) {
+            $this->writeLine($output, 'Symlinks', '<fg=white>' . count($symlinks) . ' linked</>');
+        }
+    }
+
+    private function renderSecretsStatus(string $secretsMode, string $configrepo, ?string $lockDir): void
+    {
+        $output = $this->output;
+
+        if ($secretsMode === 'aws') {
+            $this->writeLine($output, 'Secrets', '<fg=green>AWS Secrets Manager</>');
+            return;
+        }
+
+        $cfgProject = DeploymentState::resolveProjectName($lockDir);
+        $decryptedFiles = $cfgProject ? NodeConfig::read($cfgProject, 'configuration.decrypted_files', []) : [];
+        if (!empty($decryptedFiles)) {
+            $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
+        } elseif (Secrets::hasKey()) {
+            $encFiles = glob(rtrim($configrepo, '/') . '/*.enc');
+            if (!empty($encFiles)) {
+                $this->writeLine($output, 'Secrets', '<fg=yellow>encrypted but not linked</>');
+                $this->issues[] = 'Encrypted secrets not decrypted — run protocol start';
             } else {
-                $cfgProject = DeploymentState::resolveProjectName($lockDir);
-                $decryptedFiles = $cfgProject ? NodeConfig::read($cfgProject, 'configuration.decrypted_files', []) : [];
-                if (!empty($decryptedFiles)) {
-                    $this->writeLine($output, 'Secrets', '<fg=green>decrypted</> <fg=gray>(' . count($decryptedFiles) . ' file(s))</>');
-                } elseif (Secrets::hasKey()) {
-                    $encFiles = glob(rtrim($configrepo, '/') . '/*.enc');
-                    if (!empty($encFiles)) {
-                        $this->writeLine($output, 'Secrets', '<fg=yellow>encrypted but not linked</>');
-                        $issues[] = 'Encrypted secrets not decrypted — run protocol start';
-                    } else {
-                        $this->writeLine($output, 'Secrets', '<fg=green>key present</>');
-                    }
-                } else {
-                    if ($secretsMode === 'encrypted') {
-                        $this->writeLine($output, 'Secrets', '<fg=red>encrypted but key MISSING</>');
-                        $issues[] = 'Encryption key missing — run protocol secrets:setup';
-                    } else {
-                        $this->writeLine($output, 'Secrets', '<fg=white>plaintext</>');
-                    }
-                }
-            }
-
-            // Symlinks
-            $symProject = DeploymentState::resolveProjectName($lockDir);
-            $symlinks = $symProject ? NodeConfig::read($symProject, 'configuration.symlinks', []) : [];
-            if (!empty($symlinks)) {
-                $this->writeLine($output, 'Symlinks', '<fg=white>' . count($symlinks) . ' linked</>');
+                $this->writeLine($output, 'Secrets', '<fg=green>key present</>');
             }
         } else {
-            $this->writeLine($output, 'Config repo', '<fg=yellow>not initialized</>');
-        }
-
-        // ── Security ─────────────────────────────────────────────
-        // Skip entire section for strategy=none (local dev)
-        if ($strategy !== 'none') {
-            $output->writeln('');
-            $this->writeSection($output, 'Security');
-
-            // SOC 2 checks
-            $soc2Dir = $activeDir ?: $repo_dir;
-            if ($soc2Dir && is_dir($soc2Dir)) {
-                $soc2 = new Soc2Check($soc2Dir);
-                $soc2->runAll();
-                $soc2Results = $soc2->getResults();
-                $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
-                $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
-
-                if (empty($soc2Failures) && empty($soc2Warns)) {
-                    $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
-                } elseif (empty($soc2Failures)) {
-                    $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
-                } else {
-                    $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
-                    foreach ($soc2Failures as $f) {
-                        $issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
-                    }
-                }
+            if ($secretsMode === 'encrypted') {
+                $this->writeLine($output, 'Secrets', '<fg=red>encrypted but key MISSING</>');
+                $this->issues[] = 'Encryption key missing — run protocol secrets:setup';
             } else {
-                $this->writeLine($output, 'SOC 2', '<fg=gray>skipped (no active directory)</>');
-            }
-
-            // SIEM
-            if ($wazuhInstalled) {
-                $configFile = is_file('/var/ossec/etc/ossec.conf') ? '/var/ossec/etc/ossec.conf' : '/Library/Ossec/etc/ossec.conf';
-                $siemManager = '';
-                $protocolLogConfigured = false;
-                if (is_file($configFile)) {
-                    $config = file_get_contents($configFile);
-                    if (preg_match('/<address>(.*?)<\/address>/', $config, $m)) {
-                        $siemManager = $m[1];
-                    }
-                    $protocolLogConfigured = strpos($config, 'Protocol deployment audit log') !== false;
-                }
-
-                if ($wazuhRunning) {
-                    $siemDetail = "connected";
-                    if ($siemManager) {
-                        $siemDetail .= " to {$siemManager}";
-                    }
-                    if ($protocolLogConfigured) {
-                        $siemDetail .= ' <fg=gray>log forwarding active</>';
-                    }
-                    $this->writeLine($output, 'SIEM', "<fg=green>{$siemDetail}</>");
-                } else {
-                    $this->writeLine($output, 'SIEM', '<fg=yellow>installed but not running</>');
-                }
-            } else {
-                $this->writeLine($output, 'SIEM', '<fg=gray>not installed</> <fg=gray>(run protocol siem:install)</>');
-            }
-
-            // Encryption key
-            if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
-                $keyPerms = fileperms(Secrets::keyPath()) & 0777;
-                $keyOk = $keyPerms === 0600;
-                $this->writeLine($output, 'Encryption', $keyOk
-                    ? '<fg=green>AES-256-GCM key present (0600)</>'
-                    : sprintf('<fg=yellow>key permissions %04o (should be 0600)</>', $keyPerms));
-            } elseif ($secretsMode === 'encrypted') {
-                $this->writeLine($output, 'Encryption', '<fg=red>key missing</>');
-            } else {
-                $this->writeLine($output, 'Encryption', '<fg=gray>not configured</>');
-            }
-
-            // Audit log
-            $logPath = AuditLog::logPath();
-            if (is_file($logPath)) {
-                $lastLines = AuditLog::read(1);
-                $logDetail = 'active';
-                if (!empty($lastLines)) {
-                    if (preg_match('/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)/', $lastLines[0], $m)) {
-                        $ago = $this->timeAgo($m[1]);
-                        $logDetail .= " <fg=gray>last entry {$ago}</>";
-                    }
-                }
-                $this->writeLine($output, 'Audit log', "<fg=green>{$logDetail}</>");
-            } else {
-                $this->writeLine($output, 'Audit log', '<fg=yellow>no entries yet</>');
+                $this->writeLine($output, 'Secrets', '<fg=white>plaintext</>');
             }
         }
+    }
 
-        // ── Disk ─────────────────────────────────────────────────
+    private function renderSecurity(array $ctx): void
+    {
+        $output = $this->output;
+        $activeDir = $ctx['activeDir'];
+        $repo_dir = $ctx['repo_dir'];
+        $secretsMode = $ctx['secretsMode'];
+        $wazuhInstalled = $ctx['wazuhInstalled'] ?? false;
+        $wazuhRunning = $ctx['wazuhRunning'] ?? false;
+
+        $output->writeln('');
+        $this->writeSection($output, 'Security');
+
+        $this->renderSoc2($activeDir ?: $repo_dir);
+        $this->renderSiem($wazuhInstalled, $wazuhRunning);
+        $this->renderEncryption($secretsMode);
+        $this->renderAuditLog();
+    }
+
+    private function renderSoc2(?string $dir): void
+    {
+        $output = $this->output;
+
+        if (!$dir || !is_dir($dir)) {
+            $this->writeLine($output, 'SOC 2', '<fg=gray>skipped (no active directory)</>');
+            return;
+        }
+
+        $soc2 = new Soc2Check($dir);
+        $soc2->runAll();
+        $soc2Results = $soc2->getResults();
+        $soc2Failures = array_filter($soc2Results, fn($r) => $r['status'] === 'fail');
+        $soc2Warns = array_filter($soc2Results, fn($r) => $r['status'] === 'warn');
+
+        if (empty($soc2Failures) && empty($soc2Warns)) {
+            $this->writeLine($output, 'SOC 2', '<fg=green>all checks passing</>');
+        } elseif (empty($soc2Failures)) {
+            $this->writeLine($output, 'SOC 2', '<fg=yellow>' . count($soc2Warns) . ' warning(s)</>');
+        } else {
+            $this->writeLine($output, 'SOC 2', '<fg=red>' . count($soc2Failures) . ' failing</>' . (count($soc2Warns) ? " <fg=yellow>" . count($soc2Warns) . " warning(s)</>" : ''));
+            foreach ($soc2Failures as $f) {
+                $this->issues[] = 'SOC 2: ' . $f['name'] . ' — ' . $f['message'];
+            }
+        }
+    }
+
+    private function renderSiem(bool $wazuhInstalled, bool $wazuhRunning): void
+    {
+        $output = $this->output;
+
+        if (!$wazuhInstalled) {
+            $this->writeLine($output, 'SIEM', '<fg=gray>not installed</> <fg=gray>(run protocol siem:install)</>');
+            return;
+        }
+
+        $configFile = is_file('/var/ossec/etc/ossec.conf') ? '/var/ossec/etc/ossec.conf' : '/Library/Ossec/etc/ossec.conf';
+        $siemManager = '';
+        $protocolLogConfigured = false;
+        if (is_file($configFile)) {
+            $config = file_get_contents($configFile);
+            if (preg_match('/<address>(.*?)<\/address>/', $config, $m)) {
+                $siemManager = $m[1];
+            }
+            $protocolLogConfigured = strpos($config, 'Protocol deployment audit log') !== false;
+        }
+
+        if ($wazuhRunning) {
+            $siemDetail = "connected";
+            if ($siemManager) {
+                $siemDetail .= " to {$siemManager}";
+            }
+            if ($protocolLogConfigured) {
+                $siemDetail .= ' <fg=gray>log forwarding active</>';
+            }
+            $this->writeLine($output, 'SIEM', "<fg=green>{$siemDetail}</>");
+        } else {
+            $this->writeLine($output, 'SIEM', '<fg=yellow>installed but not running</>');
+        }
+    }
+
+    private function renderEncryption(string $secretsMode): void
+    {
+        $output = $this->output;
+
+        if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
+            $keyPerms = fileperms(Secrets::keyPath()) & 0777;
+            $keyOk = $keyPerms === 0600;
+            $this->writeLine($output, 'Encryption', $keyOk
+                ? '<fg=green>AES-256-GCM key present (0600)</>'
+                : sprintf('<fg=yellow>key permissions %04o (should be 0600)</>', $keyPerms));
+        } elseif ($secretsMode === 'encrypted') {
+            $this->writeLine($output, 'Encryption', '<fg=red>key missing</>');
+        } else {
+            $this->writeLine($output, 'Encryption', '<fg=gray>not configured</>');
+        }
+    }
+
+    private function renderAuditLog(): void
+    {
+        $output = $this->output;
+        $logPath = AuditLog::logPath();
+
+        if (is_file($logPath)) {
+            $lastLines = AuditLog::read(1);
+            $logDetail = 'active';
+            if (!empty($lastLines)) {
+                if (preg_match('/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)/', $lastLines[0], $m)) {
+                    $ago = $this->timeAgo($m[1]);
+                    $logDetail .= " <fg=gray>last entry {$ago}</>";
+                }
+            }
+            $this->writeLine($output, 'Audit log', "<fg=green>{$logDetail}</>");
+        } else {
+            $this->writeLine($output, 'Audit log', '<fg=yellow>no entries yet</>');
+        }
+    }
+
+    private function renderDisk(): void
+    {
+        $output = $this->output;
         $diskCheck = DiskCheck::check();
+
         $output->writeln('');
         $this->writeSection($output, 'Disk');
 
@@ -527,26 +657,30 @@ Class ProtocolStatus extends Command {
             $this->writeLine($output, 'Docker', "images {$d['images']}, containers {$d['containers']}, volumes {$d['volumes']}, cache {$d['buildcache']}");
             if ($d['reclaimable'] && $d['reclaimable'] !== '0B') {
                 $this->writeLine($output, 'Reclaimable', "<fg={$diskColor}>{$d['reclaimable']}</> <fg=gray>run: protocol docker:cleanup</>");
-                $issues[] = "Docker has {$d['reclaimable']} reclaimable disk space";
+                $this->issues[] = "Docker has {$d['reclaimable']} reclaimable disk space";
             }
         }
+    }
 
-        // ── Summary ──────────────────────────────────────────────
+    private function renderSummary(): void
+    {
+        $output = $this->output;
         $output->writeln('');
-        if (empty($issues)) {
+
+        if (empty($this->issues)) {
             $output->writeln('  <fg=green>✓</> All systems operational.');
         } else {
-            $output->writeln("  <fg=yellow>!</> " . count($issues) . " issue(s) detected:");
-            foreach ($issues as $issue) {
+            $output->writeln("  <fg=yellow>!</> " . count($this->issues) . " issue(s) detected:");
+            foreach ($this->issues as $issue) {
                 $output->writeln("    <fg=yellow>-</> {$issue}");
             }
         }
         $output->writeln('');
-
-        return empty($issues) ? Command::SUCCESS : Command::FAILURE;
     }
 
-    // ── Display helpers ──────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  DISPLAY HELPERS
+    // ═══════════════════════════════════════════════════════════════
 
     private function writeSection(OutputInterface $output, string $title): void
     {
@@ -583,7 +717,9 @@ Class ProtocolStatus extends Command {
         $output->writeln($line);
     }
 
-    // ── Data helpers ─────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  DATA HELPERS
+    // ═══════════════════════════════════════════════════════════════
 
     private function timeAgo(string $datetime): string
     {
