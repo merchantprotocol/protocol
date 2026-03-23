@@ -44,6 +44,7 @@ use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\GitHub;
+use Gitcd\Helpers\Log;
 use Gitcd\Helpers\AuditLog;
 use Gitcd\Helpers\DeploymentState;
 use Gitcd\Utils\Json;
@@ -99,11 +100,8 @@ Class GitPull extends Command {
     {
         $repo_dir = Dir::realpath($input->getArgument('local'), $input->getOption('dir'));
 
-        $logFile = is_writable('/var/log/protocol/') ? '/var/log/protocol/protocol-start.log' : null;
-        $logMsg = function(string $msg) use ($logFile) {
-            if ($logFile) {
-                @file_put_contents($logFile, "[" . date('H:i:s') . "] [git:pull] {$msg}\n", FILE_APPEND | LOCK_EX);
-            }
+        $logMsg = function(string $msg) {
+            Log::write('git:pull', $msg);
         };
 
         $logMsg("enter execute() repo_dir={$repo_dir}");
