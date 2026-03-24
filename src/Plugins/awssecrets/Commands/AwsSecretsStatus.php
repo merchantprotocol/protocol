@@ -3,10 +3,12 @@ namespace Gitcd\Plugins\awssecrets\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Plugins\awssecrets\AwsSecretsHelper;
 use Gitcd\Helpers\Git;
+use Gitcd\Utils\Json;
 
 class AwsSecretsStatus extends Command
 {
@@ -22,6 +24,7 @@ class AwsSecretsStatus extends Command
             the key names stored (not their values).
 
             HELP)
+            ->addArgument('environment', InputArgument::OPTIONAL, 'Environment to check (e.g., production, staging)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
         ;
     }
@@ -29,7 +32,16 @@ class AwsSecretsStatus extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $repoDir = $input->getOption('dir') ?: WORKING_DIR;
-        $secretName = AwsSecretsHelper::secretName($repoDir);
+        $environment = $input->getArgument('environment');
+        if ($environment) {
+            $projectName = Json::read('name', '', $repoDir);
+            if (!$projectName && $repoDir) {
+                $projectName = basename(rtrim($repoDir, '/'));
+            }
+            $secretName = "protocol/{$projectName}/{$environment}";
+        } else {
+            $secretName = AwsSecretsHelper::secretName($repoDir);
+        }
         $region = AwsSecretsHelper::region($repoDir);
 
         $output->writeln('');
@@ -42,7 +54,7 @@ class AwsSecretsStatus extends Command
         $output->writeln('');
 
         // Describe the secret
-        $meta = AwsSecretsHelper::describeSecret($repoDir);
+        $meta = AwsSecretsHelper::describeSecret($repoDir, $secretName);
 
         if (!$meta) {
             $output->writeln('  <error>Secret not found or access denied.</error>');
@@ -71,7 +83,7 @@ class AwsSecretsStatus extends Command
         $output->writeln('');
 
         // Show key names (not values)
-        $keys = AwsSecretsHelper::getSecretKeys($repoDir);
+        $keys = AwsSecretsHelper::getSecretKeys($repoDir, $secretName);
         $keyCount = count($keys);
         if (!empty($keys)) {
             $output->writeln("  <fg=white;options=bold>Keys stored ({$keyCount}):</>");

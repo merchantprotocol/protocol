@@ -230,10 +230,10 @@ class AwsSecretsHelper
      *
      * @return string|null .env formatted string, or null on failure
      */
-    public static function pullSecret($repoDir = false): ?string
+    public static function pullSecret($repoDir = false, ?string $secretNameOverride = null): ?string
     {
         $client = self::getClient($repoDir);
-        $secretName = self::secretName($repoDir);
+        $secretName = $secretNameOverride ?: self::secretName($repoDir);
 
         self::log("Pulling secret: {$secretName}");
 
@@ -286,10 +286,10 @@ class AwsSecretsHelper
      *
      * @return array|null Secret description, or null on failure
      */
-    public static function describeSecret($repoDir = false): ?array
+    public static function describeSecret($repoDir = false, ?string $secretNameOverride = null): ?array
     {
         $client = self::getClient($repoDir);
-        $secretName = self::secretName($repoDir);
+        $secretName = $secretNameOverride ?: self::secretName($repoDir);
 
         try {
             $result = $client->describeSecret([
@@ -307,10 +307,10 @@ class AwsSecretsHelper
      *
      * @return array List of key names, or empty array on failure
      */
-    public static function getSecretKeys($repoDir = false): array
+    public static function getSecretKeys($repoDir = false, ?string $secretNameOverride = null): array
     {
         $client = self::getClient($repoDir);
-        $secretName = self::secretName($repoDir);
+        $secretName = $secretNameOverride ?: self::secretName($repoDir);
 
         try {
             $result = $client->getSecretValue([
