@@ -218,7 +218,10 @@ class DeploymentState
     {
         $project = self::resolveProjectName($repoDir);
         if ($project) {
-            return NodeConfig::read($project, 'deployment.secrets') ?? 'file';
+            $mode = NodeConfig::read($project, 'deployment.secrets');
+            if ($mode) {
+                return $mode;
+            }
         }
 
         return Json::read('deployment.secrets', 'file', $repoDir);
