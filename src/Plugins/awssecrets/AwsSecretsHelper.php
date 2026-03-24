@@ -27,11 +27,11 @@ class AwsSecretsHelper
 
     /**
      * Get the secret name in AWS Secrets Manager.
+     * Always derived dynamically as protocol/{projectName}/{environment}.
      */
     public static function secretName($repoDir = false): string
     {
-        $default = self::defaultSecretName($repoDir);
-        return self::config('secret_name', $default, $repoDir);
+        return self::defaultSecretName($repoDir);
     }
 
     /**
@@ -72,9 +72,9 @@ class AwsSecretsHelper
      */
     public static function log(string $message): void
     {
-        $dir = NODE_DATA_DIR;
+        $dir = '/var/log/protocol/';
         if (!is_dir($dir)) {
-            mkdir($dir, 0700, true);
+            mkdir($dir, 0755, true);
         }
         $logFile = $dir . 'aws-secrets.log';
         $entry = date('Y-m-d\TH:i:sP') . ' ' . $message . "\n";

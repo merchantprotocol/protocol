@@ -44,6 +44,7 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\DeploymentState;
 
 Class Migrate extends Command {
 
@@ -93,7 +94,7 @@ Class Migrate extends Command {
 
         // Step 1: Check current state
         $currentStrategy = Json::read('deployment.strategy', null, $repo_dir);
-        $currentSecrets = Json::read('deployment.secrets', null, $repo_dir);
+        $currentSecrets = DeploymentState::secretsMode($repo_dir);
 
         if ($currentStrategy === 'release' && $currentSecrets === 'encrypted' && !$secretsOnly) {
             $output->writeln('<comment>This repo is already using release-based deployment with encrypted secrets.</comment>');
@@ -148,8 +149,7 @@ Class Migrate extends Command {
 
         if ($secretsOnly) {
             // Update just the secrets setting in protocol.json
-            Json::write('deployment.secrets', 'encrypted', $repo_dir);
-            Json::save($repo_dir);
+            DeploymentState::setSecretsMode($repo_dir, 'encrypted');
             $output->writeln('');
             $output->writeln('<info>Secrets migration complete. protocol.json updated with secrets: "encrypted"</info>');
             return Command::SUCCESS;
@@ -162,8 +162,7 @@ Class Migrate extends Command {
         Json::write('deployment.strategy', 'release', $repo_dir);
         Json::write('deployment.pointer', 'github_variable', $repo_dir);
         Json::write('deployment.pointer_name', 'PROTOCOL_ACTIVE_RELEASE', $repo_dir);
-        Json::write('deployment.secrets', 'encrypted', $repo_dir);
-        Json::save($repo_dir);
+        DeploymentState::setSecretsMode($repo_dir, 'encrypted');
         $output->writeln(' - Updated deployment strategy to "release"');
         $output->writeln(' - Updated secrets mode to "encrypted"');
 

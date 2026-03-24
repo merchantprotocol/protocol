@@ -49,6 +49,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\FileEncryption;
 use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\DeploymentState;
 
 Class ConfigSave extends Command {
 
@@ -99,7 +100,7 @@ Class ConfigSave extends Command {
         }
 
         // Re-encrypt .env files if encryption is configured
-        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+        $secretsMode = DeploymentState::secretsMode($repo_dir);
         if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
             $unencrypted = FileEncryption::findUnencryptedEnvFiles($configrepo);
             if (!empty($unencrypted)) {

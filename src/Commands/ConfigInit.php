@@ -49,6 +49,7 @@ use Gitcd\Helpers\FileEncryption;
 use Gitcd\Helpers\GitHub;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Commands\Init\DotMenuTrait;
 
 Class ConfigInit extends Command {
@@ -269,8 +270,7 @@ Class ConfigInit extends Command {
                 '    Continue to encrypt files? [<fg=green>Y</>/n] ', true
             );
             if (!$helper->ask($input, $output, $question)) {
-                Json::write('deployment.secrets', 'encrypted', $repo_dir);
-                Json::save($repo_dir);
+                DeploymentState::setSecretsMode($repo_dir, 'encrypted');
                 return Command::SUCCESS;
             }
         }
@@ -284,8 +284,7 @@ Class ConfigInit extends Command {
             $output->writeln("    <fg=gray>No unencrypted .env files found in the config repo.</>");
             $output->writeln("    <fg=gray>All secrets appear to be encrypted already.</>");
             $output->writeln('');
-            Json::write('deployment.secrets', 'encrypted', $repo_dir);
-            Json::save($repo_dir);
+            DeploymentState::setSecretsMode($repo_dir, 'encrypted');
             $this->showCompletion($output, $foldername, Config::read('env', 'unknown'));
             return Command::SUCCESS;
         }
@@ -316,8 +315,7 @@ Class ConfigInit extends Command {
             }
         }
 
-        Json::write('deployment.secrets', 'encrypted', $repo_dir);
-        Json::save($repo_dir);
+        DeploymentState::setSecretsMode($repo_dir, 'encrypted');
 
         $this->showCompletion($output, $foldername, Config::read('env', 'unknown'));
         return Command::SUCCESS;
@@ -668,8 +666,7 @@ Class ConfigInit extends Command {
                 $output->writeln("    <fg=cyan>protocol secrets:setup {$hexKey}</>");
                 $output->writeln('');
 
-                Json::write('deployment.secrets', 'encrypted', $repo_dir);
-                Json::save($repo_dir);
+                DeploymentState::setSecretsMode($repo_dir, 'encrypted');
 
                 $this->offerEncryptFiles($input, $output, $helper, $repo_dir, $configrepo);
             } else {
@@ -704,8 +701,7 @@ Class ConfigInit extends Command {
             Shell::run("git -C '$configrepo' add -A");
             Shell::run("git -C '$configrepo' commit -m 'encrypt secrets' 2>/dev/null");
 
-            Json::write('deployment.secrets', 'encrypted', $repo_dir);
-            Json::save($repo_dir);
+            DeploymentState::setSecretsMode($repo_dir, 'encrypted');
         }
     }
 
