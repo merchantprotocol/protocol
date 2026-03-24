@@ -610,12 +610,18 @@ Class ProtocolStart extends Command {
             $dockerCommand = Docker::getDockerCommand();
 
             $runner->log("{$dockerCommand} up -d (with secrets + deployment env)");
-            Shell::run("cd " . escapeshellarg(rtrim($dir, '/'))
+            $runner->log("tmpEnv={$tmpEnv} overrideFile={$overrideFile}");
+            $runner->log("override contents: " . file_get_contents($overrideFile));
+
+            $cmd = "cd " . escapeshellarg(rtrim($dir, '/'))
                 . " && {$dockerCommand}"
                 . " --env-file " . escapeshellarg($envFile)
                 . " -f " . escapeshellarg($composePath)
                 . " -f " . escapeshellarg($overrideFile)
-                . " up -d 2>&1", $returnVar);
+                . " up -d 2>&1";
+            $runner->log("docker cmd: {$cmd}");
+            $output = Shell::run($cmd, $returnVar);
+            $runner->log("docker exit={$returnVar} output={$output}");
             $started = $returnVar === 0;
 
             unlink($tmpEnv);
