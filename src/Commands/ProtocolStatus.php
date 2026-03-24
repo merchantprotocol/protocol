@@ -153,7 +153,7 @@ Class ProtocolStatus extends Command {
             $currentBranch = null;
             $awaitingRelease = false;
             $dockerImage = Json::read('docker.image', null, $repo_dir);
-            $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+            $secretsMode = DeploymentState::secretsMode($repo_dir);
             $gitRemote = null;
             $activeDir = $repo_dir;
         }

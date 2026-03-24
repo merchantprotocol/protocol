@@ -33,6 +33,9 @@ class DeploymentState
 
     /**
      * Get the current deployment strategy.
+     *
+     * Strategy is node-specific (stored in NodeConfig), never from protocol.json.
+     * No node config means local dev = "none".
      */
     public static function strategy(string $repoDir): string
     {
@@ -44,7 +47,7 @@ class DeploymentState
             }
         }
 
-        return Json::read('deployment.strategy', 'none', $repoDir);
+        return 'none';
     }
 
     /**
@@ -198,6 +201,27 @@ class DeploymentState
             return null;
         }
         return NodeConfig::read($project, 'release.target');
+    }
+
+    /**
+     * Get the secrets mode for this deployment.
+     *
+     * Production nodes read from NodeConfig (~/.protocol/.node/nodes/<project>.json).
+     * Development/staging reads from the repo-level protocol.json.
+     *
+     * @return string  "file", "encrypted", or "aws"
+     */
+    public static function secretsMode(string $repoDir): string
+    {
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            $mode = NodeConfig::read($project, 'deployment.secrets');
+            if ($mode) {
+                return $mode;
+            }
+        }
+
+        return Json::read('deployment.secrets', 'file', $repoDir);
     }
 
     // ─── Write ───────────────────────────────────────────────────────
@@ -395,6 +419,30 @@ class DeploymentState
         }
 
         Json::write('deployment.strategy', $strategy, $repoDir);
+        Json::save($repoDir);
+    }
+
+    /**
+     * Set the secrets mode for this deployment.
+     *
+     * Writes to NodeConfig for production nodes, and always to
+     * the repo-level protocol.json for dev/staging.
+     *
+     * @param string $mode  "file", "encrypted", or "aws"
+     */
+    public static function setSecretsMode(string $repoDir, string $mode): void
+    {
+        Log::info('deployment', "setSecretsMode: mode={$mode}");
+
+        $project = self::resolveProjectName($repoDir);
+        if ($project) {
+            NodeConfig::modify($project, function (array $nodeData) use ($mode) {
+                $nodeData['deployment']['secrets'] = $mode;
+                return $nodeData;
+            });
+        }
+
+        Json::write('deployment.secrets', $mode, $repoDir);
         Json::save($repoDir);
     }
 

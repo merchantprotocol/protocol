@@ -13,6 +13,7 @@ use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Shell;
 use Gitcd\Helpers\Config;
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\DeploymentState;
 
 class AwsSecretsInit extends Command
 {
@@ -201,7 +202,7 @@ class AwsSecretsInit extends Command
         $output->writeln("  <info>✓</info> Secrets Manager access confirmed");
         $output->writeln('');
 
-        // ── Step 2: Configure Region & Secret Name ───────────────────
+        // ── Step 2: Configure Region ──────────────────────────────────
         $output->writeln('  <fg=white;options=bold>Step 2/3:</> Configuration');
         $output->writeln('');
 
@@ -213,12 +214,9 @@ class AwsSecretsInit extends Command
         $region = $helper->ask($input, $output, $question);
         $output->writeln('');
 
-        // Secret name
-        $defaultName = AwsSecretsHelper::config('secret_name', null, $repoDir)
-            ?: AwsSecretsHelper::defaultSecretName($repoDir);
-
-        $question = new Question("  Secret name [<fg=cyan>{$defaultName}</>]: ", $defaultName);
-        $secretName = $helper->ask($input, $output, $question);
+        // Secret name is always derived: protocol/{name}/{env}
+        $secretName = AwsSecretsHelper::defaultSecretName($repoDir);
+        $output->writeln("  Secret name: <fg=cyan>{$secretName}</> <fg=gray>(protocol/{name}/{env})</>");
         $output->writeln('');
 
         // ── Step 3: Check Secret ─────────────────────────────────────
@@ -243,14 +241,12 @@ class AwsSecretsInit extends Command
 
         // ── Save Configuration ───────────────────────────────────────
         Json::write('aws.region', $region, $repoDir);
-        Json::write('aws.secret_name', $secretName, $repoDir);
-        Json::write('deployment.secrets', 'aws', $repoDir);
-        Json::save($repoDir);
+        DeploymentState::setSecretsMode($repoDir, 'aws');
 
         $output->writeln('  <info>Configuration saved to protocol.json:</info>');
-        $output->writeln("    aws.region      = <fg=white>{$region}</>");
-        $output->writeln("    aws.secret_name = <fg=white>{$secretName}</>");
+        $output->writeln("    aws.region         = <fg=white>{$region}</>");
         $output->writeln("    deployment.secrets = <fg=white>aws</>");
+        $output->writeln("    secret name        = <fg=white>{$secretName}</> <fg=gray>(derived)</>");
         $output->writeln('');
         $output->writeln('  Next steps:');
         $output->writeln('    <fg=cyan>protocol aws:push</>    Push your .env secrets to AWS');

@@ -33,6 +33,7 @@
 namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
+use Gitcd\Helpers\DeploymentState;
 use Symfony\Component\Yaml\Yaml;
 
 class SecretsProvider
@@ -53,7 +54,7 @@ class SecretsProvider
      */
     public static function resolveToTempFile(string $repoDir): ?string
     {
-        $mode = Json::read('deployment.secrets', 'file', $repoDir);
+        $mode = DeploymentState::secretsMode($repoDir);
         self::log("resolveToTempFile: mode={$mode} repoDir={$repoDir}");
 
         if ($mode === 'encrypted') {

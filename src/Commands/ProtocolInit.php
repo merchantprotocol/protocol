@@ -51,6 +51,7 @@ use Gitcd\Helpers\Secrets;
 use Gitcd\Helpers\GitHubApp;
 use Gitcd\Utils\Json;
 use Gitcd\Utils\Yaml;
+use Gitcd\Helpers\DeploymentState;
 use Gitcd\Commands\Init\ProjectType;
 use Gitcd\Helpers\BlueGreen;
 use Gitcd\Helpers\BlueGreen\ReleaseBuilder;
@@ -1621,8 +1622,7 @@ Class ProtocolInit extends Command {
         if ($helper->ask($input, $output, $question)) {
             $command = $this->getApplication()->find('secrets:setup');
             $command->run(new ArrayInput([]), $output);
-            Json::write('deployment.secrets', 'encrypted', $repo_dir);
-            Json::save($repo_dir);
+            DeploymentState::setSecretsMode($repo_dir, 'encrypted');
         } else {
             $this->writeInfo($output, '<fg=gray>Skipped. Run</> <fg=cyan>protocol secrets:setup</> <fg=gray>later.</>');
         }

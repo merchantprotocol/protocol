@@ -6,6 +6,7 @@ namespace Gitcd\Helpers;
 
 use Gitcd\Utils\Json;
 use Gitcd\Utils\NodeConfig;
+use Gitcd\Helpers\DeploymentState;
 
 class Soc2Check extends BaseAuditChecker
 {
@@ -30,7 +31,7 @@ class Soc2Check extends BaseAuditChecker
      */
     protected function checkSecretsEncrypted(): void
     {
-        $mode = Json::read('deployment.secrets', 'file', $this->repoDir);
+        $mode = DeploymentState::secretsMode($this->repoDir);
         $hasKey = Secrets::hasKey();
 
         if ($mode === 'aws') {
