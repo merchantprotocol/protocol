@@ -565,25 +565,26 @@ Class ProtocolStart extends Command {
             }
 
             if ($tmpEnv) {
-                $secretsFile = rtrim($dir, '/') . '/.env.protocol-secrets';
-                copy($tmpEnv, $secretsFile);
-                chmod($secretsFile, 0600);
-                unlink($tmpEnv);
-
-                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+                // Keep secrets in RAM — use the tmpEnv path directly (already on /dev/shm)
+                $overrideFile = SecretsProvider::generateComposeOverride($composePath, $tmpEnv);
 
                 $runner->log("{$dockerCommand} up --build -d (with secrets)");
-                Shell::run("cd " . escapeshellarg($dir)
+                $runner->log("tmpEnv={$tmpEnv} overrideFile={$overrideFile}");
+                $runner->log("override contents: " . file_get_contents($overrideFile));
+
+                $cmd = "cd " . escapeshellarg($dir)
                     . " && {$dockerCommand} -f " . escapeshellarg($composePath)
                     . " -f " . escapeshellarg($overrideFile)
                     . $portOverrideFlag
-                    . " up --build -d 2>&1");
+                    . " up --build -d 2>&1";
+                $runner->log("docker cmd: {$cmd}");
+                Shell::run($cmd);
 
-                unlink($secretsFile);
+                unlink($tmpEnv);
                 unlink($overrideFile);
                 $runner->log("Secrets temp files cleaned up");
             } else {
-                $runner->log("{$dockerCommand} up --build -d");
+                $runner->log("{$dockerCommand} up --build -d (NO secrets - resolveToTempFile returned null)");
                 Shell::run("cd " . escapeshellarg($dir)
                     . " && {$dockerCommand}"
                     . " -f " . escapeshellarg($composePath)
@@ -602,13 +603,9 @@ Class ProtocolStart extends Command {
     {
         $tmpEnv = SecretsProvider::resolveToTempFile($dir);
         if ($tmpEnv) {
-            $secretsFile = rtrim($dir, '/') . '/.env.protocol-secrets';
-            copy($tmpEnv, $secretsFile);
-            chmod($secretsFile, 0600);
-            unlink($tmpEnv);
-
+            // Keep secrets in RAM — use the tmpEnv path directly (already on /dev/shm)
             $composePath = rtrim($dir, '/') . '/docker-compose.yml';
-            $overrideFile = SecretsProvider::generateComposeOverride($composePath, $secretsFile);
+            $overrideFile = SecretsProvider::generateComposeOverride($composePath, $tmpEnv);
             $envFile = rtrim($dir, '/') . '/.env.deployment';
             $dockerCommand = Docker::getDockerCommand();
 
@@ -621,7 +618,7 @@ Class ProtocolStart extends Command {
                 . " up -d 2>&1", $returnVar);
             $started = $returnVar === 0;
 
-            unlink($secretsFile);
+            unlink($tmpEnv);
             unlink($overrideFile);
             $runner->log("Secrets temp files cleaned up");
             return $started;

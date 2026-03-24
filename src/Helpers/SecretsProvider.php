@@ -54,14 +54,17 @@ class SecretsProvider
     public static function resolveToTempFile(string $repoDir): ?string
     {
         $mode = Json::read('deployment.secrets', 'file', $repoDir);
+        self::log("resolveToTempFile: mode={$mode} repoDir={$repoDir}");
 
         if ($mode === 'encrypted') {
             $configRepo = Config::repo($repoDir);
             if (!$configRepo) {
+                self::log("resolveToTempFile: no config repo found");
                 return null;
             }
             $encFile = $configRepo . '.env.enc';
             if (!is_file($encFile) || !Secrets::hasKey()) {
+                self::log("resolveToTempFile: enc file missing or no key");
                 return null;
             }
             return Secrets::decryptToTempFile($encFile);
@@ -70,14 +73,18 @@ class SecretsProvider
         if ($mode === 'aws') {
             // Dynamic load to avoid hard dependency on the plugin
             if (!class_exists('\\Gitcd\\Plugins\\awssecrets\\AwsSecretsHelper')) {
+                self::log("resolveToTempFile: AwsSecretsHelper class not found");
                 return null;
             }
 
             // Pull secrets from AWS
             $awsEnv = \Gitcd\Plugins\awssecrets\AwsSecretsHelper::pullSecret($repoDir);
             if ($awsEnv === null) {
+                self::log("resolveToTempFile: AWS pullSecret returned null");
                 return null;
             }
+
+            self::log("resolveToTempFile: AWS pull OK, got " . strlen($awsEnv) . " bytes");
 
             // Read the existing .env (non-secret config like LOG_LEVEL, APP_ENV)
             $baseEnv = self::readBaseEnv($repoDir);
@@ -91,10 +98,26 @@ class SecretsProvider
             file_put_contents($tmpFile, $merged);
             chmod($tmpFile, 0600);
 
+            self::log("resolveToTempFile: wrote {$tmpFile}");
             return $tmpFile;
         }
 
+        self::log("resolveToTempFile: mode '{$mode}' not handled, returning null");
         return null;
+    }
+
+    /**
+     * Write a line to the secrets debug log.
+     */
+    private static function log(string $message): void
+    {
+        $logDir = '/var/log/protocol';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0755, true);
+        }
+        $logFile = $logDir . '/secrets-provider.log';
+        $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . "\n";
+        file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
     }
 
     /**
@@ -113,14 +136,14 @@ class SecretsProvider
         // Parse the original compose file to get service names
         $parsed = Yaml::parseFile($composePath);
         $services = $parsed['services'] ?? [];
-        $envFileName = basename($envFilePath);
+        $envFileRef = realpath($envFilePath) ?: $envFilePath;
 
         // Build override YAML
         $override = "services:\n";
         foreach (array_keys($services) as $serviceName) {
             $override .= "  {$serviceName}:\n";
             $override .= "    env_file:\n";
-            $override .= "      - {$envFileName}\n";
+            $override .= "      - {$envFileRef}\n";
         }
 
         $overridePath = dirname($composePath) . '/.docker-compose.secrets-override.yml';
