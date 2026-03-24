@@ -206,8 +206,11 @@ class DeploymentState
     /**
      * Get the secrets mode for this deployment.
      *
-     * Production nodes read from NodeConfig (~/.protocol/.node/nodes/<project>.json).
-     * Development/staging reads from the repo-level protocol.json.
+     * Production nodes (those with a NodeConfig entry) read exclusively
+     * from NodeConfig (~/.protocol/.node/nodes/<project>.json) and never
+     * fall back to the repo-level protocol.json.
+     *
+     * Development/staging (no NodeConfig) reads from protocol.json.
      *
      * @return string  "file", "encrypted", or "aws"
      */
@@ -215,10 +218,7 @@ class DeploymentState
     {
         $project = self::resolveProjectName($repoDir);
         if ($project) {
-            $mode = NodeConfig::read($project, 'deployment.secrets');
-            if ($mode) {
-                return $mode;
-            }
+            return NodeConfig::read($project, 'deployment.secrets') ?? 'file';
         }
 
         return Json::read('deployment.secrets', 'file', $repoDir);
