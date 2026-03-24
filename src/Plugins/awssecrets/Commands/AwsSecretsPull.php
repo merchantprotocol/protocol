@@ -3,12 +3,14 @@ namespace Gitcd\Plugins\awssecrets\Commands;
 
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Gitcd\Plugins\awssecrets\AwsSecretsHelper;
 use Gitcd\Helpers\Git;
 use Gitcd\Helpers\Config;
+use Gitcd\Utils\Json;
 
 class AwsSecretsPull extends Command
 {
@@ -24,7 +26,13 @@ class AwsSecretsPull extends Command
             By default, writes to the config repo's .env file. Use --stdout to print
             to stdout instead of writing to a file.
 
+            Examples:
+              protocol aws:pull                     # Pull using current environment
+              protocol aws:pull production           # Pull production secrets
+              protocol aws:pull production --stdout  # Print to stdout
+
             HELP)
+            ->addArgument('environment', InputArgument::OPTIONAL, 'Environment to pull (e.g., production, staging)')
             ->addOption('stdout', null, InputOption::VALUE_NONE, 'Print to stdout instead of writing to file')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
             ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Skip confirmation prompt')
@@ -35,7 +43,18 @@ class AwsSecretsPull extends Command
     {
         $repoDir = $input->getOption('dir') ?: WORKING_DIR;
         $helper = $this->getHelper('question');
-        $secretName = AwsSecretsHelper::secretName($repoDir);
+
+        // If environment argument is provided, override the secret name
+        $environment = $input->getArgument('environment');
+        if ($environment) {
+            $projectName = Json::read('name', '', $repoDir);
+            if (!$projectName && $repoDir) {
+                $projectName = basename(rtrim($repoDir, '/'));
+            }
+            $secretName = "protocol/{$projectName}/{$environment}";
+        } else {
+            $secretName = AwsSecretsHelper::secretName($repoDir);
+        }
 
         $output->writeln('');
         $output->writeln("  <fg=white;options=bold>Pull from AWS Secrets Manager</>");
@@ -46,7 +65,7 @@ class AwsSecretsPull extends Command
 
         // Pull the secret
         $output->writeln('  Fetching...');
-        $envContents = AwsSecretsHelper::pullSecret($repoDir);
+        $envContents = AwsSecretsHelper::pullSecret($repoDir, $secretName);
 
         if ($envContents === null) {
             $output->writeln('  <error>Failed to pull secret. Check aws-secrets.log for details.</error>');
