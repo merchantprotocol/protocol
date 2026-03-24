@@ -46,6 +46,8 @@ use Gitcd\Helpers\Config;
 use Gitcd\Helpers\Str;
 use Gitcd\Helpers\Dir;
 use Gitcd\Helpers\Git;
+use Gitcd\Helpers\FileEncryption;
+use Gitcd\Helpers\Secrets;
 use Gitcd\Utils\Json;
 
 Class ConfigSave extends Command {
@@ -94,6 +96,25 @@ Class ConfigSave extends Command {
         if (!$configrepo) {
             $output->writeln("<error>Please run `protocol config:init` before using this command.</error>");
             return Command::SUCCESS;
+        }
+
+        // Re-encrypt .env files if encryption is configured
+        $secretsMode = Json::read('deployment.secrets', 'file', $repo_dir);
+        if ($secretsMode === 'encrypted' && Secrets::hasKey()) {
+            $unencrypted = FileEncryption::findUnencryptedEnvFiles($configrepo);
+            if (!empty($unencrypted)) {
+                $output->writeln("<info>Encrypting .env files...</info>");
+                $dir = rtrim($configrepo, '/') . '/';
+                foreach ($unencrypted as $envName) {
+                    $envPath = $dir . $envName;
+                    $encPath = $envPath . '.enc';
+                    if (Secrets::encryptFile($envPath, $encPath)) {
+                        $output->writeln("  <fg=green>✓</> Encrypted: {$envName} → {$envName}.enc");
+                    } else {
+                        $output->writeln("  <fg=red>✗</> Failed to encrypt: {$envName}");
+                    }
+                }
+            }
         }
 
         Git::commit( 'Saving untracked changes', $configrepo );
