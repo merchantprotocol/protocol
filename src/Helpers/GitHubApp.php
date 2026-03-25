@@ -112,17 +112,31 @@ class GitHubApp
     public static function getInstallationId(string $jwt, string $owner): ?int
     {
         $result = Shell::run(
-            "curl -s -H " . escapeshellarg("Authorization: Bearer {$jwt}")
+            "curl -s -w '\\n%{http_code}' -H " . escapeshellarg("Authorization: Bearer {$jwt}")
             . " -H 'Accept: application/vnd.github+json'"
             . " https://api.github.com/app/installations 2>/dev/null"
         );
 
         if (!$result) {
+            Log::error('github-app', "installations list request returned empty response");
             return null;
         }
 
-        $installations = json_decode($result, true);
+        // Separate body from HTTP status code
+        $lines = explode("\n", trim($result));
+        $httpCode = (int) array_pop($lines);
+        $body = implode("\n", $lines);
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $parsed = json_decode($body, true);
+            $message = $parsed['message'] ?? trim($body);
+            Log::error('github-app', "installations list failed: HTTP {$httpCode} — {$message}");
+            return null;
+        }
+
+        $installations = json_decode($body, true);
         if (!is_array($installations)) {
+            Log::error('github-app', "installations response is not an array: " . trim($body));
             return null;
         }
 
@@ -133,6 +147,7 @@ class GitHubApp
             }
         }
 
+        Log::warn('github-app', "no installation found for owner '{$owner}' among " . count($installations) . " installation(s)");
         return null;
     }
 
@@ -143,18 +158,36 @@ class GitHubApp
     public static function generateInstallationToken(string $jwt, int $installationId): ?string
     {
         $result = Shell::run(
-            "curl -s -X POST"
+            "curl -s -w '\\n%{http_code}' -X POST"
             . " -H " . escapeshellarg("Authorization: Bearer {$jwt}")
             . " -H 'Accept: application/vnd.github+json'"
             . " https://api.github.com/app/installations/{$installationId}/access_tokens 2>/dev/null"
         );
 
         if (!$result) {
+            Log::error('github-app', "installation token request returned empty response for installation {$installationId}");
             return null;
         }
 
-        $data = json_decode($result, true);
-        return $data['token'] ?? null;
+        // Separate body from HTTP status code
+        $lines = explode("\n", trim($result));
+        $httpCode = (int) array_pop($lines);
+        $body = implode("\n", $lines);
+
+        $data = json_decode($body, true);
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $message = $data['message'] ?? trim($body);
+            Log::error('github-app', "installation token request failed: HTTP {$httpCode} — {$message}");
+            return null;
+        }
+
+        if (!isset($data['token'])) {
+            Log::error('github-app', "installation token response missing 'token' field: " . trim($body));
+            return null;
+        }
+
+        return $data['token'];
     }
 
     /**
