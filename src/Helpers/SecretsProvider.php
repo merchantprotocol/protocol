@@ -64,11 +64,26 @@ class SecretsProvider
                 return null;
             }
             $encFile = $configRepo . '.env.enc';
-            if (!is_file($encFile) || !Secrets::hasKey()) {
-                self::log("resolveToTempFile: enc file missing or no key");
+            if (is_file($encFile) && Secrets::hasKey()) {
+                return Secrets::decryptToTempFile($encFile);
+            }
+
+            // Fallback: no .env.enc on this branch — use the plain .env from the
+            // config repo so container env vars are still injected.
+            self::log("resolveToTempFile: enc file missing or no key, falling back to plain .env");
+            $baseEnv = self::readBaseEnv($repoDir);
+            if ($baseEnv === '') {
+                self::log("resolveToTempFile: no plain .env either, giving up");
                 return null;
             }
-            return Secrets::decryptToTempFile($encFile);
+
+            $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+            $tmpFile = $tmpDir . '/.protocol-env-' . getmypid();
+            file_put_contents($tmpFile, $baseEnv);
+            chmod($tmpFile, 0600);
+
+            self::log("resolveToTempFile: wrote plain .env fallback to {$tmpFile}");
+            return $tmpFile;
         }
 
         if ($mode === 'aws') {

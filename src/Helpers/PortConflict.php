@@ -119,9 +119,8 @@ class PortConflict
                 continue;
             }
 
-            // Ports format: "0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
-            // or ":::80->80/tcp" for IPv6
-            preg_match_all('/(?:\d+\.\d+\.\d+\.\d+|:::?)(\d+)->/', $portsStr, $matches);
+            // Ports format: "0.0.0.0:80->80/tcp, [::]:80->80/tcp"
+            preg_match_all('/(?:\d+\.\d+\.\d+\.\d+|\[::]):(\d+)->/', $portsStr, $matches);
             if (!empty($matches[1])) {
                 foreach ($matches[1] as $port) {
                     $occupied[] = [

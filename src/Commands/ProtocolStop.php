@@ -227,9 +227,7 @@ Class ProtocolStop extends Command {
             }
         }
 
-        $strategy = $nodeConfig
-            ? ($nodeData['deployment']['strategy'] ?? 'none')
-            : Json::read('deployment.strategy', 'none', $dir);
+        $strategy = DeploymentState::strategy($dir);
 
         return [
             'strategy'   => $strategy,

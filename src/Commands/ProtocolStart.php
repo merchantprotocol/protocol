@@ -275,9 +275,7 @@ Class ProtocolStart extends Command {
             }
         }
 
-        $strategy = $nodeConfig
-            ? ($nodeData['deployment']['strategy'] ?? 'none')
-            : Json::read('deployment.strategy', 'none', $dir);
+        $strategy = DeploymentState::strategy($dir);
 
         $environment = $this->input->getArgument('environment') ?: Config::read('env', false);
         if (!$environment && $nodeConfig) {
@@ -465,11 +463,13 @@ Class ProtocolStart extends Command {
     private function detectPortConflicts(string $dir, array $ctx): ?string
     {
         if ($ctx['strategy'] !== 'none') {
+            $this->runner->log("Port conflict check skipped: strategy={$ctx['strategy']}");
             return null;
         }
 
         $conflicts = PortConflict::detectConflicts($dir);
         if (empty($conflicts)) {
+            $this->runner->log("No port conflicts detected");
             return null;
         }
 
@@ -559,9 +559,18 @@ Class ProtocolStart extends Command {
             $tmpEnv = SecretsProvider::resolveToTempFile($dir);
 
             $portOverrideFlag = '';
+            $forceRecreate = '';
             if ($portOverrideFile && is_file($portOverrideFile)) {
                 $portOverrideFlag = ' -f ' . escapeshellarg($portOverrideFile);
+                $forceRecreate = ' --force-recreate';
                 $runner->log("Using port override: {$portOverrideFile}");
+
+                // Remove existing containers first so stale port bindings don't block the new ones
+                $downCmd = "cd " . escapeshellarg($dir)
+                    . " && {$dockerCommand} -f " . escapeshellarg($composePath)
+                    . " down --remove-orphans 2>&1";
+                $runner->log("Bringing down old containers: {$downCmd}");
+                Shell::run($downCmd);
             }
 
             if ($tmpEnv) {
@@ -576,20 +585,38 @@ Class ProtocolStart extends Command {
                     . " && {$dockerCommand} -f " . escapeshellarg($composePath)
                     . " -f " . escapeshellarg($overrideFile)
                     . $portOverrideFlag
-                    . " up --build -d 2>&1";
+                    . " up --build -d{$forceRecreate} 2>&1";
                 $runner->log("docker cmd: {$cmd}");
-                Shell::run($cmd);
+                $output = Shell::run($cmd, $returnVar);
 
                 unlink($tmpEnv);
                 unlink($overrideFile);
                 $runner->log("Secrets temp files cleaned up");
+
+                if ($returnVar !== 0) {
+                    $runner->log("Docker command failed (exit code {$returnVar}): {$output}");
+                    if ($portOverrideFile && is_file($portOverrideFile)) {
+                        unlink($portOverrideFile);
+                    }
+                    throw new \RuntimeException("Docker compose failed (exit code {$returnVar}): {$output}");
+                }
             } else {
                 $runner->log("{$dockerCommand} up --build -d (NO secrets - resolveToTempFile returned null)");
-                Shell::run("cd " . escapeshellarg($dir)
+                $cmd = "cd " . escapeshellarg($dir)
                     . " && {$dockerCommand}"
                     . " -f " . escapeshellarg($composePath)
                     . $portOverrideFlag
-                    . " up --build -d 2>&1");
+                    . " up --build -d{$forceRecreate} 2>&1";
+                $runner->log("docker cmd: {$cmd}");
+                $output = Shell::run($cmd, $returnVar);
+
+                if ($returnVar !== 0) {
+                    $runner->log("Docker command failed (exit code {$returnVar}): {$output}");
+                    if ($portOverrideFile && is_file($portOverrideFile)) {
+                        unlink($portOverrideFile);
+                    }
+                    throw new \RuntimeException("Docker compose failed (exit code {$returnVar}): {$output}");
+                }
             }
 
             if ($portOverrideFile && is_file($portOverrideFile)) {
