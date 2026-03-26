@@ -558,12 +558,16 @@ Class ProtocolStart extends Command {
             $dockerCommand = Docker::getDockerCommand();
             $tmpEnv = SecretsProvider::resolveToTempFile($dir);
 
-            $portOverrideFlag = '';
+            // When a port override file exists it is a COMPLETE replacement
+            // for docker-compose.yml (not an overlay).  Docker Compose
+            // concatenates `ports` arrays across multiple -f files, so an
+            // overlay that only carries the new ports still leaves the
+            // originals bound.  Use the override as the PRIMARY compose file.
             $forceRecreate = '';
             if ($portOverrideFile && is_file($portOverrideFile)) {
-                $portOverrideFlag = ' -f ' . escapeshellarg($portOverrideFile);
                 $forceRecreate = ' --force-recreate';
-                $runner->log("Using port override: {$portOverrideFile}");
+                $runner->log("Using port override as primary compose: {$portOverrideFile}");
+                $runner->log("Port override contents: " . file_get_contents($portOverrideFile));
 
                 // Remove existing containers first so stale port bindings don't block the new ones
                 $downCmd = "cd " . escapeshellarg($dir)
@@ -571,6 +575,9 @@ Class ProtocolStart extends Command {
                     . " down --remove-orphans 2>&1";
                 $runner->log("Bringing down old containers: {$downCmd}");
                 Shell::run($downCmd);
+
+                // Replace the compose path with the port override file
+                $composePath = $portOverrideFile;
             }
 
             if ($tmpEnv) {
@@ -584,7 +591,6 @@ Class ProtocolStart extends Command {
                 $cmd = "cd " . escapeshellarg($dir)
                     . " && {$dockerCommand} -f " . escapeshellarg($composePath)
                     . " -f " . escapeshellarg($overrideFile)
-                    . $portOverrideFlag
                     . " up --build -d{$forceRecreate} 2>&1";
                 $runner->log("docker cmd: {$cmd}");
                 $output = Shell::run($cmd, $returnVar);
@@ -605,7 +611,6 @@ Class ProtocolStart extends Command {
                 $cmd = "cd " . escapeshellarg($dir)
                     . " && {$dockerCommand}"
                     . " -f " . escapeshellarg($composePath)
-                    . $portOverrideFlag
                     . " up --build -d{$forceRecreate} 2>&1";
                 $runner->log("docker cmd: {$cmd}");
                 $output = Shell::run($cmd, $returnVar);

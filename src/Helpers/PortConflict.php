@@ -248,34 +248,37 @@ class PortConflict
      */
     public static function generateOverrideFile(string $repoDir, array $remappings): string
     {
-        $services = Yaml::read('services', null, $repoDir);
-        $override = ['services' => []];
+        // Read the ENTIRE compose file — not just services — so we produce
+        // a complete replacement.  Docker Compose concatenates `ports` arrays
+        // across multiple -f files instead of replacing them, so an overlay
+        // that only carries the new ports still leaves the originals in place.
+        $composePath = rtrim($repoDir, '/') . '/docker-compose.yml';
+        $fullCompose = \Symfony\Component\Yaml\Yaml::parseFile($composePath);
 
-        foreach ($services as $serviceName => $config) {
-            if (empty($config['ports']) || !is_array($config['ports'])) {
-                continue;
-            }
-
-            $newPorts = [];
-            $changed = false;
-            foreach ($config['ports'] as $portSpec) {
-                $parsed = self::parsePortSpec((string) $portSpec, $repoDir);
-                if ($parsed && isset($remappings[$parsed['host']])) {
-                    $newPort = $remappings[$parsed['host']];
-                    $newPorts[] = "{$newPort}:{$parsed['container']}";
-                    $changed = true;
-                } else {
-                    $newPorts[] = (string) $portSpec;
+        if (!empty($fullCompose['services'])) {
+            foreach ($fullCompose['services'] as $serviceName => &$config) {
+                if (empty($config['ports']) || !is_array($config['ports'])) {
+                    continue;
                 }
-            }
 
-            if ($changed) {
-                $override['services'][$serviceName] = ['ports' => $newPorts];
+                $newPorts = [];
+                foreach ($config['ports'] as $portSpec) {
+                    $parsed = self::parsePortSpec((string) $portSpec, $repoDir);
+                    if ($parsed && isset($remappings[$parsed['host']])) {
+                        $newPort = $remappings[$parsed['host']];
+                        $newPorts[] = "{$newPort}:{$parsed['container']}";
+                    } else {
+                        $newPorts[] = (string) $portSpec;
+                    }
+                }
+
+                $config['ports'] = $newPorts;
             }
+            unset($config);
         }
 
         $overridePath = rtrim($repoDir, '/') . '/docker-compose.port-override.yml';
-        $yaml = \Symfony\Component\Yaml\Yaml::dump($override, 4, 2);
+        $yaml = \Symfony\Component\Yaml\Yaml::dump($fullCompose, 4, 2);
         file_put_contents($overridePath, $yaml);
 
         Log::info('port-conflict', "Generated override file: {$overridePath}");
