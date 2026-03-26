@@ -150,7 +150,10 @@ Class Git
     {
         $flag = self::repoFlag($repo_dir);
         $remotes = Shell::run("git $flag remote 2>/dev/null");
-        $remotearray = explode(PHP_EOL, $remotes);
+        $remotearray = array_filter(explode(PHP_EOL, $remotes));
+        if (in_array('origin', $remotearray)) {
+            return 'origin';
+        }
         return array_shift($remotearray);
     }
 
