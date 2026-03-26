@@ -150,8 +150,14 @@ Class Git
     {
         $flag = self::repoFlag($repo_dir);
         $remotes = Shell::run("git $flag remote 2>/dev/null");
-        $remotearray = explode(PHP_EOL, $remotes);
-        return array_shift($remotearray);
+        $remotearray = array_filter(array_map('trim', explode(PHP_EOL, $remotes)));
+
+        // Prefer 'origin' when multiple remotes exist
+        if (in_array('origin', $remotearray, true)) {
+            return 'origin';
+        }
+
+        return reset($remotearray) ?: 'origin';
     }
 
     /**
