@@ -7,8 +7,11 @@ namespace Gitcd\Commands;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Gitcd\Helpers\Shell;
+use Gitcd\Helpers\Dir;
+use Gitcd\Helpers\BlueGreen;
 
 class DockerCleanup extends Command
 {
@@ -26,7 +29,8 @@ class DockerCleanup extends Command
               protocol docker:cleanup        Safe cleanup (no volumes)
               protocol docker:cleanup full   Full cleanup including volumes
             HELP)
-            ->addArgument('mode', InputArgument::OPTIONAL, '"full" to also prune volumes', 'safe');
+            ->addArgument('mode', InputArgument::OPTIONAL, '"full" to also prune volumes', 'safe')
+            ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', false);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -103,6 +107,9 @@ class DockerCleanup extends Command
         $reclaimed = $this->parseReclaimed($result);
         $output->writeln("    <fg=green>✓</> Build cache cleared" . ($reclaimed ? " — reclaimed {$reclaimed}" : ''));
 
+        // ── Step: Old release directories ────────────────────────
+        $this->cleanupOldReleases($input, $output);
+
         // ── After: comparison ───────────────────────────────────
         $output->writeln('');
         $this->writeSection($output, 'Result');
@@ -132,6 +139,63 @@ class DockerCleanup extends Command
     {
         $output->writeln("  <fg=white;options=bold>{$title}</>");
         $output->writeln('');
+    }
+
+    /**
+     * Remove old release directories that are not running, not the current
+     * release, and not the previous release.
+     */
+    private function cleanupOldReleases(InputInterface $input, OutputInterface $output): void
+    {
+        $repo_dir = Dir::realpath($input->getOption('dir'));
+        if (!$repo_dir || !BlueGreen::isEnabled($repo_dir)) {
+            return;
+        }
+
+        $releasesDir = BlueGreen::getReleasesDir($repo_dir);
+        if (!is_dir($releasesDir)) {
+            return;
+        }
+
+        $activeVersion = BlueGreen::getActiveVersion($repo_dir);
+        $previousVersion = BlueGreen::getPreviousVersion($repo_dir);
+
+        $output->writeln('');
+        $output->writeln('  <fg=white>Pruning old release directories...</>');
+        $output->writeln("    <fg=gray>Active: {$activeVersion}, Previous: {$previousVersion}</>");
+
+        $keep = array_filter([$activeVersion, $previousVersion]);
+        $removed = 0;
+
+        $entries = scandir($releasesDir);
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $fullPath = $releasesDir . $entry;
+            if (!is_dir($fullPath)) continue;
+
+            // Skip non-version directories (e.g. enterprise-gateway-config)
+            if (!preg_match('/^v?\d+\.\d+/', $entry)) continue;
+
+            // Keep current and previous releases
+            if (in_array($entry, $keep)) continue;
+
+            // Skip if containers are still running
+            if (BlueGreen::isReleaseRunning($repo_dir, $entry)) {
+                $output->writeln("    <fg=yellow>⊘</> {$entry} — skipped (still running)");
+                continue;
+            }
+
+            // Remove the old release directory
+            Shell::run("rm -rf " . escapeshellarg($fullPath));
+            $removed++;
+            $output->writeln("    <fg=green>✓</> {$entry} removed");
+        }
+
+        if ($removed === 0) {
+            $output->writeln("    <fg=green>✓</> No old releases to remove");
+        } else {
+            $output->writeln("    <fg=green>✓</> {$removed} old release(s) removed");
+        }
     }
 
     private function parseReclaimed(string $result): ?string
