@@ -1,6 +1,6 @@
 {
     "name": "jonathonbyrdziak/protocol",
-    "description": "A github command line tool for continuous delivery",
+    "description": "Release-based deployment and infrastructure management for Docker applications",
     "type": "project",
     "autoload": {
         "psr-4": {

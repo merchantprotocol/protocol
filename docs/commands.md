@@ -139,6 +139,19 @@ protocol release:changelog
 
 Pushing releases to your fleet and rolling back when things go wrong.
 
+### `protocol deploy:strategy`
+
+View or change the deployment strategy.
+
+```bash
+protocol deploy:strategy              # show current strategy
+protocol deploy:strategy release      # switch to release mode
+protocol deploy:strategy bluegreen    # switch to blue-green mode
+protocol deploy:strategy branch       # switch to branch mode
+```
+
+After changing strategy, run `protocol restart` to activate the new watcher.
+
 ### `protocol deploy:push`
 
 Deploy a release to ALL nodes. Sets the GitHub variable that every node watches.
@@ -487,12 +500,71 @@ Push the Docker image to the remote registry.
 protocol docker:push
 ```
 
+### `protocol docker:status`
+
+Audit all Docker containers, images, and volumes. Shows age, status, and disk usage with color-coded age indicators.
+
+```bash
+protocol docker:status
+```
+
+### `protocol docker:cleanup`
+
+Prune stopped containers and unused images. Pass `full` to also wipe unused volumes. Also cleans up old release directories in blue-green mode.
+
+```bash
+protocol docker:cleanup              # safe mode (containers, images, networks, cache)
+protocol docker:cleanup full         # also prune unused volumes
+```
+
+### `protocol docker:cleanup:schedule`
+
+Enable or disable scheduled Docker cleanup via cron.
+
+```bash
+protocol docker:cleanup:schedule on                    # enable daily at 3am
+protocol docker:cleanup:schedule on --cron="0 6 * *"   # custom schedule
+protocol docker:cleanup:schedule off                   # disable
+protocol docker:cleanup:schedule status                # check current state
+```
+
 ### `protocol composer:install`
 
 Run `composer install` inside the Docker container.
 
 ```bash
 protocol composer:install
+```
+
+---
+
+## Plugins
+
+Manage Protocol's extensible plugin system. Plugins add commands for integrations like Cloudflare, AWS Secrets, and Sulla.
+
+### `protocol plugin:list`
+
+List all available plugins and their status.
+
+```bash
+protocol plugin:list
+```
+
+### `protocol plugin:enable`
+
+Enable a plugin globally. Verifies credentials/tooling if the plugin requires it.
+
+```bash
+protocol plugin:enable cloudflare
+protocol plugin:enable awssecrets
+```
+
+### `protocol plugin:disable`
+
+Disable a plugin globally. Can be re-enabled later without reconfiguration.
+
+```bash
+protocol plugin:disable cloudflare
 ```
 
 ---
@@ -758,6 +830,7 @@ Housekeeping and setup commands.
 | `protocol key:generate` | Generate an SSH deploy key for pulling from private repos |
 | `protocol nginx:logs` | Tail nginx and PHP-FPM logs from inside the container |
 | `protocol migrate` | Interactive wizard to convert from branch-based to release-based deployment |
+| `protocol open` | Open the current project in the browser (detects running container ports) |
 
 ---
 
@@ -784,4 +857,9 @@ Housekeeping and setup commands.
 | Report an incident | `protocol incident:report 1 "msg"` |
 | Capture forensic snapshot | `protocol incident:snapshot` |
 | Real-time monitoring | `protocol top` |
+| Change deploy strategy | `protocol deploy:strategy release` |
+| Audit Docker resources | `protocol docker:status` |
+| Clean up Docker | `protocol docker:cleanup` |
+| Manage plugins | `protocol plugin:list` |
+| Open project in browser | `protocol open` |
 | Update Protocol itself | `protocol self:update` |

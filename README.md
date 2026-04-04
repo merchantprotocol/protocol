@@ -221,12 +221,25 @@ protocol config:switch staging
 |---|---|
 | `release:create [version]` | Tag a new release |
 | `release:list` | List all releases |
+| `release:prepare` | Prepare codebase for next release |
+| `release:changelog` | Generate CHANGELOG from git history |
 | `deploy:push <version>` | Deploy a release to all nodes |
 | `deploy:rollback` | Roll back all nodes |
 | `deploy:status` | Show active vs local version |
+| `deploy:strategy [strategy]` | View or change deployment strategy |
 | `deploy:log` | View deployment history |
 | `node:deploy <version>` | Deploy on this node only |
 | `node:rollback` | Roll back this node only |
+
+**Shadow Deployment**
+
+| Command | Description |
+|---|---|
+| `shadow:init` | Configure shadow deployment (wizard) |
+| `shadow:build <version>` | Build a release in a version-named slot |
+| `shadow:start` | Promote shadow to production (~1s) |
+| `shadow:rollback` | Revert to previous version (~1s) |
+| `shadow:status` | Show version slots and states |
 
 **Secrets**
 
@@ -246,20 +259,13 @@ protocol config:switch staging
 | `config:init` | Config repo wizard (create, encrypt, decrypt) |
 | `config:env <name>` | Set this machine's environment name |
 | `config:mv <file>` | Move file to config repo + symlink |
+| `config:cp <file>` | Copy file to config repo |
+| `config:new` | Create a new config repo from scratch |
 | `config:link` | Create all config symlinks |
 | `config:unlink` | Remove all config symlinks |
+| `config:refresh` | Clear and rebuild config symlinks |
 | `config:switch <env>` | Switch environment branch |
 | `config:save` | Commit and push config changes |
-
-**Shadow Deployment**
-
-| Command | Description |
-|---|---|
-| `shadow:init` | Configure shadow deployment (wizard) |
-| `shadow:build <version>` | Build a release in a version-named slot |
-| `shadow:start` | Promote shadow to production (~1s) |
-| `shadow:rollback` | Revert to previous version (~1s) |
-| `shadow:status` | Show version slots and states |
 
 **Docker**
 
@@ -270,6 +276,36 @@ protocol config:switch staging
 | `docker:compose:rebuild` | Rebuild and restart |
 | `docker:exec [cmd]` | Run command in container |
 | `docker:logs` | Follow container logs |
+| `docker:build` | Build image from local Dockerfile |
+| `docker:pull` | Pull image from registry |
+| `docker:push` | Push image to registry |
+| `docker:status` | Audit containers, images, and volumes |
+| `docker:cleanup [full]` | Prune stopped containers and unused images |
+| `docker:cleanup:schedule` | Enable/disable scheduled cleanup via cron |
+
+**Security & Monitoring**
+
+| Command | Description |
+|---|---|
+| `security:audit` | Run security scan on codebase and server |
+| `security:trojansearch` | Deep scan for trojan patterns in PHP files |
+| `security:changedfiles` | List recently modified files |
+| `soc2:check` | Validate SOC 2 Type II readiness |
+| `incident:status` | Live incident dashboard |
+| `incident:report` | Generate incident report and GitHub issue |
+| `incident:snapshot` | Capture forensic snapshot |
+| `siem:install` | Install Wazuh SIEM agent |
+| `siem:status` | Check SIEM agent health |
+| `top` | Real-time system command center |
+| `top:shadow` | Visual dashboard of shadow deployments |
+
+**Plugins**
+
+| Command | Description |
+|---|---|
+| `plugin:list` | List all available plugins and status |
+| `plugin:enable <plugin>` | Enable a plugin globally |
+| `plugin:disable <plugin>` | Disable a plugin globally |
 
 **System**
 
@@ -277,8 +313,13 @@ protocol config:switch staging
 |---|---|
 | `self:update` | Update to latest release |
 | `self:update --nightly` | Update to latest commit |
+| `self:global` | Install Protocol as global command |
 | `cron:add` | Auto-restart on reboot |
+| `cron:remove` | Remove reboot crontab entry |
 | `key:generate` | Generate SSH deploy key |
+| `open` | Open project in browser |
+| `nginx:logs` | Tail nginx and PHP-FPM logs |
+| `migrate` | Convert from branch to release mode |
 
 </details>
 
