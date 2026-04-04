@@ -79,6 +79,7 @@ Class ProtocolStop extends Command {
             // configure an argument
             ->addArgument('project', InputArgument::OPTIONAL, 'Project name (for slave nodes, run from anywhere)')
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', null)
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Force stop, ignoring any existing lock')
             // ...
         ;
     }
@@ -96,8 +97,14 @@ Class ProtocolStop extends Command {
         $output->writeln('');
 
         if (!$this->lock()) {
-            $output->writeln('The command is already running in another process.');
-            return Command::SUCCESS;
+            if ($input->getOption('force')) {
+                $output->writeln('<comment>Forcing lock override...</comment>');
+                $this->release();
+                $this->lock();
+            } else {
+                $output->writeln('The command is already running in another process. Use --force (-f) to override.');
+                return Command::SUCCESS;
+            }
         }
 
         $dir = $this->resolveDirectory();

@@ -234,7 +234,6 @@ Class ProtocolStart extends Command {
         // duplicate stop+start cycle that kills what we just started.
         $this->provisionSlaveWatchers($dir, $ctx);
         $this->startDevServices($dir, $ctx);
-        $this->runPostStartHooks($dir, $ctx);
         $this->runSecurityAudit($dir, $ctx);
         $this->runSoc2Check($dir, $ctx);
         $this->verifyHealth($dir, $ctx);
@@ -247,6 +246,12 @@ Class ProtocolStart extends Command {
         // Run protocol status to show full dashboard
         $statusArgs = new ArrayInput(['--dir' => $dir]);
         $this->getApplication()->find('status')->run($statusArgs, $this->output);
+
+        // Wait for container readiness with Fibonacci backoff (up to 2 min)
+        // before running post_start hooks — all other steps must have
+        // completed and displayed their output first.
+        $this->waitForContainerReady($dir);
+        $this->runPostStartHooks($dir, $ctx);
 
         return Command::SUCCESS;
     }
@@ -680,13 +685,54 @@ Class ProtocolStart extends Command {
         }
     }
 
+    private function waitForContainerReady(string $dir): void
+    {
+        $runner = $this->runner;
+        $runner->run('Waiting for container readiness', function() use ($runner, $dir) {
+            $runner->log("dir={$dir}");
+
+            // Log what docker sees right now
+            $containerName = ContainerName::resolveFromDir($dir);
+            $runner->log("resolveFromDir container=" . ($containerName ?: '(none)'));
+            if (!$containerName) {
+                $names = Docker::getContainerNamesFromDockerComposeFile($dir);
+                $runner->log("compose containers=" . json_encode($names));
+            }
+
+            // List running docker containers for context
+            $ps = Shell::run("docker ps --format '{{.Names}} {{.Status}}' 2>&1");
+            $runner->log("docker ps:\n" . ($ps ?: '(empty)'));
+
+            $ready = Lifecycle::waitForContainer($dir, function($msg) use ($runner) {
+                $runner->log($msg);
+            });
+            if (!$ready) {
+                throw new \RuntimeException('Container did not become ready within ' . Lifecycle::MAX_WAIT . ' seconds');
+            }
+        }, 'READY');
+    }
+
     private function runPostStartHooks(string $dir, array $ctx): void
     {
         $runner = $this->runner;
         $runner->run('Post-start hooks', function() use ($runner, $dir, $ctx) {
+            $runner->log("dir={$dir} strategy={$ctx['strategy']}");
+
+            // Check protocol.json exists and is readable
+            $protocolJson = rtrim($dir, '/') . '/protocol.json';
+            $runner->log("protocol.json exists=" . (is_file($protocolJson) ? 'yes' : 'no'));
+            if (is_file($protocolJson)) {
+                $raw = file_get_contents($protocolJson);
+                $decoded = json_decode($raw, true);
+                $runner->log("protocol.json lifecycle keys=" . json_encode(
+                    array_keys($decoded['lifecycle'] ?? [])
+                ));
+            }
+
             $hookKey = 'lifecycle.post_start';
             if ($ctx['strategy'] === 'none') {
                 $devHooks = Json::read('lifecycle.post_start_dev', null, $dir);
+                $runner->log("lifecycle.post_start_dev raw=" . json_encode($devHooks));
                 if (is_array($devHooks)) {
                     $hookKey = 'lifecycle.post_start_dev';
                     $runner->log("strategy=none, using {$hookKey}");
@@ -694,8 +740,10 @@ Class ProtocolStart extends Command {
             }
 
             $postStart = Json::read($hookKey, [], $dir);
+            $runner->log("{$hookKey} raw=" . json_encode($postStart));
+
             if (empty($postStart) || !is_array($postStart)) {
-                $runner->log("No {$hookKey} hooks configured");
+                $runner->log("No {$hookKey} hooks configured — skipping");
                 return;
             }
 
@@ -703,9 +751,12 @@ Class ProtocolStart extends Command {
             $bgEnv = rtrim($dir, '/') . '/.env.deployment';
             if (is_file($bgEnv)) {
                 $envFile = $bgEnv;
+                $runner->log("envFile={$envFile}");
+            } else {
+                $runner->log("no .env.deployment found");
             }
 
-            $runner->log("Running " . count($postStart) . " {$hookKey} hook(s) in {$dir}");
+            $runner->log("Dispatching " . count($postStart) . " {$hookKey} hook(s)");
             Lifecycle::runPostStart($dir, function($msg) use ($runner) {
                 $runner->log($msg);
             }, $envFile, $hookKey);
