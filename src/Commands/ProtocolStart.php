@@ -406,8 +406,7 @@ Class ProtocolStart extends Command {
         }
 
         $runner = $this->runner;
-        $force = $this->input->getOption('force');
-        $arrInput = new ArrayInput(['--dir' => $dir] + ($force ? ['--force' => true] : []));
+        $arrInput = new ArrayInput(['--dir' => $dir]);
         $subOutput = $this->output->isVerbose() ? $this->output : new NullOutput();
         $app = $this->getApplication();
 
@@ -426,8 +425,7 @@ Class ProtocolStart extends Command {
     private function provisionSlaveWatchers(string $dir, array $ctx): void
     {
         $runner = $this->runner;
-        $force = $this->input->getOption('force');
-        $arrInput = new ArrayInput(['--dir' => $dir] + ($force ? ['--force' => true] : []));
+        $arrInput = new ArrayInput(['--dir' => $dir]);
         $subOutput = $this->output->isVerbose() ? $this->output : new NullOutput();
         $app = $this->getApplication();
 
