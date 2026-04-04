@@ -114,11 +114,13 @@ Class DockerExec extends Command {
             }
         }
 
-        $ttyFlag = $input->getOption('no-tty') ? '-T' : '-it';
+        // docker exec has no -T flag (that's docker-compose exec).
+        // For non-interactive usage, simply omit -it.
+        $ttyFlag = $input->getOption('no-tty') ? '' : '-it';
         $command = "docker exec {$ttyFlag} " . escapeshellarg($name) . " " . $cmd;
-        $response = Shell::passthru($command);
+        $exitCode = Shell::passthru($command);
 
-        return Command::SUCCESS;
+        return $exitCode === 0 ? Command::SUCCESS : Command::FAILURE;
     }
 
 }
