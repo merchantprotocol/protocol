@@ -70,6 +70,7 @@ Class DockerExec extends Command {
             // configure an argument
             ->addArgument('cmd', InputArgument::OPTIONAL, 'The command you want to run on the container', false)
             ->addOption('dir', 'd', InputOption::VALUE_OPTIONAL, 'Directory Path', Git::getGitLocalFolder())
+            ->addOption('no-tty', 'T', InputOption::VALUE_NONE, 'Disable TTY allocation (for non-interactive/scripted usage)')
             // ...
         ;
     }
@@ -113,7 +114,8 @@ Class DockerExec extends Command {
             }
         }
 
-        $command = "docker exec -it " . escapeshellarg($name) . " " . $cmd;
+        $ttyFlag = $input->getOption('no-tty') ? '-T' : '-it';
+        $command = "docker exec {$ttyFlag} " . escapeshellarg($name) . " " . $cmd;
         $response = Shell::passthru($command);
 
         return Command::SUCCESS;
