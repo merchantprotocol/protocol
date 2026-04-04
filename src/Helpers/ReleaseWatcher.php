@@ -464,7 +464,7 @@ class ReleaseWatcher
         $stopArg = escapeshellarg($stopDir);
         $startArg = escapeshellarg($startDir);
 
-        $cmd = "nohup sh -c 'php {$phpBin} stop --dir={$stopArg} && php {$phpBin} start --dir={$startArg}'"
+        $cmd = "nohup sh -c 'php {$phpBin} stop --force --dir={$stopArg} && php {$phpBin} start --force --dir={$startArg}'"
             . " >> " . escapeshellarg($logFile) . " 2>&1 </dev/null &";
 
         Log::context('watcher', [

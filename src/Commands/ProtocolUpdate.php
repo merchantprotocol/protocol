@@ -82,10 +82,17 @@ Class ProtocolUpdate extends Command {
         Shell::passthru("git -C " . escapeshellarg($protocoldir) . " fetch --all --tags");
 
         if ($input->getOption('nightly')) {
-            // Nightly: reset to branch tip
-            $branch = Git::branch($protocoldir) ?: 'main';
+            // Nightly: checkout the branch and pull the tip.
+            // Git::branch() returns garbage in detached HEAD (e.g. from a
+            // previous tag checkout), so detect that and default to main.
+            $rawBranch = trim(Shell::run(
+                "git -C " . escapeshellarg($protocoldir) . " symbolic-ref --short HEAD 2>/dev/null"
+            ));
+            $branch = $rawBranch ?: 'main';
+
             $output->writeln("<comment>Updating to nightly ({$remote}/{$branch})</comment>");
-            Shell::passthru("git -C " . escapeshellarg($protocoldir) . " reset --hard {$remote}/{$branch}");
+            Shell::passthru("git -C " . escapeshellarg($protocoldir) . " checkout " . escapeshellarg($branch));
+            Shell::passthru("git -C " . escapeshellarg($protocoldir) . " reset --hard " . escapeshellarg("{$remote}/{$branch}"));
         } else {
             // Release: find the latest semver tag
             $latestTag = trim(Shell::run(

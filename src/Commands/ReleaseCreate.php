@@ -122,22 +122,33 @@ Class ReleaseCreate extends Command {
         // Check clean working tree
         $status = trim(Shell::run("git -C " . escapeshellarg($repo_dir) . " status --porcelain 2>/dev/null"));
         if ($status) {
-            $output->writeln('<fg=yellow>Warning: Working tree is not clean.</>');
+            $output->writeln('<error>Working tree is not clean. Commit your changes before creating a release.</error>');
             $output->writeln('');
             $output->writeln($status);
-            $output->writeln('');
+            return Command::FAILURE;
+        }
 
-            $helper = $this->getHelper('question');
-            $question = new ConfirmationQuestion('Commit all changes before creating the release? [y/N] ', false);
-            if ($helper->ask($input, $output, $question)) {
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " add -A");
-                Shell::run("git -C " . escapeshellarg($repo_dir) . " commit -m " . escapeshellarg("Pre-release cleanup for {$version}"));
-                $output->writeln(' - Committed all changes');
-                $output->writeln('');
-            } else {
-                $output->writeln('<error>Aborting. Commit or stash your changes first.</error>');
-                return Command::FAILURE;
-            }
+        // Fetch remote and check if local is behind
+        $remote = Git::remoteName($repo_dir) ?: 'origin';
+        $branch = Git::branch($repo_dir);
+        Shell::run("git -C " . escapeshellarg($repo_dir) . " fetch " . escapeshellarg($remote) . " 2>&1");
+
+        $behind = (int) trim(Shell::run(
+            "git -C " . escapeshellarg($repo_dir)
+            . " rev-list --count HEAD.." . escapeshellarg("{$remote}/{$branch}") . " 2>/dev/null"
+        ));
+        if ($behind > 0) {
+            $output->writeln("<error>Local branch '{$branch}' is {$behind} commit(s) behind {$remote}/{$branch}.</error>");
+            $output->writeln('<error>Pull the latest changes before creating a release.</error>');
+            return Command::FAILURE;
+        }
+
+        $ahead = (int) trim(Shell::run(
+            "git -C " . escapeshellarg($repo_dir)
+            . " rev-list --count " . escapeshellarg("{$remote}/{$branch}") . "..HEAD 2>/dev/null"
+        ));
+        if ($ahead > 0) {
+            $output->writeln("<comment>Local branch is {$ahead} commit(s) ahead — these will be pushed with the release.</comment>");
         }
 
         // Check tag doesn't exist
@@ -163,12 +174,34 @@ Class ReleaseCreate extends Command {
 
         // Push
         if (!$input->getOption('no-push')) {
-            $remote = Git::remoteName($repo_dir) ?: 'origin';
-            $branch = Git::branch($repo_dir);
+            // Push branch first — abort entirely if rejected
+            $branchPushResult = Shell::run(
+                "git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($branch) . " 2>&1",
+                $branchPushExit
+            );
+            if ($branchPushExit !== 0) {
+                $output->writeln('<error>Branch push rejected. Removing local tag and undoing VERSION commit.</error>');
+                $output->writeln($branchPushResult);
+                // Rollback: delete local tag and undo the VERSION commit
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " tag -d " . escapeshellarg($version) . " 2>/dev/null");
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " reset --soft HEAD~1 2>/dev/null");
+                Shell::run("git -C " . escapeshellarg($repo_dir) . " checkout -- VERSION 2>/dev/null");
+                $output->writeln('<comment>Rolled back local tag and VERSION commit. Pull the latest changes and try again.</comment>');
+                return Command::FAILURE;
+            }
+            $output->writeln(" - Pushed branch to {$remote}");
 
-            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($branch));
-            Shell::passthru("git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($version));
-            $output->writeln(" - Pushed to {$remote}");
+            // Push tag
+            $tagPushResult = Shell::run(
+                "git -C " . escapeshellarg($repo_dir) . " push " . escapeshellarg($remote) . " " . escapeshellarg($version) . " 2>&1",
+                $tagPushExit
+            );
+            if ($tagPushExit !== 0) {
+                $output->writeln('<error>Tag push failed.</error>');
+                $output->writeln($tagPushResult);
+                return Command::FAILURE;
+            }
+            $output->writeln(" - Pushed tag {$version} to {$remote}");
 
             // Create GitHub Release
             $draft = $input->getOption('draft');
